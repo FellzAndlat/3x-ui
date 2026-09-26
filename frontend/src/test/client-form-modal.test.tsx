@@ -62,11 +62,14 @@ describe('ClientFormModal credential tooltips', () => {
         { id: 2, protocol: 'anytls', tag: 'anytls-8443', enable: true },
       ],
     });
-    const label = Array.from(document.querySelectorAll('.ant-form-item-label label')).find(
-      (item) => (item.textContent ?? '').includes('Attached inbounds'),
-    );
-    const selector = label?.closest('.ant-form-item')?.querySelector('.ant-select-selector');
-    if (!selector) throw new Error('Inbound picker not found');
+    const selector = await waitFor(() => {
+      const label = Array.from(document.querySelectorAll('.ant-form-item-label label')).find(
+        (item) => (item.textContent ?? '').includes('Attached inbounds'),
+      );
+      const found = label?.closest('.ant-form-item')?.querySelector('.ant-select-content');
+      if (!found) throw new Error('Inbound picker not found');
+      return found;
+    });
     fireEvent.mouseDown(selector);
     await waitFor(() => {
       expect(document.body.textContent).toContain('shadowtls-443');

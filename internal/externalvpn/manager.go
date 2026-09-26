@@ -349,12 +349,16 @@ func (m *Manager) Reconcile(instances []Instance) {
 	}
 }
 
-func ExportTrustTunnelLink(inst Instance, email, address string) (string, error) {
+func ExportTrustTunnelLink(inst Instance, email, address string, port int) (string, error) {
 	if inst.Protocol != model.TrustTunnel {
 		return "", fmt.Errorf("not a TrustTunnel inbound")
 	}
+	address = strings.Trim(strings.TrimSpace(address), "[]")
 	if address == "" || net.ParseIP(address) != nil && net.ParseIP(address).IsUnspecified() {
 		return "", fmt.Errorf("a public address is required")
+	}
+	if port < 1 || port > 65535 {
+		return "", fmt.Errorf("a valid port is required")
 	}
 	found := false
 	for _, c := range inst.Settings.Clients {
@@ -373,7 +377,7 @@ func ExportTrustTunnelLink(inst Instance, email, address string) (string, error)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	target := net.JoinHostPort(address, strconv.Itoa(inst.Port))
+	target := net.JoinHostPort(address, strconv.Itoa(port))
 	output, err := exec.CommandContext(ctx, binary(model.TrustTunnel), vpn, hosts, "-c", email, "-a", target, "--format", "deeplink").Output()
 	if err != nil {
 		return "", err

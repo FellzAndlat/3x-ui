@@ -188,7 +188,7 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 		t.Fatalf("GetSubs: %v", err)
 	}
 	joined := strings.Join(links, "\n")
-	if !strings.Contains(joined, "anytls://anytls-pass@anytls.example.com:8443") {
+	if !strings.Contains(joined, "anytls://anytls-pass@anytls.example.com:8443/") {
 		t.Fatalf("raw subscription is missing AnyTLS: %v", links)
 	}
 	if !strings.Contains(joined, "shadowtls://shadow-pass@shadowtls.example.com:9443") {

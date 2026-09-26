@@ -1021,11 +1021,17 @@ func (s *SubService) GetLink(inbound *model.Inbound, email string) string {
 		if err != nil {
 			return ""
 		}
-		link, err := externalvpn.ExportTrustTunnelLink(inst, email, s.resolveInboundAddress(inbound))
-		if err != nil {
-			return ""
+		var links []string
+		for _, endpoint := range s.shareEndpointsForInbound(inbound) {
+			if endpoint.ForceTls == "none" {
+				continue
+			}
+			link, err := externalvpn.ExportTrustTunnelLink(inst, email, endpoint.Address, endpoint.Port)
+			if err == nil {
+				links = append(links, link)
+			}
 		}
-		return link
+		return strings.Join(links, "\n")
 	case model.NaiveProxy:
 		return s.genNaiveLink(inbound, email)
 	case model.AnyTLS:
@@ -1129,7 +1135,7 @@ func (s *SubService) genAnyTlsLink(inbound *model.Inbound, email string) string 
 			s.renderHostRemark(inbound, client, ep, "")
 		}
 		remark := s.endpointRemark(inbound, email, ep, "")
-		link := fmt.Sprintf("anytls://%s@%s", encodeUserinfo(client.Password), joinHostPort(address, port))
+		link := fmt.Sprintf("anytls://%s@%s/", encodeUserinfo(client.Password), joinHostPort(address, port))
 		links = append(links, buildLinkWithParams(link, params, remark))
 	}
 	return strings.Join(links, "\n")

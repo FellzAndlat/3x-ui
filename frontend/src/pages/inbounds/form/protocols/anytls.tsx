@@ -1,60 +1,64 @@
-import { Input, Space, Typography } from 'antd';
+import { Alert, Collapse, Input } from 'antd';
+import { useTranslation } from 'react-i18next';
 import { FormField } from '@/components/form/rhf';
-
-const DEFAULT_PADDING_SCHEME = [
-  'stop=8',
-  '0=30-30',
-  '1=100-400',
-  '2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000',
-  '3=9-9,500-1000',
-  '4=500-1000',
-  '5=500-1000',
-  '6=500-1000',
-  '7=500-1000',
-];
+import { ANYTLS_DEFAULT_PADDING_SCHEME } from '@/schemas/protocols/inbound/anytls';
 
 export default function AnyTlsFields() {
+  const { t } = useTranslation();
+
   return (
     <>
-      <FormField name={['settings', 'tls', 'serverName']} label="SNI">
-        <Input placeholder="example.com" />
-      </FormField>
-
-      <FormField name={['settings', 'tls', 'certificatePath']} label="Certificate path">
-        <Input placeholder="/root/cert/example.com/fullchain.pem" />
-      </FormField>
-
-      <FormField name={['settings', 'tls', 'keyPath']} label="Private key path">
-        <Input placeholder="/root/cert/example.com/privkey.pem" />
-      </FormField>
-
+      <Alert type="info" showIcon description={t('pages.inbounds.form.anytlsHint')} />
       <FormField
-        name={['settings', 'paddingScheme']}
-        label="Padding scheme"
-        transform={{
-          input: (value) =>
-            Array.isArray(value) && value.length > 0
-              ? value.join('\n')
-              : DEFAULT_PADDING_SCHEME.join('\n'),
-          output: (value) =>
-            String(value ?? '')
-              .split(/\r?\n/)
-              .map((line) => line.trim())
-              .filter(Boolean),
-        }}
+        name={['settings', 'tls', 'serverName']}
+        label={t('pages.inbounds.form.anytlsServerName')}
+        tooltip={t('pages.inbounds.form.anytlsServerNameHint')}
       >
-        <Input.TextArea rows={8} spellCheck={false} />
+        <Input placeholder="vpn.example.com" />
       </FormField>
-
-      <Space direction="vertical" size={2} style={{ width: '100%' }}>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          AnyTLS требует TLS. Если пути сертификата оставить пустыми, панель использует сертификат
-          HTTPS панели при генерации sing-box.
-        </Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          Строки padding scheme вводятся по одной на строку.
-        </Typography.Text>
-      </Space>
+      <FormField
+        name={['settings', 'tls', 'certificatePath']}
+        label={t('pages.inbounds.form.anytlsCertificate')}
+        tooltip={t('pages.inbounds.form.anytlsCertificateHint')}
+      >
+        <Input placeholder="/etc/letsencrypt/live/vpn.example.com/fullchain.pem" />
+      </FormField>
+      <FormField
+        name={['settings', 'tls', 'keyPath']}
+        label={t('pages.inbounds.form.anytlsPrivateKey')}
+        tooltip={t('pages.inbounds.form.anytlsPrivateKeyHint')}
+      >
+        <Input placeholder="/etc/letsencrypt/live/vpn.example.com/privkey.pem" />
+      </FormField>
+      <Collapse
+        ghost
+        items={[
+          {
+            key: 'padding',
+            label: t('pages.inbounds.form.anytlsAdvanced'),
+            children: (
+              <FormField
+                name={['settings', 'paddingScheme']}
+                label={t('pages.inbounds.form.anytlsPaddingScheme')}
+                tooltip={t('pages.inbounds.form.anytlsPaddingSchemeHint')}
+                transform={{
+                  input: (value) =>
+                    Array.isArray(value)
+                      ? value.join('\n')
+                      : ANYTLS_DEFAULT_PADDING_SCHEME.join('\n'),
+                  output: (value) =>
+                    String(value ?? '')
+                      .split(/\r?\n/)
+                      .map((line) => line.trim())
+                      .filter(Boolean),
+                }}
+              >
+                <Input.TextArea rows={8} spellCheck={false} />
+              </FormField>
+            ),
+          },
+        ]}
+      />
     </>
   );
 }

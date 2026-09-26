@@ -69,23 +69,6 @@ func TestJsonAndClashServeExternalLinkOnlySub(t *testing.T) {
 	}
 }
 
-func TestClashRejectsUnrepresentableExternalLink(t *testing.T) {
-	initSubDB(t)
-	db := database.GetDB()
-	rec := &model.ClientRecord{Email: "ext@x", SubID: "ext-unsupported", Enable: true}
-	if err := db.Create(rec).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&model.ClientExternalLink{ClientId: rec.Id, Kind: model.ExternalLinkKindLink,
-		Value: "shadowtls://secret@example.com:443?version=3&sni=cloudflare.com", SortIndex: 1}).Error; err != nil {
-		t.Fatal(err)
-	}
-	_, _, err := NewSubClashService(false, "", NewSubService("")).GetClash("ext-unsupported", "sub.example.com")
-	if !errors.Is(err, errSubscriptionFormatUnsupported) {
-		t.Fatalf("unsupported external link error = %v", err)
-	}
-}
-
 func TestStructuredSubscriptionsRejectUnrenderableInbound(t *testing.T) {
 	initSubDB(t)
 	db := database.GetDB()

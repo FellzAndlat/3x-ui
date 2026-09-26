@@ -106,7 +106,8 @@ func (s *SubClashService) getClash(subId string, host string, legacy bool) (stri
 			}
 			proxy := s.clashProxyFromExternal(el.Link, name)
 			if proxy == nil {
-				return "", "", errSubscriptionFormatUnsupported
+				// Keep quota accounting for links Clash cannot represent.
+				continue
 			}
 			proxies = append(proxies, proxy)
 		}

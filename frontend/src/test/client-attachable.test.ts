@@ -5,9 +5,22 @@ import { isClientAttachableProtocol } from '@/lib/inbounds/client-attachable';
 describe('client inbound picker capabilities', () => {
   it('includes the per-client protocols supported by the server', () => {
     for (const protocol of [
-      'vmess', 'vless', 'trojan', 'shadowsocks', 'hysteria', 'wireguard',
-      'mtproto', 'amneziawg', 'tuic', 'trusttunnel', 'naive', 'anytls',
-      'shadowtls', 'mieru', 'vk-turn-proxy', 'sudoku',
+      'vmess',
+      'vless',
+      'trojan',
+      'shadowsocks',
+      'hysteria',
+      'wireguard',
+      'mtproto',
+      'amneziawg',
+      'tuic',
+      'trusttunnel',
+      'naive',
+      'anytls',
+      'shadowtls',
+      'mieru',
+      'vk-turn-proxy',
+      'sudoku',
     ]) {
       expect(isClientAttachableProtocol(protocol), protocol).toBe(true);
     }

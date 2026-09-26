@@ -2,7 +2,10 @@ import { RandomUtil, Wireguard } from '@/utils';
 import { generateAwgObfuscation } from '@/lib/xray/amneziawg-obfuscation';
 
 import type { AmneziawgInboundSettings } from '@/schemas/protocols/inbound/amneziawg';
-import type { AnyTlsInboundSettings } from '@/schemas/protocols/inbound/anytls';
+import {
+  ANYTLS_DEFAULT_PADDING_SCHEME,
+  type AnyTlsInboundSettings,
+} from '@/schemas/protocols/inbound/anytls';
 import type { ShadowTlsInboundSettings } from '@/schemas/protocols/inbound/shadowtls';
 import type { HttpInboundSettings } from '@/schemas/protocols/inbound/http';
 import type { HysteriaClient, HysteriaInboundSettings } from '@/schemas/protocols/inbound/hysteria';
@@ -270,17 +273,7 @@ export function createDefaultMtprotoClient(domain: string): Partial<MtprotoClien
 
 export function createDefaultAnyTlsInboundSettings(): AnyTlsInboundSettings {
   return {
-    paddingScheme: [
-      'stop=8',
-      '0=30-30',
-      '1=100-400',
-      '2=400-500,c,500-1000,c,500-1000,c,500-1000,c,500-1000',
-      '3=9-9,500-1000',
-      '4=500-1000',
-      '5=500-1000',
-      '6=500-1000',
-      '7=500-1000',
-    ],
+    paddingScheme: [...ANYTLS_DEFAULT_PADDING_SCHEME],
     tls: {
       enabled: true,
       serverName: '',

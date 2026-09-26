@@ -169,9 +169,11 @@ function stripTlsCertUseFile(stream: Record<string, unknown>): void {
 
 export function rawInboundToFormValues(row: RawInboundRow): InboundFormValues {
   const protocol = (row.protocol || 'vless') as InboundSettings['protocol'];
-  const settings = (row.protocol === 'sudoku'
-    ? migrateSudokuSettings(coerceJsonObject(row.settings))
-    : coerceJsonObject(row.settings)) as InboundSettings['settings'];
+  const settings = (
+    row.protocol === 'sudoku'
+      ? migrateSudokuSettings(coerceJsonObject(row.settings))
+      : coerceJsonObject(row.settings)
+  ) as InboundSettings['settings'];
   const rawStream = coerceJsonObject(row.streamSettings);
   const streamSettings =
     Object.keys(rawStream).length > 0 ? (rawStream as StreamSettings) : undefined;
