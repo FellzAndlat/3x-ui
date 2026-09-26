@@ -45,7 +45,7 @@ func (s *SubService) genSudokuLink(inbound *model.Inbound, email string) string 
 		if endpoint.ForceTls == "tls" || endpoint.ForceTls == "none" {
 			payload["ht"] = endpoint.ForceTls == "tls"
 		}
-		if value, ok := mask["multiplex"]; ok {
+		if value, ok := mask["multiplex"]; ok && value != "" {
 			payload["hx"] = value
 		}
 		if encoded, err := json.Marshal(payload); err == nil {

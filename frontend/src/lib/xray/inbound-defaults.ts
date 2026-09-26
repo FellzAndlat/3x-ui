@@ -332,7 +332,7 @@ export function createDefaultSudokuInboundSettings(): SudokuInboundSettings {
     fallbackAddress: '',
     key: '',
     aead: 'chacha20-poly1305',
-    suspiciousAction: 'fallback',
+    suspiciousAction: 'silent',
     paddingMin: 5,
     paddingMax: 15,
     ascii: 'prefer_entropy',
@@ -342,11 +342,10 @@ export function createDefaultSudokuInboundSettings(): SudokuInboundSettings {
     multiplex: 'off',
     httpmask: {
       disable: false,
-      mode: 'legacy',
+      mode: 'auto',
       tls: false,
       host: '',
       pathRoot: '',
-      multiplex: 'off',
     },
     clients: [],
   };

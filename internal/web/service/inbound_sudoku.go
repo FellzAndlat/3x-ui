@@ -35,7 +35,7 @@ type sudokuHTTPMaskSettings struct {
     TLS       bool   `json:"tls"`
     Host      string `json:"host"`
     PathRoot  string `json:"pathRoot"`
-    Multiplex string `json:"multiplex"`
+    Multiplex string `json:"multiplex,omitempty"`
 }
 
 type sudokuStoredSettings struct {
@@ -57,13 +57,13 @@ type sudokuStoredSettings struct {
 func normalizeSudokuSettings(raw string) (sudokuStoredSettings, error) {
     settings := sudokuStoredSettings{
         AEAD:               "chacha20-poly1305",
-        SuspiciousAction:   "fallback",
+        SuspiciousAction:   "silent",
         PaddingMin:         5,
         PaddingMax:         15,
         ASCII:              "prefer_entropy",
         EnablePureDownlink: true,
         Multiplex:          "off",
-        HTTPMask:           sudokuHTTPMaskSettings{Mode: "legacy"},
+        HTTPMask:           sudokuHTTPMaskSettings{Mode: "auto"},
     }
     if strings.TrimSpace(raw) != "" {
         if err := json.Unmarshal([]byte(raw), &settings); err != nil {
@@ -74,16 +74,19 @@ func normalizeSudokuSettings(raw string) (sudokuStoredSettings, error) {
         settings.AEAD = "chacha20-poly1305"
     }
     if settings.SuspiciousAction == "" {
-        settings.SuspiciousAction = "fallback"
+        settings.SuspiciousAction = "silent"
     }
-    if settings.PaddingMin < 0 {
+    if settings.SuspiciousAction == "fallback" && strings.TrimSpace(settings.FallbackAddress) == "" {
+        settings.SuspiciousAction = "silent"
+    }
+    if settings.PaddingMin < 0 || settings.PaddingMin > 100 {
         settings.PaddingMin = 5
+    }
+    if settings.PaddingMax < settings.PaddingMin || settings.PaddingMax > 100 {
+        settings.PaddingMax = 15
     }
     if settings.PaddingMax < settings.PaddingMin {
         settings.PaddingMax = settings.PaddingMin
-    }
-    if settings.PaddingMax == 0 {
-        settings.PaddingMax = 15
     }
     if settings.ASCII == "" {
         settings.ASCII = "prefer_entropy"
@@ -91,8 +94,12 @@ func normalizeSudokuSettings(raw string) (sudokuStoredSettings, error) {
     if settings.Multiplex == "" {
         settings.Multiplex = "off"
     }
+    if settings.HTTPMask.Multiplex != "" {
+        settings.Multiplex = settings.HTTPMask.Multiplex
+        settings.HTTPMask.Multiplex = ""
+    }
     if settings.HTTPMask.Mode == "" {
-        settings.HTTPMask.Mode = "legacy"
+        settings.HTTPMask.Mode = "auto"
     }
     return settings, nil
 }
@@ -246,7 +253,6 @@ func DesiredSudokuInstances() ([]sudoku.Instance, error) {
                     TLS: settings.HTTPMask.TLS,
                     Host: settings.HTTPMask.Host,
                     PathRoot: settings.HTTPMask.PathRoot,
-                    Multiplex: settings.HTTPMask.Multiplex,
                 },
             },
         })

@@ -6,7 +6,6 @@ type HTTPMaskConfig struct {
     TLS       bool   `json:"tls"`
     Host      string `json:"host"`
     PathRoot  string `json:"path_root"`
-    Multiplex string `json:"multiplex"`
 }
 
 type Config struct {

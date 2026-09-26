@@ -28,6 +28,7 @@ import { canEnableSniffing } from '@/lib/xray/protocol-capabilities';
 import { tlsCertUsesFiles } from '@/schemas/protocols/security/tls';
 import { SockoptStreamSettingsSchema } from '@/schemas/protocols/stream/sockopt';
 import { XHttpStreamSettingsSchema, XHttpXmuxSchema } from '@/schemas/protocols/stream/xhttp';
+import { migrateSudokuSettings } from '@/schemas/protocols/inbound/sudoku';
 
 const XMUX_DEFAULTS = XHttpXmuxSchema.parse({});
 
@@ -168,7 +169,9 @@ function stripTlsCertUseFile(stream: Record<string, unknown>): void {
 
 export function rawInboundToFormValues(row: RawInboundRow): InboundFormValues {
   const protocol = (row.protocol || 'vless') as InboundSettings['protocol'];
-  const settings = coerceJsonObject(row.settings) as InboundSettings['settings'];
+  const settings = (row.protocol === 'sudoku'
+    ? migrateSudokuSettings(coerceJsonObject(row.settings))
+    : coerceJsonObject(row.settings)) as InboundSettings['settings'];
   const rawStream = coerceJsonObject(row.streamSettings);
   const streamSettings =
     Object.keys(rawStream).length > 0 ? (rawStream as StreamSettings) : undefined;
