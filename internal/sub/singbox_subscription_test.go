@@ -3,6 +3,7 @@ package sub
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
@@ -195,5 +196,49 @@ func TestGenNativeShadowTLSUsesHandshakeServer(t *testing.T) {
 	tls, ok := got["tls"].(map[string]any)
 	if !ok || tls["server_name"] != "cloudflare.com" {
 		t.Fatalf("unexpected ShadowTLS TLS: %#v", got["tls"])
+	}
+}
+
+func TestGenNativeShadowTLSExternalEndpoint(t *testing.T) {
+	svc := &SubJsonService{}
+	inbound := &model.Inbound{Protocol: model.ShadowTLS, Listen: "origin.example.com", Port: 443,
+		Settings: `{"version":3,"handshake":{"server":"cloudflare.com"}}`}
+	subReq := &SubService{}
+	endpoint := ShareEndpoint{Address: "edge.example.com", Port: 8443, ep: map[string]any{
+		"sni": "front.example.com", "allowInsecure": true, "alpn": []any{"h2"},
+	}}
+	got := svc.genNativeTLSLikeEndpoint(subReq, inbound, model.Client{Password: "secret"}, endpoint)
+	if got == nil || got["server"] != "edge.example.com" || got["server_port"] != 8443 {
+		t.Fatalf("unexpected ShadowTLS endpoint: %#v", got)
+	}
+	tls := got["tls"].(map[string]any)
+	if tls["server_name"] != "front.example.com" {
+		t.Fatalf("ShadowTLS endpoint SNI = %#v", tls)
+	}
+	if tls["insecure"] != true || !reflect.DeepEqual(tls["alpn"], []any{"h2"}) {
+		t.Fatalf("ShadowTLS endpoint TLS options = %#v", tls)
+	}
+}
+
+func TestGenNativeNaiveUsesAdvertisedDomainAsTLSName(t *testing.T) {
+	svc := &SubJsonService{}
+	inbound := &model.Inbound{Protocol: model.NaiveProxy, Listen: "naive.example.com", Port: 443,
+		Settings: `{"network":"tcp","tls":{}}`}
+	got := svc.genNativeNaive(&SubService{}, inbound, model.Client{Email: "user", Password: "secret"}, nil)
+	if got == nil {
+		t.Fatal("genNativeNaive returned nil")
+	}
+	tls := got["tls"].(map[string]any)
+	if tls["server_name"] != "naive.example.com" {
+		t.Fatalf("Naive TLS server_name = %v", tls["server_name"])
+	}
+}
+
+func TestShadowTLSLinkSkipsPlaintextEndpoint(t *testing.T) {
+	inbound := &model.Inbound{Protocol: model.ShadowTLS, Listen: "shadow.example.com", Port: 443,
+		Settings: `{"handshake":{"server":"cloudflare.com"},"clients":[{"email":"user","password":"secret"}]}`,
+		StreamSettings: `{"externalProxy":[{"dest":"plain.example.com","port":80,"forceTls":"none"}]}`}
+	if link := (&SubService{}).genShadowTlsLink(inbound, "user"); link != "" {
+		t.Fatalf("ShadowTLS must not advertise a plaintext endpoint: %q", link)
 	}
 }

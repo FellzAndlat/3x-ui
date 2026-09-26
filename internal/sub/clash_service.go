@@ -82,7 +82,7 @@ func (s *SubClashService) getClash(subId string, host string, legacy bool) (stri
 			}
 			seenEmails[client.Email] = struct{}{}
 			generated := s.getProxies(subReq, inbound, client, host)
-			if inbound.Protocol == model.Sudoku && len(generated) == 0 {
+			if len(generated) == 0 {
 				return "", "", errSubscriptionFormatUnsupported
 			}
 			proxies = append(proxies, generated...)
@@ -106,9 +106,7 @@ func (s *SubClashService) getClash(subId string, host string, legacy bool) (stri
 			}
 			proxy := s.clashProxyFromExternal(el.Link, name)
 			if proxy == nil {
-				// Keep the client's quota accounting even when this external
-				// endpoint cannot be represented by Clash/Mihomo.
-				continue
+				return "", "", errSubscriptionFormatUnsupported
 			}
 			proxies = append(proxies, proxy)
 		}

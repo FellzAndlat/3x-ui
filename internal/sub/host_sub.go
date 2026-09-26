@@ -259,6 +259,7 @@ func (s *SubService) linkFromHosts(inbound *model.Inbound, client model.Client, 
 	}
 	clone := *inbound
 	injectExternalProxy(&clone, rendered)
+	delete(s.streamSettingsByInbound, inbound.Id)
 	return s.GetLink(&clone, client.Email)
 }
 

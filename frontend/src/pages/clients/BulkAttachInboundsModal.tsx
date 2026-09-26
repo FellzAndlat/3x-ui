@@ -5,20 +5,8 @@ import { Alert, Modal, Select, Typography, message } from 'antd';
 import { SelectAllClearButtons } from '@/components/form';
 import type { InboundOption } from '@/hooks/useClients';
 import { formatInboundLabel } from '@/lib/inbounds/label';
+import { isClientAttachableProtocol } from '@/lib/inbounds/client-attachable';
 import type { BulkAttachResult } from '@/schemas/client';
-
-const MULTI_USER_PROTOCOLS = new Set([
-  'vmess',
-  'vless',
-  'trojan',
-  'hysteria',
-  'shadowsocks',
-  'wireguard',
-  'mtproto',
-  'amneziawg',
-  'tuic',
-  'trusttunnel',
-]);
 
 interface BulkAttachInboundsModalProps {
   open: boolean;
@@ -50,7 +38,7 @@ export default function BulkAttachInboundsModal({
 
   const targetOptions = useMemo(() => {
     return (inbounds || [])
-      .filter((ib) => MULTI_USER_PROTOCOLS.has((ib.protocol || '').toLowerCase()))
+      .filter((ib) => isClientAttachableProtocol(ib.protocol))
       .map((ib) => ({
         value: ib.id,
         label: formatInboundLabel(ib.tag, ib.remark),

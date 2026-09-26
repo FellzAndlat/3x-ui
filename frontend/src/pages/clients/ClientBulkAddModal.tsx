@@ -20,6 +20,7 @@ import { FormProvider, useForm, useWatch } from 'react-hook-form';
 
 import { RandomUtil, SizeFormatter } from '@/utils';
 import { formatInboundLabel } from '@/lib/inbounds/label';
+import { isClientAttachableProtocol } from '@/lib/inbounds/client-attachable';
 import { TLS_FLOW_CONTROL, TRAFFIC_RESETS } from '@/schemas/primitives';
 import { DateTimePicker, SelectAllClearButtons } from '@/components/form';
 import { FormField } from '@/components/form/rhf';
@@ -28,19 +29,6 @@ import { useFail2banStatusQuery, getLimitIpNotice } from '@/api/queries/useFail2
 import { ClientBulkAddFormSchema, type ClientBulkAddFormValues } from '@/schemas/client';
 
 const FLOW_OPTIONS = Object.values(TLS_FLOW_CONTROL);
-
-const MULTI_CLIENT_PROTOCOLS = new Set([
-  'shadowsocks',
-  'vless',
-  'vmess',
-  'trojan',
-  'hysteria',
-  'wireguard',
-  'amneziawg',
-  'tuic',
-  'trusttunnel',
-  'vk-turn-proxy',
-]);
 
 const EMPTY: ClientBulkAddFormValues = {
   emailMethod: 0,
@@ -152,7 +140,7 @@ export default function ClientBulkAddModal({
   const inboundOptions = useMemo(
     () =>
       (inbounds || [])
-        .filter((ib) => MULTI_CLIENT_PROTOCOLS.has(ib.protocol || ''))
+        .filter((ib) => isClientAttachableProtocol(ib.protocol))
         .map((ib) => ({
           label: formatInboundLabel(ib.tag, ib.remark),
           value: ib.id,

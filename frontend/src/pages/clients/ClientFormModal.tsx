@@ -32,6 +32,7 @@ import { Controller, FormProvider, useForm, useWatch, useFieldArray } from 'reac
 
 import { HttpUtil, IntlUtil, RandomUtil, Wireguard } from '@/utils';
 import { formatInboundLabel } from '@/lib/inbounds/label';
+import { isClientAttachableProtocol } from '@/lib/inbounds/client-attachable';
 import { generateMtprotoSecret } from '@/lib/xray/inbound-defaults';
 import { normalizeClientIps, type ClientIpInfo } from '@/lib/clients/ip-log';
 import { resolveExternalLinkExpiry } from '@/lib/clients/external-link';
@@ -53,23 +54,6 @@ import './ClientFormModal.css';
 
 const FLOW_OPTIONS = Object.values(TLS_FLOW_CONTROL);
 const VMESS_SECURITY_OPTIONS = ['auto', 'aes-128-gcm', 'chacha20-poly1305'] as const;
-
-const MULTI_CLIENT_PROTOCOLS = new Set([
-  'shadowsocks',
-  'vless',
-  'vmess',
-  'trojan',
-  'hysteria',
-  'wireguard',
-  'mtproto',
-  'amneziawg',
-  'tuic',
-  'trusttunnel',
-  'naive',
-  'mieru',
-  'vk-turn-proxy',
-  'sudoku',
-]);
 
 const CLIENT_FORM_MODAL_Z_INDEX = 1000;
 const CLIENT_IP_LOG_MODAL_Z_INDEX = CLIENT_FORM_MODAL_Z_INDEX + 1;
@@ -596,14 +580,13 @@ export default function ClientFormModal({
   const inboundOptions = useMemo(
     () =>
       (inbounds || [])
-        .filter((ib) => MULTI_CLIENT_PROTOCOLS.has(ib.protocol || ''))
-        .filter((ib) => ib.enable || (inboundIds || []).includes(ib.id))
+        .filter((ib) => isClientAttachableProtocol(ib.protocol))
         .map((ib) => ({
           label: formatInboundLabel(ib.tag, ib.remark),
           value: ib.id,
           title: formatInboundLabel(ib.tag, ib.remark),
         })),
-    [inbounds, inboundIds],
+    [inbounds],
   );
 
   const expiryDayjs = useMemo<Dayjs | null>(

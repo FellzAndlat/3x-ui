@@ -55,6 +55,25 @@ function tooltipIconForLabel(label: string): HTMLElement {
 }
 
 describe('ClientFormModal credential tooltips', () => {
+  it('shows password-based and disabled inbounds in the client picker', async () => {
+    renderModal({
+      inbounds: [
+        { id: 1, protocol: 'shadowtls', tag: 'shadowtls-443', enable: false },
+        { id: 2, protocol: 'anytls', tag: 'anytls-8443', enable: true },
+      ],
+    });
+    const label = Array.from(document.querySelectorAll('.ant-form-item-label label')).find(
+      (item) => (item.textContent ?? '').includes('Attached inbounds'),
+    );
+    const selector = label?.closest('.ant-form-item')?.querySelector('.ant-select-selector');
+    if (!selector) throw new Error('Inbound picker not found');
+    fireEvent.mouseDown(selector);
+    await waitFor(() => {
+      expect(document.body.textContent).toContain('shadowtls-443');
+      expect(document.body.textContent).toContain('anytls-8443');
+    });
+  });
+
   it('explains which protocols consume the Password field', async () => {
     renderModal();
     openCredentialsTab();
@@ -64,7 +83,7 @@ describe('ClientFormModal credential tooltips', () => {
 
     await waitFor(() => {
       expect(document.body.textContent).toContain(
-        'Used by Trojan, Shadowsocks, TUIC, NaïveProxy, and Mieru clients; ignored for VLESS, VMess, Hysteria, and WireGuard.',
+        'Used by Trojan, Shadowsocks, TUIC, NaïveProxy, AnyTLS, ShadowTLS, Mieru, and TrustTunnel clients; ignored for VLESS, VMess, Hysteria, and WireGuard.',
       );
     });
   });

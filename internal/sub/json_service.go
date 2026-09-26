@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net"
 	"net/url"
 	"slices"
 	"sort"
@@ -152,6 +153,7 @@ func (s *SubJsonService) GetJson(subId string, host string, alwaysReturnArray bo
 		subReq.projectThroughFallbackMaster(inbound)
 		if hostEps := subReq.hostEndpoints(inbound, "json"); len(hostEps) > 0 {
 			injectExternalProxy(inbound, hostEps)
+			delete(subReq.streamSettingsByInbound, inbound.Id)
 		}
 
 		var inboundConfigs []json_util.RawMessage
@@ -160,7 +162,11 @@ func (s *SubJsonService) GetJson(subId string, host string, alwaysReturnArray bo
 				hasEnabledClient = true
 			}
 			seenEmails[client.Email] = struct{}{}
-			inboundConfigs = append(inboundConfigs, s.getConfig(subReq, inbound, client, host)...)
+			configs := s.getConfig(subReq, inbound, client, host)
+			if len(configs) == 0 {
+				return "", "", errSubscriptionFormatUnsupported
+			}
+			inboundConfigs = append(inboundConfigs, configs...)
 		}
 		if len(inboundConfigs) > 0 {
 			entries = append(entries, subConfigEntry{
@@ -501,20 +507,29 @@ func (s *SubJsonService) GetSingBoxJson(subId string, host string, alwaysReturnA
 				continue
 			}
 			if inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS {
-				native := s.genNativeTLSLike(subReq, inbound, client)
-				if native == nil {
+				generated := 0
+				for _, endpoint := range subReq.shareEndpointsForInbound(inbound) {
+					if strings.EqualFold(strings.TrimSpace(endpoint.ForceTls), "none") {
+						continue
+					}
+					native := s.genNativeTLSLikeEndpoint(subReq, inbound, client, endpoint)
+					if native == nil {
+						continue
+					}
+					tag := client.Email
+					if tag == "" {
+						tag = fmt.Sprintf("proxy-%d", len(proxies)+1)
+					}
+					if len(proxies) > 0 {
+						tag = fmt.Sprintf("%s-%d", tag, len(proxies)+1)
+					}
+					native["tag"] = tag
+					proxies = append(proxies, nativeOutbound{out: native})
+					generated++
+				}
+				if generated == 0 {
 					formatUnsupported = true
-					continue
 				}
-				tag := client.Email
-				if tag == "" {
-					tag = fmt.Sprintf("proxy-%d", len(proxies)+1)
-				}
-				if len(proxies) > 0 {
-					tag = fmt.Sprintf("%s-%d", tag, len(proxies)+1)
-				}
-				native["tag"] = tag
-				proxies = append(proxies, nativeOutbound{out: native})
 				continue
 			}
 			if inbound.Protocol == model.NaiveProxy {
@@ -1409,15 +1424,26 @@ func (s *SubJsonService) genServer(subReq *SubService, inbound *model.Inbound, s
 }
 
 func (s *SubJsonService) genNativeTLSLike(subReq *SubService, inbound *model.Inbound, client model.Client) map[string]any {
+	return s.genNativeTLSLikeEndpoint(subReq, inbound, client, subReq.inboundDefaultEndpoint(inbound))
+}
+
+func (s *SubJsonService) genNativeTLSLikeEndpoint(subReq *SubService, inbound *model.Inbound, client model.Client, endpoint ShareEndpoint) map[string]any {
 	if (inbound.Protocol != model.AnyTLS && inbound.Protocol != model.ShadowTLS) || client.Password == "" {
 		return nil
 	}
 
-	server := strings.TrimSpace(subReq.resolveInboundAddress(inbound))
+	server := strings.TrimSpace(endpoint.Address)
+	if server == "" {
+		server = strings.TrimSpace(subReq.resolveInboundAddress(inbound))
+	}
 	if server == "" {
 		server = strings.TrimSpace(inbound.Listen)
 	}
-	if server == "" || inbound.Port <= 0 {
+	port := endpoint.Port
+	if port <= 0 {
+		port = inbound.Port
+	}
+	if server == "" || port <= 0 {
 		return nil
 	}
 
@@ -1426,7 +1452,7 @@ func (s *SubJsonService) genNativeTLSLike(subReq *SubService, inbound *model.Inb
 		out := map[string]any{
 			"type":        "anytls",
 			"server":      server,
-			"server_port": inbound.Port,
+			"server_port": port,
 			"password":    client.Password,
 		}
 		tls := map[string]any{"enabled": true}
@@ -1435,6 +1461,12 @@ func (s *SubJsonService) genNativeTLSLike(subReq *SubService, inbound *model.Inb
 				tls["server_name"] = strings.TrimSpace(serverName)
 			}
 		}
+		if endpoint.ep != nil {
+			if sni, ok := externalProxySNI(endpoint.ep); ok {
+				tls["server_name"] = sni
+			}
+		}
+		applyNativeTLSHostOptions(tls, endpoint.ep)
 		out["tls"] = tls
 		return out
 	}
@@ -1443,23 +1475,41 @@ func (s *SubJsonService) genNativeTLSLike(subReq *SubService, inbound *model.Inb
 	handshakeServer, _ := handshake["server"].(string)
 	handshakeServer = strings.TrimSpace(handshakeServer)
 	if handshakeServer == "" {
+		handshakeServer, _ = handshake["address"].(string)
+		handshakeServer = strings.TrimSpace(handshakeServer)
+	}
+	if handshakeServer == "" && settings["wildcardSni"] != "all" {
+		handshakeServer = "cloudflare.com"
+	}
+	if endpoint.ep != nil {
+		if sni, ok := externalProxySNI(endpoint.ep); ok {
+			handshakeServer = sni
+		}
+	}
+	if handshakeServer == "" {
 		return nil
 	}
-	version := 3
-	if rawVersion, ok := settings["version"].(float64); ok && int(rawVersion) == 3 {
-		version = 3
-	}
-
+	tls := map[string]any{"enabled": true, "server_name": handshakeServer}
+	applyNativeTLSHostOptions(tls, endpoint.ep)
 	return map[string]any{
 		"type":        "shadowtls",
 		"server":      server,
-		"server_port": inbound.Port,
-		"version":     version,
+		"server_port": port,
+		"version":     3,
 		"password":    client.Password,
-		"tls": map[string]any{
-			"enabled":     true,
-			"server_name": handshakeServer,
-		},
+		"tls":         tls,
+	}
+}
+
+func applyNativeTLSHostOptions(tls map[string]any, endpoint map[string]any) {
+	if endpoint == nil {
+		return
+	}
+	if insecure, _ := endpoint["allowInsecure"].(bool); insecure {
+		tls["insecure"] = true
+	}
+	if alpn, ok := endpoint["alpn"].([]any); ok && len(alpn) > 0 {
+		tls["alpn"] = alpn
 	}
 }
 
@@ -1492,7 +1542,14 @@ func (s *SubJsonService) genNativeNaive(subReq *SubService, inbound *model.Inbou
 		}
 	}
 	if serverName == "" {
-		serverName = subReq.configuredPublicHost()
+		if server != "" && !strings.Contains(server, ":") && net.ParseIP(server) == nil {
+			serverName = server
+		} else {
+			serverName = subReq.configuredPublicHost()
+		}
+	}
+	if server == "" || serverPort <= 0 {
+		return nil
 	}
 
 	out := map[string]any{

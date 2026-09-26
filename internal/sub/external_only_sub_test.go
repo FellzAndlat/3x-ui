@@ -2,6 +2,7 @@ package sub
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -65,5 +66,47 @@ func TestJsonAndClashServeExternalLinkOnlySub(t *testing.T) {
 	}
 	if !strings.Contains(clashOut, "DE-Provider") {
 		t.Fatalf("GetClash missing external proxy: %s", clashOut)
+	}
+}
+
+func TestClashRejectsUnrepresentableExternalLink(t *testing.T) {
+	initSubDB(t)
+	db := database.GetDB()
+	rec := &model.ClientRecord{Email: "ext@x", SubID: "ext-unsupported", Enable: true}
+	if err := db.Create(rec).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ClientExternalLink{ClientId: rec.Id, Kind: model.ExternalLinkKindLink,
+		Value: "shadowtls://secret@example.com:443?version=3&sni=cloudflare.com", SortIndex: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := NewSubClashService(false, "", NewSubService("")).GetClash("ext-unsupported", "sub.example.com")
+	if !errors.Is(err, errSubscriptionFormatUnsupported) {
+		t.Fatalf("unsupported external link error = %v", err)
+	}
+}
+
+func TestStructuredSubscriptionsRejectUnrenderableInbound(t *testing.T) {
+	initSubDB(t)
+	db := database.GetDB()
+	inbound := &model.Inbound{UserId: 1, Tag: "hysteria-plain", Enable: true,
+		Listen: "example.com", Port: 443, Protocol: model.Hysteria,
+		Settings: `{"version":2,"clients":[{"email":"user@example.com","auth":"secret","subId":"plain-sub","enable":true}]}`,
+		StreamSettings: `{"network":"hysteria","security":"tls","hysteriaSettings":{"version":2},"externalProxy":[{"forceTls":"none","dest":"plain.example.com","port":80}]}`}
+	if err := db.Create(inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	rec := &model.ClientRecord{Email: "user@example.com", SubID: "plain-sub", Enable: true, Auth: "secret"}
+	if err := db.Create(rec).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ClientInbound{ClientId: rec.Id, InboundId: inbound.Id}).Error; err != nil {
+		t.Fatal(err)
+	}
+	base := NewSubService("")
+	_, _, jsonErr := NewSubJsonService("", "", "", "", base).GetJson("plain-sub", "sub.example.com", false)
+	_, _, clashErr := NewSubClashService(false, "", base).GetClash("plain-sub", "sub.example.com")
+	if !errors.Is(jsonErr, errSubscriptionFormatUnsupported) || !errors.Is(clashErr, errSubscriptionFormatUnsupported) {
+		t.Fatalf("unrenderable inbound errors: JSON=%v Clash=%v", jsonErr, clashErr)
 	}
 }

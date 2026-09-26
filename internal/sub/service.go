@@ -1155,6 +1155,13 @@ func (s *SubService) genShadowTlsLink(inbound *model.Inbound, email string) stri
 	handshake, _ := settings["handshake"].(map[string]any)
 	handshakeServer, _ := handshake["server"].(string)
 	handshakeServer = strings.TrimSpace(handshakeServer)
+	if handshakeServer == "" {
+		handshakeServer, _ = handshake["address"].(string)
+		handshakeServer = strings.TrimSpace(handshakeServer)
+	}
+	if handshakeServer == "" && settings["wildcardSni"] != "all" {
+		handshakeServer = "cloudflare.com"
+	}
 
 	version := 3
 	if rawVersion, ok := settings["version"].(float64); ok && int(rawVersion) > 0 {
@@ -1163,6 +1170,9 @@ func (s *SubService) genShadowTlsLink(inbound *model.Inbound, email string) stri
 
 	links := make([]string, 0)
 	for _, ep := range s.shareEndpointsForInbound(inbound) {
+		if strings.EqualFold(strings.TrimSpace(ep.ForceTls), "none") {
+			continue
+		}
 		address := strings.TrimSpace(ep.Address)
 		if address == "" {
 			address = s.resolveInboundAddress(inbound)
@@ -1171,13 +1181,12 @@ func (s *SubService) genShadowTlsLink(inbound *model.Inbound, email string) stri
 		if port <= 0 {
 			port = inbound.Port
 		}
-		if address == "" || port <= 0 || handshakeServer == "" {
+		if address == "" || port <= 0 {
 			continue
 		}
-
-		params := map[string]string{
-			"version": strconv.Itoa(version),
-			"sni":     handshakeServer,
+		params := map[string]string{"version": strconv.Itoa(version)}
+		if handshakeServer != "" {
+			params["sni"] = handshakeServer
 		}
 		if ep.ep != nil {
 			if sni, ok := externalProxySNI(ep.ep); ok {
@@ -1186,6 +1195,9 @@ func (s *SubService) genShadowTlsLink(inbound *model.Inbound, email string) stri
 			if isHostEndpoint(ep.ep) {
 				s.renderHostRemark(inbound, client, ep.ep, "")
 			}
+		}
+		if params["sni"] == "" {
+			continue
 		}
 		var rawEndpoint map[string]any
 		if ep.ep != nil {

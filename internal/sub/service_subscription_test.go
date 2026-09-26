@@ -158,7 +158,7 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	}
 	shadowtls := &model.Inbound{
 		UserId: 1, Tag: "shadowtls", Enable: true, Listen: "shadowtls.example.com", Port: 9443, Protocol: model.ShadowTLS,
-		Settings: fmt.Sprintf(`{"version":3,"handshake":{"server":"cloudflare.com","serverPort":443},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
+		Settings: fmt.Sprintf(`{"version":3,"handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
 		StreamSettings: `{}`,
 	}
 	for _, inbound := range []*model.Inbound{anytls, shadowtls} {
@@ -196,6 +196,10 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	}
 	if !strings.Contains(joined, "sni=cloudflare.com") {
 		t.Fatalf("ShadowTLS subscription link is missing handshake SNI: %v", links)
+	}
+	jsonSub, _, err := NewSubJsonService("", "", "", "", NewSubService("")).GetSingBoxJson(subID, "sub.example.com", false)
+	if err != nil || !strings.Contains(jsonSub, `"type": "shadowtls"`) || !strings.Contains(jsonSub, `"server_name": "cloudflare.com"`) {
+		t.Fatalf("sing-box subscription is missing ShadowTLS default handshake: %v\n%s", err, jsonSub)
 	}
 }
 func TestGetSubsSkipsEmptyRenderedLinksButKeepsTraffic(t *testing.T) {
