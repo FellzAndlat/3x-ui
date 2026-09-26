@@ -120,6 +120,48 @@ func TestListenOverlaps(t *testing.T) {
 	}
 }
 
+func TestMieruPortBindingsConflict(t *testing.T) {
+	setupConflictDB(t)
+	seedInboundConflict(t, "mieru", "0.0.0.0", 38443, model.Mieru, "", `{"tcpPorts":["31000-31002"],"udpPorts":["32000"]}`)
+	svc := &InboundService{}
+	for _, tc := range []struct {
+		name     string
+		port     int
+		protocol model.Protocol
+		conflict bool
+	}{
+		{"TCP in range", 31001, model.VLESS, true},
+		{"UDP on bound port", 32000, model.Hysteria, true},
+		{"UDP on TCP range", 31001, model.Hysteria, false},
+		{"unused common port", 38443, model.VLESS, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := &model.Inbound{Protocol: tc.protocol, Listen: "0.0.0.0", Port: tc.port}
+			got, err := svc.checkPortConflict(in, 0)
+			if err != nil || (got != nil) != tc.conflict {
+				t.Fatalf("conflict = %v, error = %v, want conflict %v", got, err, tc.conflict)
+			}
+			if got != nil && got.Port != tc.port {
+				t.Fatalf("conflict port = %d, want %d", got.Port, tc.port)
+			}
+		})
+	}
+	seedInboundConflict(t, "vless", "0.0.0.0", 33001, model.VLESS, "", "{}")
+	for _, tc := range []struct {
+		settings string
+		conflict bool
+	}{
+		{`{"tcpPorts":["33000-33002"]}`, true},
+		{`{"udpPorts":["33000-33002"]}`, false},
+	} {
+		in := &model.Inbound{Protocol: model.Mieru, Listen: "0.0.0.0", Port: 38444, Settings: tc.settings}
+		got, err := svc.checkPortConflict(in, 0)
+		if err != nil || (got != nil) != tc.conflict {
+			t.Fatalf("Mieru settings %s: conflict = %v, error = %v", tc.settings, got, err)
+		}
+	}
+}
+
 // the actual case from #4103: tcp/443 vless reality and udp/443
 // hysteria must be allowed to coexist on the same port.
 func TestCheckPortConflict_TCPandUDPCoexistOnSamePort(t *testing.T) {

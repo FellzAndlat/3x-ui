@@ -323,6 +323,12 @@ export default function InboundFormModal({
     protocol !== Protocols.SHADOWTLS;
 
   const wPort = useWatch({ control, name: 'port' });
+  const mieruTcpPorts = useWatch({ control, name: 'settings.tcpPorts' });
+  const mieruUdpPorts = useWatch({ control, name: 'settings.udpPorts' });
+  const hasMieruPortBindings =
+    protocol === Protocols.MIERU &&
+    ((Array.isArray(mieruTcpPorts) && mieruTcpPorts.length > 0) ||
+      (Array.isArray(mieruUdpPorts) && mieruUdpPorts.length > 0));
   const wListen = (useWatch({ control, name: 'listen' }) ?? '') as string;
   const isUdsListen = wListen.startsWith('/') || wListen.startsWith('@');
   const autoPortSeedRef = useRef('');
@@ -798,7 +804,7 @@ export default function InboundFormModal({
         rules={{ validate: rhfZodValidate(InboundFormBaseSchema.shape.port) }}
       >
         <InputNumber
-          disabled={protocol === Protocols.PINGTUNNEL}
+          disabled={protocol === Protocols.PINGTUNNEL || hasMieruPortBindings}
           min={protocol === Protocols.PINGTUNNEL || isUdsListen ? 0 : 1}
           max={65535}
         />

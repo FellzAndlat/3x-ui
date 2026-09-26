@@ -36,11 +36,11 @@ func prepareExternalVPN(ib *model.Inbound, previous string) error {
 			}
 			raw["key"] = old.Key
 		}
-		if raw["encrypt"] == nil || raw["encrypt"] == "" {
+		if raw["encrypt"] == nil {
 			raw["encrypt"] = "chacha20"
 		}
 		secret, _ := raw["encryptKey"].(string)
-		if secret == "" {
+		if secret == "" && raw["encrypt"] != "" {
 			secret = old.EncryptKey
 			if secret == "" {
 				generated, err := externalvpn.GenerateSecret()

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -102,7 +103,7 @@ func (a *TelemtController) enableWebProxy(c *gin.Context) {
 		if rollbackErr != nil {
 			msg += "; WEB Proxy rollback failed: " + rollbackErr.Error()
 		}
-		jsonMsg(c, msg, err)
+		jsonMsg(c, "WEB Proxy setup failed", errors.New(msg))
 		return
 	}
 	if err := a.service.EnsureWebProxyBackend(); err != nil {
@@ -111,7 +112,7 @@ func (a *TelemtController) enableWebProxy(c *gin.Context) {
 		if rollbackErr != nil {
 			msg += "; WEB Proxy rollback failed: " + rollbackErr.Error()
 		}
-		jsonMsg(c, msg, err)
+		jsonMsg(c, "WEB Proxy setup failed", errors.New(msg))
 		return
 	}
 	status := a.getWebProxyStatus(c)

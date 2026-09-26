@@ -108,15 +108,7 @@ func addPortBindings(dst *[]PortBinding, seen map[string]struct{}, values []any,
 	}
 }
 
-func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
-	if ib == nil || ib.Protocol != model.Mieru {
-		return Instance{}, false
-	}
-	var raw map[string]any
-	if err := json.Unmarshal([]byte(ib.Settings), &raw); err != nil {
-		return Instance{}, false
-	}
-
+func portBindingsFromSettings(raw map[string]any, primaryPort int) []PortBinding {
 	var bindings []PortBinding
 	seen := map[string]struct{}{}
 	if values, ok := raw["tcpPorts"].([]any); ok {
@@ -134,7 +126,7 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 			protocols = []string{"TCP", "UDP"}
 		}
 		var legacyPorts []string
-		legacyPorts = append(legacyPorts, strconv.Itoa(ib.Port))
+		legacyPorts = append(legacyPorts, strconv.Itoa(primaryPort))
 		if rawPorts, ok := raw["additionalPorts"].([]any); ok {
 			for _, value := range rawPorts {
 				if s := portEntryString(value); s != "" {
@@ -155,6 +147,31 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 			}
 		}
 	}
+	return bindings
+}
+
+// PortBindingsFromInbound reports the actual TCP/UDP listeners even if the
+// inbound has no active users yet. Port conflict checks must reserve them.
+func PortBindingsFromInbound(ib *model.Inbound) []PortBinding {
+	if ib == nil || ib.Protocol != model.Mieru {
+		return nil
+	}
+	var raw map[string]any
+	if json.Unmarshal([]byte(ib.Settings), &raw) != nil {
+		return nil
+	}
+	return portBindingsFromSettings(raw, ib.Port)
+}
+
+func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
+	if ib == nil || ib.Protocol != model.Mieru {
+		return Instance{}, false
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(ib.Settings), &raw); err != nil {
+		return Instance{}, false
+	}
+	bindings := portBindingsFromSettings(raw, ib.Port)
 
 	clients, _ := raw["clients"].([]any)
 	users := make([]User, 0, len(clients))

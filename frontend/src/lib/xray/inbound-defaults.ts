@@ -530,7 +530,16 @@ export function createDefaultInboundSettings(protocol: string): AnyInboundSettin
     case 'tuic':
       return createDefaultTuicInboundSettings();
     case 'pingtunnel':
-      return { key: 0, encrypt: 'chacha20', encryptKey: '', clients: [] };
+      return {
+        key: 0,
+        encrypt: 'chacha20',
+        encryptKey: '',
+        maxConn: 0,
+        connectTimeout: 1000,
+        forward: '',
+        congestion: 'bb',
+        clients: [],
+      };
     case 'trusttunnel':
       return { hostname: 'trusttunnel.local', certificate: '', privateKey: '', clients: [] };
     case 'naive':

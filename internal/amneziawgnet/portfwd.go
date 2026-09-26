@@ -167,14 +167,21 @@ func desiredPortForwardKeys(inst amneziawg.Instance) map[portForwardKey]struct{}
 // ForwardedPortOwner names the peer Reconcile opens a listener on port for --
 // the same peers and expansion as desiredPortForwardKeys, never a silent one.
 func ForwardedPortOwner(inst amneziawg.Instance, port int) (string, bool) {
+	email, _, ok := ForwardedPortOwnerInRange(inst, port, port)
+	return email, ok
+}
+
+// ForwardedPortOwnerInRange checks a listener range without expanding that
+// range into repeated scans of all forwarding peers.
+func ForwardedPortOwnerInRange(inst amneziawg.Instance, first, last int) (string, int, bool) {
 	for _, p := range forwardingPeers(inst) {
 		for _, candidate := range amneziawg.ExpandForwardedPorts(p.ForwardedPorts) {
-			if candidate == port {
-				return p.Email, true
+			if candidate >= first && candidate <= last {
+				return p.Email, candidate, true
 			}
 		}
 	}
-	return "", false
+	return "", 0, false
 }
 
 // Reconcile brings the supervisor's open listeners in line with what inst

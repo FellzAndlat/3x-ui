@@ -1,6 +1,8 @@
 package service
 
 import (
+	"net"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -30,6 +32,27 @@ func TestAppendTelemtWebProxyConfig(t *testing.T) {
 		if !containsTelemtWeb(got, want) {
 			t.Fatalf("generated config missing %q:\n%s", want, got)
 		}
+	}
+	state.ListenPort = 15081
+	got, err = appendTelemtWebProxyConfig(base, state)
+	if err != nil || !containsTelemtWeb(got, "port = 15081") {
+		t.Fatalf("chosen backend port was not written: err=%v config=%s", err, got)
+	}
+}
+
+func TestPickTelemtWebListenPort(t *testing.T) {
+	port, err := pickTelemtWebListenPort(telemtWebListenPort)
+	if err != nil || port == telemtWebListenPort {
+		t.Fatalf("primary Telemt port must not be reused: port=%d err=%v", port, err)
+	}
+	listener, err := net.Listen("tcp", net.JoinHostPort(telemtWebListenIP, strconv.Itoa(telemtWebListenPort)))
+	if err != nil {
+		t.Skipf("default WEB Proxy port already occupied: %v", err)
+	}
+	defer listener.Close()
+	port, err = pickTelemtWebListenPort(8443)
+	if err != nil || port == telemtWebListenPort {
+		t.Fatalf("occupied WEB Proxy port must be skipped: port=%d err=%v", port, err)
 	}
 }
 

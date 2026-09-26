@@ -162,14 +162,19 @@ func files(inst Instance, metricsAddr string) ([]string, error) {
 	}
 	if inst.Protocol == model.Pingtunnel {
 		path := filepath.Join(folder, "server.json")
-		data, err := json.Marshal(map[string]any{"type": "server", "key": inst.Settings.Key, "encrypt": inst.Settings.Encrypt, "encrypt_key": inst.Settings.EncryptKey, "icmp_listen": defaultListen(inst.Listen), "nolog": 1, "noprint": 1})
+		data, err := json.Marshal(map[string]any{"type": "server", "key": inst.Settings.Key, "encrypt": inst.Settings.Encrypt, "encrypt_key": inst.Settings.EncryptKey, "icmp_listen": defaultListen(inst.Listen), "maxconn": inst.Settings.MaxConn, "conntt": inst.Settings.ConnectTimeout, "forward": inst.Settings.Forward, "nolog": 1})
 		if err != nil {
 			return nil, err
 		}
 		if err := writePrivate(path, data); err != nil {
 			return nil, err
 		}
-		return []string{"-c", path}, nil
+		args := []string{"-c", path}
+		if inst.Settings.Congestion == "none" {
+			// Pingtunnel's JSON loader ignores empty strings; disable via an explicit flag.
+			args = append(args, "-congestion", "")
+		}
+		return args, nil
 	}
 	cert, key, err := certificate(inst, folder)
 	if err != nil {

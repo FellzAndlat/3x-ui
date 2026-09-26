@@ -109,6 +109,20 @@ func writeTelemtWebState(state TelemtWebProxyState) error {
 	return nil
 }
 
+func pickTelemtWebListenPort(primaryPort int) (int, error) {
+	for port := telemtWebListenPort; port < telemtWebListenPort+100; port++ {
+		if port == primaryPort {
+			continue
+		}
+		listener, err := net.Listen("tcp", net.JoinHostPort(telemtWebListenIP, fmt.Sprint(port)))
+		if err == nil {
+			_ = listener.Close()
+			return port, nil
+		}
+	}
+	return 0, errors.New("telemt: no free loopback port for WEB Proxy backend (15080-15179)")
+}
+
 func clearTelemtWebState() error {
 	err := os.Remove(telemtWebStatePath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -275,10 +289,21 @@ func (TelemtService) EnableWebProxy(ctx context.Context, domain, panelCert, pane
 		}
 		state.Secret = hex.EncodeToString(buf)
 	}
+	cfg, err := (TelemtService{}).GetConfig()
+	if err != nil {
+		rollbackNginx()
+		return TelemtWebProxyStatus{}, err
+	}
+	if !oldState.Enabled {
+		state.ListenPort, err = pickTelemtWebListenPort(cfg.Port)
+		if err != nil {
+			rollbackNginx()
+			return TelemtWebProxyStatus{}, err
+		}
+	}
 	state.Enabled = true
 	state.Domain = domain
 	state.DecoyDir = telemtWebDecoyDir
-	state.ListenPort = telemtWebListenPort
 	state.CertFile = certFile
 	state.KeyFile = keyFile
 	state.PublicAddr = publicAddr
@@ -286,12 +311,6 @@ func (TelemtService) EnableWebProxy(ctx context.Context, domain, panelCert, pane
 	state.NginxWasEnabled = nginxWasEnabled
 	state.NginxStateCaptured = nginxStateCaptured
 	if err := writeTelemtWebState(state); err != nil {
-		rollbackNginx()
-		return TelemtWebProxyStatus{}, err
-	}
-	cfg, err := (TelemtService{}).GetConfig()
-	if err != nil {
-		_ = writeTelemtWebState(oldState)
 		rollbackNginx()
 		return TelemtWebProxyStatus{}, err
 	}

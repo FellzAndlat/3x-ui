@@ -2,12 +2,15 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -190,16 +193,24 @@ func cleanupWebProxyBootUnit() error {
 }
 
 func (TelemtService) EnsureWebProxyBackend() error {
+	state, err := readTelemtWebState()
+	if err != nil {
+		return err
+	}
+	if !state.Enabled {
+		return errors.New("telemt: WEB Proxy is not configured")
+	}
 	if err := ensureWebProxyBootUnit(); err != nil {
 		return err
 	}
+	_ = systemctl("reset-failed", telemtServiceName)
 	if err := systemctl("start", telemtServiceName); err != nil {
 		_ = cleanupWebProxyBootUnit()
-		return fmt.Errorf("telemt: failed to start WEB Proxy backend: %w", err)
+		return fmt.Errorf("telemt: failed to start WEB Proxy backend: %w%s", err, telemtBackendServiceState())
 	}
 
-	addr := net.JoinHostPort(telemtWebListenIP, strconv.Itoa(telemtWebListenPort))
-	deadline := time.Now().Add(8 * time.Second)
+	addr := net.JoinHostPort(telemtWebListenIP, strconv.Itoa(state.ListenPort))
+	deadline := time.Now().Add(30 * time.Second)
 	var lastErr error
 	for {
 		if systemctl("is-active", "--quiet", telemtServiceName) == nil {
@@ -218,7 +229,18 @@ func (TelemtService) EnsureWebProxyBackend() error {
 		time.Sleep(200 * time.Millisecond)
 	}
 	_ = cleanupWebProxyBootUnit()
-	return fmt.Errorf("telemt: WEB Proxy backend %s is not ready: %w", addr, lastErr)
+	return fmt.Errorf("telemt: WEB Proxy backend %s is not ready: %w%s; see journalctl -u telemt.service -n 50 --no-pager", addr, lastErr, telemtBackendServiceState())
+}
+
+func telemtBackendServiceState() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "systemctl", "show", telemtServiceName,
+		"-p", "Result", "-p", "ExecMainStatus", "-p", "SubState", "--no-pager").Output()
+	if err != nil {
+		return ""
+	}
+	return "; " + strings.Join(strings.Fields(string(output)), " ")
 }
 
 func (TelemtService) RestoreFailedWebProxyEnable(snapshot WebProxyEnableSnapshot) error {

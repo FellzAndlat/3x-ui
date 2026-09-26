@@ -4,18 +4,61 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/SawaMEN/3x-ui/v3/internal/mieru"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
 
 	"gorm.io/gorm"
 )
 
 type transportBits uint8
+
+type listenerSpan struct {
+	first, last int
+	transport   transportBits
+}
+
+func inboundListenerSpans(ib *model.Inbound) []listenerSpan {
+	if ib.Protocol != model.Mieru {
+		return []listenerSpan{{ib.Port, ib.Port, inboundTransports(ib.Protocol, ib.StreamSettings, ib.Settings)}}
+	}
+	bindings := mieru.PortBindingsFromInbound(ib)
+	spans := make([]listenerSpan, 0, len(bindings))
+	for _, binding := range bindings {
+		first, last := binding.Port, binding.Port
+		if binding.PortRange != "" {
+			start, end, ok := strings.Cut(binding.PortRange, "-")
+			if !ok {
+				continue
+			}
+			first, _ = strconv.Atoi(start)
+			last, _ = strconv.Atoi(end)
+		}
+		transport := transportTCP
+		if binding.Protocol == "UDP" {
+			transport = transportUDP
+		}
+		spans = append(spans, listenerSpan{first, last, transport})
+	}
+	return spans
+}
+
+func spansOverlap(a, b []listenerSpan) (int, transportBits) {
+	for _, x := range a {
+		for _, y := range b {
+			if shared := x.transport & y.transport; shared != 0 && x.first <= y.last && y.first <= x.last {
+				return max(x.first, y.first), shared
+			}
+		}
+	}
+	return 0, 0
+}
 
 const (
 	transportTCP transportBits = 1 << iota
@@ -33,7 +76,7 @@ func inboundTransports(protocol model.Protocol, streamSettings, settings string)
 	case model.MTProto:
 		return transportTCP
 	case model.Mieru:
-		// The automatic Mieru profile uses one port for both TCP and UDP.
+		// Used for tag generation; listener conflicts use PortBindingsFromInbound.
 		return transportTCP | transportUDP
 	}
 
@@ -224,19 +267,20 @@ func checkPortConflictTx(db *gorm.DB, inbound *model.Inbound, ignoreId int) (*po
 		return nil, nil
 	}
 	newBits := inboundTransports(inbound.Protocol, inbound.StreamSettings, inbound.Settings)
+	newSpans := inboundListenerSpans(inbound)
 
 	// The panel itself owns its configured web port outside the inbounds table.
 	// Reserve that listener so a newly added inbound cannot be saved successfully
 	// only to fail later when the panel and core try to bind the same TCP socket.
 	if inbound.NodeID == nil {
 		panelSettings := &SettingService{}
-		if panelPort, portErr := panelSettings.GetPort(); portErr == nil && panelPort > 0 && inbound.Port == panelPort {
+		if panelPort, portErr := panelSettings.GetPort(); portErr == nil && panelPort > 0 {
 			panelListen, _ := panelSettings.GetListen()
-			if listenOverlaps(panelListen, inbound.Listen) {
+			if port, _ := spansOverlap(newSpans, []listenerSpan{{panelPort, panelPort, transportTCP}}); port > 0 && listenOverlaps(panelListen, inbound.Listen) {
 				return &portConflictDetail{
 					Tag:        "3x-ui",
 					Listen:     panelListen,
-					Port:       panelPort,
+					Port:       port,
 					Transports: transportTCP,
 				}, nil
 			}
@@ -247,24 +291,27 @@ func checkPortConflictTx(db *gorm.DB, inbound *model.Inbound, ignoreId int) (*po
 	// so a local user inbound reusing its port would leave Xray binding the
 	// port twice (#5304). Nodes run their own Xray, so this only applies to
 	// the local panel.
-	if inbound.NodeID == nil && inbound.Port == reservedAPIPort() &&
-		newBits&transportTCP != 0 && listenOverlaps("127.0.0.1", inbound.Listen) {
-		return &portConflictDetail{
-			Tag:        "api",
-			Listen:     "127.0.0.1",
-			Port:       inbound.Port,
-			Transports: transportTCP,
-		}, nil
+	if inbound.NodeID == nil && listenOverlaps("127.0.0.1", inbound.Listen) {
+		reserved := reservedAPIPort()
+		apiPort, _ := spansOverlap(newSpans, []listenerSpan{{reserved, reserved, transportTCP}})
+		if apiPort > 0 {
+			return &portConflictDetail{
+				Tag:        "api",
+				Listen:     "127.0.0.1",
+				Port:       apiPort,
+				Transports: transportTCP,
+			}, nil
+		}
 	}
 
 	// Egress SOCKS server holds loopback EgressBasePort when AWG outbounds are
 	// active; conflict check prevents inbounds from colliding with it.
-	if inbound.NodeID == nil && inbound.Port == int(amneziawgnet.EgressBasePort) &&
-		newBits&transportTCP != 0 && listenOverlaps("127.0.0.1", inbound.Listen) {
+	egressPort, _ := spansOverlap(newSpans, []listenerSpan{{int(amneziawgnet.EgressBasePort), int(amneziawgnet.EgressBasePort), transportTCP}})
+	if inbound.NodeID == nil && egressPort > 0 && listenOverlaps("127.0.0.1", inbound.Listen) {
 		return &portConflictDetail{
 			Tag:        "amneziawg-egress",
 			Listen:     "127.0.0.1",
-			Port:       inbound.Port,
+			Port:       egressPort,
 			Transports: transportTCP,
 		}, nil
 	}
@@ -278,7 +325,7 @@ func checkPortConflictTx(db *gorm.DB, inbound *model.Inbound, ignoreId int) (*po
 	// port silently fails at the next Xray start, taking every other
 	// protocol down with it, not just AmneziaWG.
 	if inbound.NodeID == nil && listenOverlaps("127.0.0.1", inbound.Listen) {
-		conflict, err := checkAmneziawgnetSocksConflict(db, inbound, ignoreId, newBits)
+		conflict, err := checkAmneziawgnetSocksConflict(db, inbound, ignoreId, newSpans)
 		if err != nil {
 			return nil, err
 		}
@@ -321,7 +368,10 @@ func checkPortConflictTx(db *gorm.DB, inbound *model.Inbound, ignoreId int) (*po
 	}
 
 	var candidates []*model.Inbound
-	q := db.Model(model.Inbound{}).Where("port = ?", inbound.Port)
+	q := db.Model(model.Inbound{})
+	if inbound.Protocol != model.Mieru {
+		q = q.Where("port = ? OR protocol = ?", inbound.Port, model.Mieru)
+	}
 	if ignoreId > 0 {
 		q = q.Where("id != ?", ignoreId)
 	}
@@ -336,8 +386,7 @@ func checkPortConflictTx(db *gorm.DB, inbound *model.Inbound, ignoreId int) (*po
 		if !listenOverlaps(c.Listen, inbound.Listen) {
 			continue
 		}
-		existingBits := inboundTransports(c.Protocol, c.StreamSettings, c.Settings)
-		shared := existingBits & newBits
+		port, shared := spansOverlap(newSpans, inboundListenerSpans(c))
 		if shared == 0 {
 			continue
 		}
@@ -346,7 +395,7 @@ func checkPortConflictTx(db *gorm.DB, inbound *model.Inbound, ignoreId int) (*po
 			Remark:     c.Remark,
 			Tag:        c.Tag,
 			Listen:     c.Listen,
-			Port:       c.Port,
+			Port:       port,
 			Transports: shared,
 		}, nil
 	}
@@ -372,27 +421,22 @@ func amneziawgForwardedPortOwner(db *gorm.DB, inbound *model.Inbound, ignoreId i
 		if !ok {
 			continue
 		}
-		email, forwards := amneziawgnet.ForwardedPortOwner(instance, inbound.Port)
-		if !forwards {
-			continue
+		for _, span := range inboundListenerSpans(inbound) {
+			email, port, forwards := amneziawgnet.ForwardedPortOwnerInRange(instance, span.first, span.last)
+			if forwards {
+				return &portConflictDetail{
+					InboundID: row.Id, Remark: row.Remark, Tag: row.Tag,
+					Listen: "", Port: port, ForwardedBy: email,
+				}, nil
+			}
 		}
-		return &portConflictDetail{
-			InboundID: row.Id,
-			Remark:    row.Remark,
-			Tag:       row.Tag,
-			// the forward binds :port on every interface, wherever the
-			// candidate asked to listen.
-			Listen:      "",
-			Port:        inbound.Port,
-			ForwardedBy: email,
-		}, nil
 	}
 	return nil, nil
 }
 
 // checkAmneziawgnetSocksConflict: inbound's port vs the relay port every matching
 // local row reserves, emitted or not; db keeps it in the caller's transaction (#6225).
-func checkAmneziawgnetSocksConflict(db *gorm.DB, inbound *model.Inbound, ignoreId int, newBits transportBits) (*portConflictDetail, error) {
+func checkAmneziawgnetSocksConflict(db *gorm.DB, inbound *model.Inbound, ignoreId int, spans []listenerSpan) (*portConflictDetail, error) {
 	// A disabled row still owns the slot its id derives: SetInboundEnable flips
 	// the column with no port check, so enabling it later must not collide.
 	var candidates []*model.Inbound
@@ -406,7 +450,8 @@ func checkAmneziawgnetSocksConflict(db *gorm.DB, inbound *model.Inbound, ignoreI
 	// Ownership does not depend on the peers: the relay appears when the first
 	// client is added, and the client paths run no port check at all.
 	for _, c := range candidates {
-		if amneziawgnet.SOCKSPortForInbound(c.Id) != inbound.Port {
+		port := amneziawgnet.SOCKSPortForInbound(c.Id)
+		if overlap, _ := spansOverlap(spans, []listenerSpan{{port, port, transportTCP}}); overlap == 0 {
 			continue
 		}
 		return &portConflictDetail{
@@ -414,8 +459,8 @@ func checkAmneziawgnetSocksConflict(db *gorm.DB, inbound *model.Inbound, ignoreI
 			Remark:     c.Remark,
 			Tag:        c.Tag,
 			Listen:     "127.0.0.1",
-			Port:       inbound.Port,
-			Transports: newBits,
+			Port:       port,
+			Transports: transportTCP,
 		}, nil
 	}
 	return nil, nil
@@ -468,12 +513,15 @@ func checkAmneziawgnetSocksReverseConflict(db *gorm.DB, id int) (*portConflictDe
 	relayPort := amneziawgnet.SOCKSPortForInbound(id)
 	var candidates []*model.Inbound
 	if err := db.Model(model.Inbound{}).
-		Where("port = ? AND node_id IS NULL AND id != ?", relayPort, id).
+		Where("(port = ? OR protocol = ?) AND node_id IS NULL AND id != ?", relayPort, model.Mieru, id).
 		Find(&candidates).Error; err != nil {
 		return nil, err
 	}
 	for _, c := range candidates {
 		if !listenOverlaps("127.0.0.1", c.Listen) {
+			continue
+		}
+		if overlap, _ := spansOverlap(inboundListenerSpans(c), []listenerSpan{{relayPort, relayPort, transportTCP}}); overlap == 0 {
 			continue
 		}
 		return &portConflictDetail{
