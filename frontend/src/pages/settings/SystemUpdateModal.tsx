@@ -60,6 +60,13 @@ type ExternalVPNStatus = {
   trusttunnel?: ExternalVPNBinaryStatus;
 };
 
+type NaiveProxyStatus = {
+  installed?: boolean;
+  version?: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+};
+
 type CoreType = 'xray' | 'sing-box';
 
 type SystemUpdateStatus = {
@@ -198,7 +205,7 @@ export default function SystemUpdateModal({
   const loadDependencyUpdates = useCallback(async () => {
     const safeGet = async <T,>(url: string): Promise<ApiMsg<T>> => {
       try {
-        return (await HttpUtil.get<T>(url)) as ApiMsg<T>;
+        return (await HttpUtil.get<T>(url, undefined, { silent: true })) as ApiMsg<T>;
       } catch {
         return { success: false };
       }
@@ -211,8 +218,14 @@ export default function SystemUpdateModal({
       }
     };
 
+    const settings = await safePost<{ coreType?: string }>('/panel/api/setting/all');
+    const coreType: CoreType | null =
+      settings.success &&
+      (settings.obj?.coreType === 'xray' || settings.obj?.coreType === 'sing-box')
+        ? settings.obj.coreType
+        : null;
+
     const [
-      settings,
       serverStatus,
       xrayVersions,
       singBoxStatus,
@@ -221,19 +234,15 @@ export default function SystemUpdateModal({
       sudokuStatus,
       externalVPNStatus,
     ] = await Promise.all([
-      safePost<{ coreType?: string }>('/panel/api/setting/all'),
       safeGet<{ xray?: { version?: string } }>('/panel/api/server/status'),
       safeGet<string[]>('/panel/api/server/getXrayVersion'),
       safeGet<{ installed?: boolean; version?: string }>('/panel/api/setting/singbox/status'),
       safeGet<Array<{ version?: string; prerelease?: boolean } | string>>(
         '/panel/api/setting/singbox/versions',
       ),
-      safeGet<{
-        installed?: boolean;
-        version?: string;
-        latestVersion?: string;
-        updateAvailable?: boolean;
-      }>('/panel/api/naiveproxy/status'),
+      coreType === 'xray'
+        ? safeGet<NaiveProxyStatus>('/panel/api/naiveproxy/status')
+        : Promise.resolve({ success: false } as ApiMsg<NaiveProxyStatus>),
       safeGet<{
         installed?: boolean;
         version?: string;
@@ -243,11 +252,6 @@ export default function SystemUpdateModal({
       safeGet<ExternalVPNStatus>('/panel/api/server/externalvpn/status'),
     ]);
 
-    const coreType: CoreType | null =
-      settings.success &&
-      (settings.obj?.coreType === 'xray' || settings.obj?.coreType === 'sing-box')
-        ? settings.obj.coreType
-        : null;
     const xrayCurrent = serverStatus.success ? serverStatus.obj?.xray?.version || '' : '';
     const xrayLatest =
       xrayVersions.success && Array.isArray(xrayVersions.obj) ? xrayVersions.obj[0] || '' : '';

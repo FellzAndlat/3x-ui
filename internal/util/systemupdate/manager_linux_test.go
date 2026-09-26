@@ -229,6 +229,11 @@ func TestCollectPackageStatusesIncludesOnlyRequiredAndKernelUpdates(t *testing.T
 			t.Fatalf("required package %q was not marked correctly: %#v", name, item)
 		}
 	}
+	// An installed package without a pending upgrade still has an available
+	// version, equal to the installed version.
+	if item := byName["tar"]; item.AvailableVersion != "1.0" || item.UpdateAvailable {
+		t.Fatalf("current package has incorrect available version: %#v", item)
+	}
 	for _, name := range []string{"bash"} {
 		if _, ok := byName[name]; ok {
 			t.Fatalf("collectPackageStatuses() exposed unrelated package %q: %#v", name, packages)

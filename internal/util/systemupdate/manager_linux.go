@@ -405,6 +405,11 @@ func collectPackageStatuses(
 			return
 		}
 		installedVersion, installed := lookup(name)
+		// Upgrade listings omit packages that are already current. Their
+		// installed version is also the available version in the local index.
+		if availableVersion == "" && installed {
+			availableVersion = installedVersion
+		}
 		item := PackageStatus{
 			Name:             name,
 			InstalledVersion: installedVersion,
