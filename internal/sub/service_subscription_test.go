@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
@@ -158,7 +162,7 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	}
 	shadowtls := &model.Inbound{
 		UserId: 1, Tag: "shadowtls", Enable: true, Listen: "shadowtls.example.com", Port: 9443, Protocol: model.ShadowTLS,
-		Settings: fmt.Sprintf(`{"version":3,"handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
+		Settings: fmt.Sprintf(`{"version":3,"shareLinkFormat":"hiddify","handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
 		StreamSettings: `{}`,
 	}
 	for _, inbound := range []*model.Inbound{anytls, shadowtls} {
@@ -200,6 +204,19 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	jsonSub, _, err := NewSubJsonService("", "", "", "", NewSubService("")).GetSingBoxJson(subID, "sub.example.com", false)
 	if err != nil || !strings.Contains(jsonSub, `"type": "shadowtls"`) || !strings.Contains(jsonSub, `"server_name": "cloudflare.com"`) {
 		t.Fatalf("sing-box subscription is missing ShadowTLS default handshake: %v\n%s", err, jsonSub)
+	}
+	controller := &SUBController{subService: NewSubService("")}
+	if !controller.hiddifyShadowTLSSubscription(subID, "Hiddify/2.0") || controller.hiddifyShadowTLSSubscription(subID, "GenericClient/1.0") {
+		t.Fatal("Hiddify compatibility must apply only to Hiddify subscriptions")
+	}
+	gin.SetMode(gin.TestMode)
+	router := newSubscriptionTestRouter(subscriptionTestRouterConfig{})
+	request := httptest.NewRequest(http.MethodGet, "/sub/"+subID, nil)
+	request.Header.Set("User-Agent", "Hiddify/2.0")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type": "shadowtls"`) {
+		t.Fatalf("Hiddify subscription must contain native ShadowTLS: HTTP %d: %s", response.Code, response.Body.String())
 	}
 }
 func TestGetSubsSkipsEmptyRenderedLinksButKeepsTraffic(t *testing.T) {

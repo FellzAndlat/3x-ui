@@ -423,17 +423,57 @@ func resolveTelemtWebPublicAddr(domain string) (string, error) {
 	isPublic := func(ip net.IP) bool {
 		return ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsUnspecified()
 	}
-	for _, ip := range ips {
-		if ip4 := ip.To4(); ip4 != nil && isPublic(ip4) {
-			return net.JoinHostPort(ip4.String(), "443"), nil
+	// Prefer an address that actually belongs to this server. A hostname can
+	// have several A/AAAA records, but Telemt binds public_addr to the inner
+	// relay destination; choosing an unrelated record breaks WEB sessions.
+	interfaces, err := net.InterfaceAddrs()
+	if err == nil {
+		local := make([]net.IP, 0, len(interfaces))
+		for _, address := range interfaces {
+			if network, ok := address.(*net.IPNet); ok && isPublic(network.IP) {
+				local = append(local, network.IP)
+			}
 		}
-	}
-	for _, ip := range ips {
-		if ip.To4() == nil && isPublic(ip) {
+		if ip := selectTelemtWebPublicIP(ips, local); ip != nil {
 			return net.JoinHostPort(ip.String(), "443"), nil
 		}
 	}
+	// Public IPs behind NAT are not assigned to a local interface. Preserve
+	// the DNS fallback for those installations.
+	if ip := selectTelemtWebPublicIP(ips, nil); ip != nil {
+		return net.JoinHostPort(ip.String(), "443"), nil
+	}
 	return "", fmt.Errorf("WEB Proxy domain %s does not resolve to a public IP address", domain)
+}
+
+func selectTelemtWebPublicIP(dns, local []net.IP) net.IP {
+	isPublic := func(ip net.IP) bool {
+		return ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsUnspecified()
+	}
+	for _, ip := range dns {
+		if !isPublic(ip) {
+			continue
+		}
+		for _, own := range local {
+			if ip.Equal(own) {
+				return ip
+			}
+		}
+	}
+	if len(local) > 0 {
+		return nil
+	}
+	for _, ip := range dns {
+		if ip4 := ip.To4(); ip4 != nil && isPublic(ip4) {
+			return ip4
+		}
+	}
+	for _, ip := range dns {
+		if ip.To4() == nil && isPublic(ip) {
+			return ip
+		}
+	}
+	return nil
 }
 
 func telemtWebCertificateCoversDomain(path, domain string) bool {

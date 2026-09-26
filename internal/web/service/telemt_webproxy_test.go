@@ -56,6 +56,17 @@ func TestPickTelemtWebListenPort(t *testing.T) {
 	}
 }
 
+func TestSelectTelemtWebPublicIP(t *testing.T) {
+	dns := []net.IP{net.ParseIP("198.51.100.8"), net.ParseIP("203.0.113.10")}
+	local := []net.IP{net.ParseIP("203.0.113.10")}
+	if got := selectTelemtWebPublicIP(dns, local); !got.Equal(local[0]) {
+		t.Fatalf("expected server address, got %v", got)
+	}
+	if got := selectTelemtWebPublicIP(dns, nil); !got.Equal(dns[0]) {
+		t.Fatalf("expected IPv4 DNS fallback for NAT, got %v", got)
+	}
+}
+
 func TestAppendTelemtWebProxyConfigDisabled(t *testing.T) {
 	base := "[access.users]\nxui = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n"
 	got, err := appendTelemtWebProxyConfig(base, TelemtWebProxyState{})

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -210,14 +211,26 @@ func (TelemtService) EnsureWebProxyBackend() error {
 	}
 
 	addr := net.JoinHostPort(telemtWebListenIP, strconv.Itoa(state.ListenPort))
+	client := &http.Client{
+		Timeout:   2 * time.Second,
+		Transport: &http.Transport{Proxy: nil},
+	}
 	deadline := time.Now().Add(30 * time.Second)
 	var lastErr error
 	for {
 		if systemctl("is-active", "--quiet", telemtServiceName) == nil {
-			conn, err := net.DialTimeout("tcp", addr, 500*time.Millisecond)
+			request, err := http.NewRequest(http.MethodHead, "http://"+addr+"/", nil)
 			if err == nil {
-				_ = conn.Close()
-				return nil
+				request.Host = state.Domain
+				var response *http.Response
+				response, err = client.Do(request)
+				if err == nil {
+					_ = response.Body.Close()
+					if response.StatusCode == http.StatusOK {
+						return nil
+					}
+					err = fmt.Errorf("WEB listener returned HTTP %d", response.StatusCode)
+				}
 			}
 			lastErr = err
 		} else {

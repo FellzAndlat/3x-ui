@@ -287,6 +287,7 @@ export function createDefaultAnyTlsInboundSettings(): AnyTlsInboundSettings {
 export function createDefaultShadowTlsInboundSettings(): ShadowTlsInboundSettings {
   return {
     version: 3,
+    shareLinkFormat: 'standard',
     handshake: {
       server: 'cloudflare.com',
       serverPort: 443,

@@ -482,7 +482,7 @@ func (a *SUBController) subs(c *gin.Context) {
 		if !a.enforceHwid(c) {
 			return
 		}
-		if !a.serveJsonBody(c, a.jsonAlwaysArray, "application/json; charset=utf-8", false) {
+		if !a.serveJsonBody(c, a.jsonAlwaysArray, "application/json; charset=utf-8", false, true) {
 			writeSubError(c, nil)
 		}
 		a.recordSubscriptionFetch(c)
@@ -492,12 +492,18 @@ func (a *SUBController) subs(c *gin.Context) {
 	if !a.enforceHwid(c) {
 		return
 	}
+	if a.hiddifyShadowTLSSubscription(c.Param("subid"), userAgent) &&
+		a.serveJsonBody(c, true, "application/json; charset=utf-8", false, true) {
+		a.recordSubscriptionFetch(c)
+		logSubscriptionRoute(userAgent, "hiddify-shadowtls-sing-box")
+		return
+	}
 	if shouldAutoServeClash(a.subClashAutoDetect, a.clashEnabled, false, userAgent, a.clashUserAgent) && a.serveClashBody(c, false, false) {
 		a.recordSubscriptionFetch(c)
 		logSubscriptionRoute(userAgent, "clash")
 		return
 	}
-	if shouldAutoServeJson(a.jsonAutoDetect, a.jsonEnabled, false, userAgent, a.jsonUserAgent) && a.serveJsonBody(c, true, "application/json; charset=utf-8", false) {
+	if shouldAutoServeJson(a.jsonAutoDetect, a.jsonEnabled, false, userAgent, a.jsonUserAgent) && a.serveJsonBody(c, true, "application/json; charset=utf-8", false, false) {
 		a.recordSubscriptionFetch(c)
 		logSubscriptionRoute(userAgent, "json")
 		return
@@ -532,6 +538,22 @@ func (a *SUBController) subs(c *gin.Context) {
 		}
 		a.recordSubscriptionFetch(c)
 	}
+}
+
+func (a *SUBController) hiddifyShadowTLSSubscription(subID, userAgent string) bool {
+	if !strings.Contains(strings.ToLower(userAgent), "hiddify") {
+		return false
+	}
+	inbounds, err := a.subService.getInboundsBySubId(subID)
+	if err != nil {
+		return false
+	}
+	for _, inbound := range inbounds {
+		if inbound.Protocol == "shadowtls" && a.subService.linkSettings(inbound)["shareLinkFormat"] == "hiddify" {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *SUBController) recordSubscriptionFetch(c *gin.Context) {
@@ -824,7 +846,7 @@ func (a *SUBController) subJsons(c *gin.Context) {
 		if !a.enforceHwid(c) {
 			return
 		}
-		if !a.serveJsonBody(c, a.jsonAlwaysArray, "application/json; charset=utf-8", true) {
+		if !a.serveJsonBody(c, a.jsonAlwaysArray, "application/json; charset=utf-8", true, false) {
 			writeSubError(c, nil)
 		}
 		a.recordSubscriptionFetch(c)
@@ -840,18 +862,18 @@ func (a *SUBController) subJsons(c *gin.Context) {
 }
 
 func (a *SUBController) serveJson(c *gin.Context, alwaysReturnArray bool, contentType string) {
-	if !a.serveJsonBody(c, alwaysReturnArray, contentType, false) {
+	if !a.serveJsonBody(c, alwaysReturnArray, contentType, false, false) {
 		writeSubError(c, nil)
 	}
 	a.recordSubscriptionFetch(c)
 }
 
-func (a *SUBController) serveJsonBody(c *gin.Context, alwaysReturnArray bool, contentType string, rawDownload bool) bool {
+func (a *SUBController) serveJsonBody(c *gin.Context, alwaysReturnArray bool, contentType string, rawDownload, forceSingBox bool) bool {
 	subId := c.Param("subid")
 	scheme, host, hostWithPort, _ := a.subService.ResolveRequest(c)
 	var jsonSub, header string
 	var err error
-	if strings.EqualFold(c.Query("format"), "sing-box") {
+	if forceSingBox || strings.EqualFold(c.Query("format"), "sing-box") {
 		jsonSub, header, err = a.subJsonService.GetSingBoxJson(subId, host, alwaysReturnArray)
 	} else {
 		jsonSub, header, err = a.subJsonService.GetJson(subId, host, alwaysReturnArray)
