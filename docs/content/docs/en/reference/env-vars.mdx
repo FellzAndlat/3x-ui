@@ -83,6 +83,7 @@ knobs — leave them unset unless you're tuning a constrained host.
 | `XUI_MEMORY_RELEASE_INTERVAL` | —       | Minutes between `FreeOSMemory` calls; `0` disables.               |
 | `XUI_MEMORY_LIMIT`            | —       | Go soft memory limit in **MiB**.                                  |
 | `GOMEMLIMIT`                  | —       | Go-syntax soft limit (e.g. `400MiB`); takes precedence over above.|
+| `XUI_XRAY_MEMORY_LIMIT`       | —       | Separate Go soft limit for the Xray child in MiB; overrides inherited `GOMEMLIMIT` only for Xray. Size after measuring. |
 | `XUI_PPROF`                   | `false` | Expose pprof profiling on `127.0.0.1:6060`.                       |
 
 ## Xray

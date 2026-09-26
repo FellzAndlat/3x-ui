@@ -58,6 +58,26 @@ func domain(domainType xraygeodata.Domain_Type, value string, attributes ...stri
 	return d
 }
 
+func BenchmarkDomainPageValue(b *testing.B) {
+	payload, err := proto.Marshal(domain(xraygeodata.Domain_Domain, "example.org", "ads", "cn"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name       string
+		attributes bool
+	}{{"entry-page", false}, {"index", true}} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if _, _, err := domainValue(payload, tc.attributes); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func geoip(code string, prefixes ...string) *xraygeodata.GeoIP {
 	entry := &xraygeodata.GeoIP{Code: code}
 	for _, raw := range prefixes {

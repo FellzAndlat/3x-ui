@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -16,6 +17,23 @@ import (
 
 	xuilogger "github.com/SawaMEN/3x-ui/v3/internal/logger"
 )
+
+func TestXrayProcessMemoryLimitOverridesInheritedLimit(t *testing.T) {
+	t.Setenv("GOMEMLIMIT", "256MiB")
+	t.Setenv("XUI_XRAY_MEMORY_LIMIT", "192")
+	var got string
+	for _, entry := range xrayProcessEnv() {
+		if strings.HasPrefix(entry, "GOMEMLIMIT=") {
+			got = entry
+		}
+	}
+	if got != "GOMEMLIMIT=192MiB" {
+		t.Fatalf("Xray GOMEMLIMIT = %q, want 192MiB", got)
+	}
+	if os.Getenv("GOMEMLIMIT") != "256MiB" {
+		t.Fatal("panel GOMEMLIMIT was modified")
+	}
+}
 
 func TestGetInstalledVersionReadsBinaryVersion(t *testing.T) {
 	dir := t.TempDir()

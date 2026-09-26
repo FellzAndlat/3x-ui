@@ -508,8 +508,11 @@ func listAvailableUpdates(ctx context.Context, manager string) (map[string]strin
 	case "pacman":
 		if commandExists("checkupdates") {
 			output, err := runCommand(ctx, "checkupdates")
-			if err != nil && strings.TrimSpace(output) == "" {
-				return nil, err
+			if err != nil {
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+					return nil, err
+				}
 			}
 			return parsePacmanUpdates(output), nil
 		}

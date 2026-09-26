@@ -82,7 +82,7 @@ func scanEntriesFromSpans(dir, name string, spans []byteSpan, kind GeoKind, code
 			var ok bool
 			var err error
 			if kind == KindSite {
-				raw, _, err = domainValue(payload)
+				raw, _, err = domainValue(payload, false)
 				if err != nil {
 					return err
 				}
@@ -154,7 +154,7 @@ func scanIndexFile(dir, name string, kind GeoKind) (*categoryScan, error) {
 		attributes := make(map[string]struct{})
 		code, err := walkEntry(entry, func(payload []byte) error {
 			if kind == KindSite {
-				value, attrs, err := domainValue(payload)
+				value, attrs, err := domainValue(payload, true)
 				if err != nil {
 					return err
 				}
@@ -358,7 +358,10 @@ func containsFold(haystack []byte, needle string) bool {
 	return strings.Contains(strings.ToLower(string(haystack)), needle)
 }
 
-func domainValue(payload []byte) ([]byte, []string, error) {
+// Attributes are needed while building the category index, but entry pages
+// only need the value. Avoid allocating attribute strings for every rule on
+// every page request, especially for large geosite categories.
+func domainValue(payload []byte, withAttributes bool) ([]byte, []string, error) {
 	var value []byte
 	var attributes []string
 	for len(payload) > 0 {
@@ -380,8 +383,10 @@ func domainValue(payload []byte) ([]byte, []string, error) {
 			if size < 0 {
 				return nil, nil, protowire.ParseError(size)
 			}
-			if key := attributeKey(raw); key != "" {
-				attributes = append(attributes, key)
+			if withAttributes {
+				if key := attributeKey(raw); key != "" {
+					attributes = append(attributes, key)
+				}
 			}
 			payload = payload[size:]
 		default:

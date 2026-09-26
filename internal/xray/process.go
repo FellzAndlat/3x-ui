@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -641,6 +643,7 @@ func (p *process) Start() (err error) {
 	}
 
 	cmd := exec.CommandContext(context.Background(), GetBinaryPath(), "-c", configPath)
+	cmd.Env = xrayProcessEnv()
 	cmd.Stdout = p.logWriter
 	cmd.Stderr = p.logWriter
 
@@ -653,6 +656,21 @@ func (p *process) Start() (err error) {
 	p.refreshAPIPort()
 
 	return nil
+}
+
+// xrayProcessEnv lets an operator budget the proxy core separately from the
+// panel. Xray inherits GOMEMLIMIT by default (for example from systemd), but
+// XUI_XRAY_MEMORY_LIMIT overrides it for this child process only.
+func xrayProcessEnv() []string {
+	env := os.Environ()
+	if raw := strings.TrimSpace(os.Getenv("XUI_XRAY_MEMORY_LIMIT")); raw != "" {
+		if mib, err := strconv.ParseUint(raw, 10, 64); err == nil && mib > 0 && mib <= math.MaxInt64/(1<<20) {
+			env = append(env, fmt.Sprintf("GOMEMLIMIT=%dMiB", mib))
+		} else {
+			logger.Warning("Ignoring invalid XUI_XRAY_MEMORY_LIMIT; expected a positive MiB count")
+		}
+	}
+	return env
 }
 
 // writeFileAtomic writes data to path via a same-directory temp file that is

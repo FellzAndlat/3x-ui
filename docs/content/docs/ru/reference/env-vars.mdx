@@ -85,6 +85,7 @@ x-ui encrypt-tokens
 | `XUI_MEMORY_RELEASE_INTERVAL` | —       | Минуты между вызовами `FreeOSMemory`; `0` отключает.               |
 | `XUI_MEMORY_LIMIT`            | —       | Мягкий лимит памяти Go в **MiB**.                                  |
 | `GOMEMLIMIT`                  | —       | Мягкий лимит в синтаксисе Go (например, `400MiB`); имеет приоритет над предыдущим.|
+| `XUI_XRAY_MEMORY_LIMIT`       | —       | Отдельный мягкий лимит для дочернего процесса Xray в MiB; переопределяет унаследованный `GOMEMLIMIT` только в Xray. Подбирайте после измерения. |
 | `XUI_PPROF`                   | `false` | Открыть профилирование pprof на `127.0.0.1:6060`.                       |
 
 ## Xray

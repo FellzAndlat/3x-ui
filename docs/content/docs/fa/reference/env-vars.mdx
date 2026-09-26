@@ -84,6 +84,7 @@ x-ui encrypt-tokens
 | `XUI_MEMORY_RELEASE_INTERVAL` | —       | فاصله‌ی زمانی فراخوانی‌های `FreeOSMemory` بر حسب دقیقه؛ مقدار `0` آن را غیرفعال می‌کند.               |
 | `XUI_MEMORY_LIMIT`            | —       | محدودیت نرم حافظه‌ی Go بر حسب **MiB**.                                  |
 | `GOMEMLIMIT`                  | —       | محدودیت نرم با نحو Go (مثلاً `400MiB`)؛ بر مورد بالا اولویت دارد.|
+| `XUI_XRAY_MEMORY_LIMIT`       | —       | محدودیت نرم جداگانه برای پردازش Xray بر حسب MiB؛ فقط `GOMEMLIMIT` ارث‌رسیده در Xray را تغییر می‌دهد. |
 | `XUI_PPROF`                   | `false` | در دسترس قرار دادن پروفایلینگ pprof روی `127.0.0.1:6060`.                       |
 
 ## Xray

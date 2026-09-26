@@ -79,6 +79,7 @@ x-ui encrypt-tokens
 | `XUI_MEMORY_RELEASE_INTERVAL` | —       | 两次 `FreeOSMemory` 调用之间的分钟数；`0` 表示禁用。              |
 | `XUI_MEMORY_LIMIT`            | —       | Go 软内存限制，单位 **MiB**。                                     |
 | `GOMEMLIMIT`                  | —       | Go 语法的软限制（例如 `400MiB`）；优先级高于上一项。              |
+| `XUI_XRAY_MEMORY_LIMIT`       | —       | Xray 子进程独立的 Go 软内存限制，单位 MiB；仅覆盖 Xray 继承的 `GOMEMLIMIT`。 |
 | `XUI_PPROF`                   | `false` | 在 `127.0.0.1:6060` 上暴露 pprof 性能分析。                       |
 
 ## Xray
