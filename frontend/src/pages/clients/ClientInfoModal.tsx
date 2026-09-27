@@ -30,6 +30,7 @@ import {
   findAmneziaWGInbounds,
   isAmneziaWGClient,
 } from './amneziawgConfig';
+import { isSudokuLink, loadClientLinks } from './clientLinks';
 import './ClientInfoModal.css';
 
 const INBOUND_PROTOCOL_COLORS: Record<string, string> = {
@@ -132,12 +133,12 @@ export default function ClientInfoModal({
   >(null);
 
   // Clearing on close happens during render; the effect owns only the fetch.
-  const openSubId = open ? (client?.subId ?? '') : null;
-  const [syncedSubId, setSyncedSubId] = useState(openSubId);
-  if (openSubId !== syncedSubId) {
-    setSyncedSubId(openSubId);
-    if (openSubId === null) {
-      setLinks([]);
+  const openClientId = open ? (client?.id ?? null) : null;
+  const [syncedClientId, setSyncedClientId] = useState(openClientId);
+  if (openClientId !== syncedClientId) {
+    setSyncedClientId(openClientId);
+    setLinks([]);
+    if (openClientId === null) {
       setClientIps([]);
       setIpsModalOpen(false);
       resetHwids();
@@ -146,19 +147,19 @@ export default function ClientInfoModal({
   }
 
   useEffect(() => {
-    if (!open || !client?.subId) return;
+    if (!open || !client?.email) return;
     let cancelled = false;
     (async () => {
-      const msg = (await HttpUtil.get(
-        `/panel/api/clients/subLinks/${encodeURIComponent(client.subId!)}`,
-      )) as ApiMsg<string[]>;
-      if (cancelled) return;
-      setLinks(msg?.success && Array.isArray(msg.obj) ? msg.obj : []);
+      const result = await loadClientLinks(client.email, client.subId);
+      if (!cancelled) setLinks(result);
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, client?.subId]);
+  }, [open, client?.email, client?.subId]);
+
+  const standardLinks = links.filter((link) => !isSudokuLink(link));
+  const sudokuLinks = links.filter(isSudokuLink);
 
   const traffic = client?.traffic || null;
   const totalBytes = client?.totalGB || 0;
@@ -741,10 +742,10 @@ export default function ClientInfoModal({
               </>
             )}
 
-            {links.length > 0 && (
+            {standardLinks.length > 0 && (
               <>
                 <Divider>{t('pages.inbounds.copyLink')}</Divider>
-                {links.map((link, idx) => {
+                {standardLinks.map((link, idx) => {
                   const parts = parseLinkParts(link);
                   const fallback = `${t('pages.clients.link')} ${idx + 1}`;
                   const rowTitle = (parts && linkMetaText(parts)) || fallback;
@@ -789,6 +790,21 @@ export default function ClientInfoModal({
                     </div>
                   );
                 })}
+              </>
+            )}
+
+            {sudokuLinks.length > 0 && client && (
+              <>
+                <Divider>{t('pages.clients.sudokuConfig')}</Divider>
+                {sudokuLinks.map((link, idx) => (
+                  <ConfigBlock
+                    key={link}
+                    label={`${t('pages.clients.sudokuConfig')} ${sudokuLinks.length > 1 ? idx + 1 : ''}`.trim()}
+                    text={link}
+                    fileName={`${client.email || 'sudoku'}-${idx + 1}.txt`}
+                    qrRemark={`${client.email} — Sudoku ${idx + 1}`}
+                  />
+                ))}
               </>
             )}
 

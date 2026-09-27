@@ -110,6 +110,17 @@ export function parseLinkParts(link: string): LinkParts | null {
     } catch {
       /* unparseable payload, fall back to protocol only */
     }
+  } else if (scheme === 'sudoku') {
+    try {
+      const payload = JSON.parse(fromBase64Url(trimmed.slice('sudoku://'.length))) as {
+        h?: string;
+        p?: number;
+      };
+      remark = typeof payload.h === 'string' ? payload.h : '';
+      port = typeof payload.p === 'number' ? String(payload.p) : '';
+    } catch {
+      /* malformed payload, keep the protocol label */
+    }
   } else if (scheme === 'vpn') {
     /* AmneziaWG's vpn:// links are base64url of a plain .conf text (matching
        the real AmneziaVPN app's own share-link scheme), not a structured URL

@@ -22,6 +22,7 @@ import {
   isAmneziaWGClient,
 } from './amneziawgConfig';
 import { buildTuicClientConfig, findTuicInbound, isTuicClient } from './tuicConfig';
+import { isSudokuLink, loadClientLinks } from './clientLinks';
 
 interface SubSettings {
   enable: boolean;
@@ -382,12 +383,12 @@ function ClientQrModalContent({
     links.length > 0;
 
   // The reset runs during render so the effect only carries the request.
-  const openSubId = open ? (client?.subId ?? '') : '';
-  const [syncedSubId, setSyncedSubId] = useState(openSubId);
-  if (openSubId !== syncedSubId) {
-    setSyncedSubId(openSubId);
+  const openClientId = open ? (client?.id ?? null) : null;
+  const [syncedClientId, setSyncedClientId] = useState(openClientId);
+  if (openClientId !== syncedClientId) {
+    setSyncedClientId(openClientId);
     setLinks([]);
-    setLoading(!!openSubId);
+    setLoading(openClientId !== null);
     setVariant('standard');
     setHappLink('');
     setHappLoading(false);
@@ -395,16 +396,12 @@ function ClientQrModalContent({
   }
 
   useEffect(() => {
-    if (!open || !client?.subId) return;
+    if (!open || !client?.email) return;
     let cancelled = false;
     (async () => {
       try {
-        const msg = (await HttpUtil.get(
-          `/panel/api/clients/subLinks/${encodeURIComponent(client.subId!)}`,
-        )) as ApiMsg<string[]>;
-        if (!cancelled) {
-          setLinks(msg?.success && Array.isArray(msg.obj) ? msg.obj : []);
-        }
+        const result = await loadClientLinks(client.email, client.subId);
+        if (!cancelled) setLinks(result);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -412,7 +409,7 @@ function ClientQrModalContent({
     return () => {
       cancelled = true;
     };
-  }, [open, client?.subId]);
+  }, [open, client?.email, client?.subId]);
 
   const [activeKey, setActiveKey] = useState<string[]>([]);
 
@@ -445,7 +442,7 @@ function ClientQrModalContent({
         children: <QrPanel value={subJsonLink} remark={`${client?.email || ''} — JSON`} />,
       });
     }
-    links.forEach((link, idx) => {
+    links.filter((link) => !isSudokuLink(link)).forEach((link, idx) => {
       const parts = parseLinkParts(link);
       const meta = parts ? linkMetaText(parts) : '';
       const label: React.ReactNode = parts ? (
@@ -464,6 +461,23 @@ function ClientQrModalContent({
             value={link}
             remark={parts?.remark || `${client?.email || ''} #${idx + 1}`}
             showQr={!isPostQuantumLink(link)}
+          />
+        ),
+      });
+    });
+    links.filter(isSudokuLink).forEach((link, idx) => {
+      out.push({
+        key: `sudoku-${idx}`,
+        label: (
+          <Tag color="gold" style={{ margin: 0 }}>
+            {t('pages.clients.sudokuConfig')} {idx + 1}
+          </Tag>
+        ),
+        children: (
+          <QrPanel
+            value={link}
+            remark={`${client?.email || 'sudoku'} — Sudoku ${idx + 1}`}
+            downloadName={`${client?.email || 'sudoku'}-${idx + 1}.txt`}
           />
         ),
       });
@@ -555,12 +569,7 @@ function ClientQrModalContent({
       onCancel={() => onOpenChange(false)}
     >
       <Spin spinning={loading}>
-        {!client?.subId && !loading && (
-          <div style={{ padding: 24, textAlign: 'center', opacity: 0.6 }}>
-            {t('pages.clients.noSubId')}
-          </div>
-        )}
-        {client?.subId && !hasAnything && !loading && (
+        {client?.email && !hasAnything && !loading && (
           <div style={{ padding: 24, textAlign: 'center', opacity: 0.6 }}>
             {t('pages.clients.noLinks')}
           </div>

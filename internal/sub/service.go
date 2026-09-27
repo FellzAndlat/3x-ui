@@ -664,7 +664,9 @@ func sudokuInboundUsable(inbound *model.Inbound) bool {
 	if inbound == nil || inbound.Protocol != model.Sudoku {
 		return true
 	}
-	return inbound.Enable && sudoku.IsInstalled(config.GetBinFolderPath())
+	// A remote node runs its own Sudoku binary; the panel's local installation
+	// state only determines whether a local Sudoku inbound can serve traffic.
+	return inbound.Enable && (inbound.NodeID != nil || sudoku.IsInstalled(config.GetBinFolderPath()))
 }
 
 func (s *SubService) inboundLinks(inbound *model.Inbound) []string {
@@ -812,10 +814,7 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) 
 	protocols := []string{
 		"vmess", "vless", "trojan", "shadowsocks", "hysteria",
 		"wireguard", "amneziawg", "mtproto", "tuic", "naive", "anytls", "shadowtls", "mieru",
-		"vk-turn-proxy", "trusttunnel",
-	}
-	if sudoku.IsInstalled(config.GetBinFolderPath()) {
-		protocols = append(protocols, string(model.Sudoku))
+		"vk-turn-proxy", "trusttunnel", "sudoku",
 	}
 	err := db.Model(model.Inbound{}).
 		Where(`id in (
@@ -833,6 +832,9 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) 
 	if err != nil {
 		return nil, err
 	}
+	inbounds = slices.DeleteFunc(inbounds, func(inbound *model.Inbound) bool {
+		return !sudokuInboundUsable(inbound)
+	})
 	inboundIDs := make([]int, 0, len(inbounds))
 	for _, inbound := range inbounds {
 		inboundIDs = append(inboundIDs, inbound.Id)

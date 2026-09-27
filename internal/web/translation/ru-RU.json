@@ -1036,6 +1036,7 @@
       "tunnelKeepAlive": "Keepalive (секунды)",
       "tunnelKeepAliveHint": "Как часто клиент шлёт keepalive-пакет. Обычное значение 25: оно держит NAT-маппинг открытым и возвращает простаивающий пир сам после любого разрыва, включая рестарт панели. 0 отключает — тогда молчащий клиент остаётся отключённым до первого своего пакета.",
       "amneziaWgConfig": "Конфиг AmneziaWG",
+      "sudokuConfig": "Подключение Sudoku",
       "tuicConfig": "Конфиг TUIC (Clash)",
       "mtprotoSecret": "Секрет MTProto",
       "mtprotoSecretHint": "Секрет FakeTLS клиента. Перегенерируйте, чтобы сменить.",
