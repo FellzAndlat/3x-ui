@@ -115,9 +115,7 @@ func TestNewDeviceUDPHandlerAndReply(t *testing.T) {
 	if err := clientDev.IpcSet(clientConf); err != nil {
 		t.Fatalf("client IpcSet: %v", err)
 	}
-	if err := clientDev.Up(); err != nil {
-		t.Fatalf("client Up: %v", err)
-	}
+	upTestClient(t, clientDev)
 
 	conn, err := clientNet.DialUDPAddrPort(netip.AddrPort{}, wantDest)
 	if err != nil {

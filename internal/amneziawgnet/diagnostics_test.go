@@ -128,9 +128,7 @@ func TestDiagnoseDeviceReportsListenPortAndPeerState(t *testing.T) {
 	if err := clientDev.IpcSet(clientConf); err != nil {
 		t.Fatalf("client IpcSet: %v", err)
 	}
-	if err := clientDev.Up(); err != nil {
-		t.Fatalf("client Up: %v", err)
-	}
+	upTestClient(t, clientDev)
 
 	wantDest := netip.MustParseAddrPort("10.202.9.9:9999")
 	dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -5,7 +5,7 @@ import { inboundNetworkLabels } from '@/pages/inbounds/list/helpers';
 describe('inboundNetworkLabels', () => {
   it.each([
     ['anytls', {}, ['TCP']],
-    ['shadowtls', {}, ['TCP']],
+    ['shadowtls', {}, ['ShadowTLS', 'TCP']],
     ['mtproto', {}, ['TCP']],
     ['http', {}, ['TCP']],
     ['sudoku', {}, ['TCP']],
@@ -43,6 +43,16 @@ describe('inboundNetworkLabels', () => {
         streamSettings: JSON.stringify({ network: 'grpc', security: 'tls' }),
       }),
     ).toEqual(['GRPC']);
+  });
+
+  it('shows ShadowTLS over TCP for a wrapped inner protocol', () => {
+    expect(
+      inboundNetworkLabels({
+        protocol: 'vless',
+        settings: { shadowTls: { enabled: true } },
+        streamSettings: {},
+      }),
+    ).toEqual(['ShadowTLS', 'TCP']);
   });
 
   it('adds the L4 tag for QUIC/KCP transports', () => {

@@ -305,9 +305,7 @@ func TestPortForwardRoundTripTCPAndUDP(t *testing.T) {
 	if err := clientDev.IpcSet(clientConf); err != nil {
 		t.Fatalf("client IpcSet: %v", err)
 	}
-	if err := clientDev.Up(); err != nil {
-		t.Fatalf("client Up: %v", err)
-	}
+	upTestClient(t, clientDev)
 
 	// Prime the handshake before exercising the actual port forwards below.
 	// The server only learns the client's real (roaming) endpoint from a

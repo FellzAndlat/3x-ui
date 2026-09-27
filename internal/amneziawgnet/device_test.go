@@ -130,9 +130,7 @@ func TestNewDeviceHandshakeForwarderAndIdentity(t *testing.T) {
 	if err := clientDev.IpcSet(clientConf); err != nil {
 		t.Fatalf("client IpcSet: %v", err)
 	}
-	if err := clientDev.Up(); err != nil {
-		t.Fatalf("client Up: %v", err)
-	}
+	upTestClient(t, clientDev)
 
 	// Retry the dial rather than guessing a fixed handshake delay: the
 	// first attempts may race the handshake, later ones should succeed
@@ -335,9 +333,7 @@ func TestNewDeviceHeaderProtectionAndContentPaddingRoundTrip(t *testing.T) {
 	if err := clientDev.IpcSet(clientConf); err != nil {
 		t.Fatalf("client IpcSet: %v", err)
 	}
-	if err := clientDev.Up(); err != nil {
-		t.Fatalf("client Up: %v", err)
-	}
+	upTestClient(t, clientDev)
 
 	dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -509,9 +505,7 @@ func TestNewDeviceRandomTrailersAndDisableCookiesRoundTrip(t *testing.T) {
 	if err := clientDev.IpcSet(clientConf); err != nil {
 		t.Fatalf("client IpcSet: %v", err)
 	}
-	if err := clientDev.Up(); err != nil {
-		t.Fatalf("client Up: %v", err)
-	}
+	upTestClient(t, clientDev)
 
 	dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
