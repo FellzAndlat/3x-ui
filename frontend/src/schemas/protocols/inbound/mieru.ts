@@ -67,6 +67,9 @@ export const MieruInboundSettingsSchema = z.preprocess(
     // so existing inbounds continue to work unchanged.
     tcpPorts: MieruPortListSchema,
     udpPorts: MieruPortListSchema,
+    // Missing means the legacy/default Hiddify-compatible simple-sharing link.
+    // The form persists an explicit value for newly created or edited Mieru inbounds.
+    shareLinkFormat: z.enum(['hiddify', 'native']).optional(),
     // Client-side defaults used when generating mieru:// and mierus:// links.
     multiplexing: z
       .enum(['MULTIPLEXING_OFF', 'MULTIPLEXING_LOW', 'MULTIPLEXING_MIDDLE', 'MULTIPLEXING_HIGH'])

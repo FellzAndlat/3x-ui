@@ -33,6 +33,30 @@ func TestSplitLinkLines(t *testing.T) {
 	}
 }
 
+func TestSplitLinkLines_PrefersNativeMieruWhenConfigured(t *testing.T) {
+	seedSubDB(t)
+	db := database.GetDB()
+	ib := &model.Inbound{
+		UserId:   1,
+		Tag:      "mieru-native-format",
+		Enable:   true,
+		Listen:   "0.0.0.0",
+		Port:     2012,
+		Protocol: model.Mieru,
+		Remark:   "Mieru native",
+		Settings: `{"shareLinkFormat":"native","tcpPorts":["2012-2022","2027"],"clients":[{"email":"native@e","password":"secret","enable":true}]}`,
+	}
+	if err := db.Create(ib).Error; err != nil {
+		t.Fatalf("seed Mieru inbound: %v", err)
+	}
+
+	raw := "mieru://QUJDRA==\nmierus://native%40e:secret@example.com?port=2012-2022&protocol=TCP#Mieru"
+	want := []string{"mieru://QUJDRA=="}
+	if got := splitLinkLines(raw); !reflect.DeepEqual(got, want) {
+		t.Fatalf("native Mieru format = %#v, want %#v", got, want)
+	}
+}
+
 func TestNormalizeGeneratedLinks_DeduplicatesAcrossEntries(t *testing.T) {
 	entries := []string{
 		"vless://same\nmieru://QUJDRA==\nmierus://user:pass@example.com?port=443&protocol=TCP#Mieru",
