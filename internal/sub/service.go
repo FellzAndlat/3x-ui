@@ -53,10 +53,17 @@ func containsUnsupportedJSONProtocol(inbounds []*model.Inbound) bool {
 
 func containsUnsupportedSingBoxProtocol(inbounds []*model.Inbound) bool {
 	for _, inbound := range inbounds {
-		switch inbound.Protocol {
-		case model.AmneziaWG, model.MTProto, model.VKTurnProxy, model.Mieru, model.Sudoku, model.TrustTunnel:
+		if singBoxUnsupportedProtocol(inbound.Protocol) {
 			return true
 		}
+	}
+	return false
+}
+
+func singBoxUnsupportedProtocol(protocol model.Protocol) bool {
+	switch protocol {
+	case model.AmneziaWG, model.MTProto, model.VKTurnProxy, model.Mieru, model.Sudoku, model.TrustTunnel:
+		return true
 	}
 	return false
 }

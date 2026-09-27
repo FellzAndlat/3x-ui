@@ -8,22 +8,6 @@ export default function ShadowTlsFields() {
   return (
     <>
       <FormField
-        name={['settings', 'shareLinkFormat']}
-        label={t('pages.inbounds.form.shadowTlsHiddifyCompatibility')}
-        tooltip={t('pages.inbounds.form.shadowTlsHiddifyCompatibilityHint')}
-        valueProp="checked"
-        transform={{
-          input: (value) => value === 'hiddify',
-          output: (value) => (value ? 'hiddify' : 'standard'),
-        }}
-      >
-        <Switch
-          checkedChildren={t('pages.inbounds.form.shadowTlsHiddify')}
-          unCheckedChildren={t('pages.inbounds.form.shadowTlsStandard')}
-        />
-      </FormField>
-
-      <FormField
         name={['settings', 'handshake', 'server']}
         label={t('pages.inbounds.form.shadowTlsHandshakeServer')}
         tooltip={t('pages.inbounds.form.shadowTlsHandshakeServerHint')}

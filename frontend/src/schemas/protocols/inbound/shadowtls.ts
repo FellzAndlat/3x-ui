@@ -21,7 +21,6 @@ export type ShadowTlsClient = z.infer<typeof ShadowTlsClientSchema>;
 
 export const ShadowTlsInboundSettingsSchema = z.object({
   version: z.literal(3).default(3),
-  shareLinkFormat: z.enum(['standard', 'hiddify']).default('standard'),
   handshake: z.object({
     server: z
       .string()

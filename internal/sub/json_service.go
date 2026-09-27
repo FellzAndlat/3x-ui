@@ -426,21 +426,30 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 		return string(arr), header, nil
 	}
 
-	// Refuse partial sing-box output for protocols this renderer cannot represent.
-	// Returning the format-unsupported sentinel preserves the complete raw profile
-	// instead of silently dropping an inbound during auto-detection.
+	// Refuse partial sing-box output during ordinary auto-detection. For
+	// Hiddify with ShadowTLS, retain importable nodes even when other protocols
+	// cannot be represented; otherwise Hiddify loses the ShadowTLS node too.
 	// WireGuard endpoint profiles are emitted separately above. A mixed
 	// WireGuard + proxy subscription cannot be represented by the current
 	// separated-profile builder without routing one profile through another,
 	// so reject it instead of falling back to the deprecated WireGuard outbound.
-	if containsSubscriptionProtocol(inbounds, model.WireGuard) || containsUnsupportedSingBoxProtocol(inbounds) {
+	shadowTLSForHiddify := hiddify && containsSubscriptionProtocol(inbounds, model.ShadowTLS)
+	if !shadowTLSForHiddify && (containsSubscriptionProtocol(inbounds, model.WireGuard) || containsUnsupportedSingBoxProtocol(inbounds)) {
 		return "", "", errSubscriptionFormatUnsupported
 	}
 
 	formatUnsupported := false
+	shadowTLSGenerated := false
 	for _, inbound := range inbounds {
 		clients := clientsFor(inbound)
 		if len(clients) == 0 {
+			continue
+		}
+		// Hiddify can import the supported sing-box outbounds even when another
+		// inbound in this subscription is not representable as an outbound.
+		// Do not let that unrelated inbound remove ShadowTLS from the profile.
+		if shadowTLSForHiddify && (inbound.Protocol == model.WireGuard ||
+			singBoxUnsupportedProtocol(inbound.Protocol)) {
 			continue
 		}
 		subReq.projectThroughFallbackMaster(inbound)
@@ -543,6 +552,9 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 				if generated == 0 {
 					formatUnsupported = true
 				}
+				if inbound.Protocol == model.ShadowTLS && generated > 0 {
+					shadowTLSGenerated = true
+				}
 				continue
 			}
 			if inbound.Protocol == model.NaiveProxy {
@@ -630,6 +642,9 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 		for _, el := range expandEntry(ext) {
 			outbound := parsedExternalOutbound(el.Link)
 			if outbound == nil {
+				if shadowTLSForHiddify {
+					continue
+				}
 				return "", "", errSubscriptionFormatUnsupported
 			}
 			var xrayOutbound map[string]any
@@ -638,7 +653,9 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 			}
 			native, err := singbox.TranslateXrayOutbound(xrayOutbound)
 			if err != nil {
-				formatUnsupported = true
+				if !shadowTLSForHiddify {
+					formatUnsupported = true
+				}
 				continue
 			}
 			seenEmails[ext.Email] = struct{}{}
@@ -654,7 +671,7 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 		}
 	}
 
-	if formatUnsupported {
+	if (formatUnsupported && !shadowTLSForHiddify) || (shadowTLSForHiddify && !shadowTLSGenerated) {
 		return "", "", errSubscriptionFormatUnsupported
 	}
 

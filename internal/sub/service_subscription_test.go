@@ -162,7 +162,7 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	}
 	shadowtls := &model.Inbound{
 		UserId: 1, Tag: "shadowtls", Enable: true, Listen: "shadowtls.example.com", Port: 9443, Protocol: model.ShadowTLS,
-		Settings: fmt.Sprintf(`{"version":3,"shareLinkFormat":"hiddify","handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
+		Settings: fmt.Sprintf(`{"version":3,"handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
 		StreamSettings: `{}`,
 	}
 	for _, inbound := range []*model.Inbound{anytls, shadowtls} {
@@ -203,8 +203,20 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 		t.Fatalf("sing-box subscription is missing ShadowTLS default handshake: %v\n%s", err, jsonSub)
 	}
 	controller := &SUBController{subService: NewSubService("")}
-	if !controller.hiddifyShadowTLSSubscription(subID, "Hiddify/2.0") || !controller.hiddifyShadowTLSSubscription(subID, "GenericClient/1.0") {
-		t.Fatal("compatibility setting must provide native JSON for all clients")
+	if !controller.hasShadowTLSSubscription(subID) {
+		t.Fatal("ShadowTLS inbound missing from subscription")
+	}
+	// An unrelated protocol without a sing-box outbound must not force the
+	// Hiddify subscription back to raw links and hide ShadowTLS.
+	unsupported := &model.Inbound{
+		UserId: 1, Tag: "mtproto", Enable: true, Port: 9444, Protocol: model.MTProto,
+		Settings: `{}`, StreamSettings: `{}`,
+	}
+	if err := db.Create(unsupported).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ClientInbound{ClientId: shadowClient.Id, InboundId: unsupported.Id}).Error; err != nil {
+		t.Fatal(err)
 	}
 	gin.SetMode(gin.TestMode)
 	router := newSubscriptionTestRouter(subscriptionTestRouterConfig{})

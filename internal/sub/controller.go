@@ -492,7 +492,7 @@ func (a *SUBController) subs(c *gin.Context) {
 	if !a.enforceHwid(c) {
 		return
 	}
-	if a.hiddifyShadowTLSSubscription(c.Param("subid"), userAgent) &&
+	if strings.Contains(strings.ToLower(userAgent), "hiddify") && a.hasShadowTLSSubscription(c.Param("subid")) &&
 		a.serveJsonBody(c, true, "application/json; charset=utf-8", false, true) {
 		a.recordSubscriptionFetch(c)
 		logSubscriptionRoute(userAgent, "hiddify-shadowtls-sing-box")
@@ -540,14 +540,13 @@ func (a *SUBController) subs(c *gin.Context) {
 	}
 }
 
-func (a *SUBController) hiddifyShadowTLSSubscription(subID, userAgent string) bool {
-	isHiddify := strings.Contains(strings.ToLower(userAgent), "hiddify")
+func (a *SUBController) hasShadowTLSSubscription(subID string) bool {
 	inbounds, err := a.subService.getInboundsBySubId(subID)
 	if err != nil {
 		return false
 	}
 	for _, inbound := range inbounds {
-		if inbound.Protocol == "shadowtls" && (isHiddify || a.subService.linkSettings(inbound)["shareLinkFormat"] == "hiddify") {
+		if inbound.Protocol == "shadowtls" {
 			return true
 		}
 	}
@@ -872,8 +871,7 @@ func (a *SUBController) serveJsonBody(c *gin.Context, alwaysReturnArray bool, co
 	var jsonSub, header string
 	var err error
 	if forceSingBox || strings.EqualFold(c.Query("format"), "sing-box") {
-		if strings.Contains(strings.ToLower(c.Request.UserAgent()), "hiddify") ||
-			(forceSingBox && a.hiddifyShadowTLSSubscription(subId, c.Request.UserAgent())) {
+		if strings.Contains(strings.ToLower(c.Request.UserAgent()), "hiddify") {
 			jsonSub, header, err = a.subJsonService.GetHiddifySingBoxJson(subId, host)
 		} else {
 			jsonSub, header, err = a.subJsonService.GetSingBoxJson(subId, host, alwaysReturnArray)
