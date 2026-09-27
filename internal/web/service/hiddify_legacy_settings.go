@@ -231,7 +231,8 @@ func (s *SettingService) RepairHiddifySubscriptionURL() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if strings.Trim(parsed.Path, "/") != strings.Trim(subPath, "/") {
+	path := strings.Trim(parsed.Path, "/")
+	if path != strings.Trim(subPath, "/") && path != "subs" {
 		return "", nil
 	}
 	// The old URL often points HTTPS at the separate HTTP listener. The

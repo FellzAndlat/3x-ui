@@ -91,7 +91,8 @@ func TestRepairHiddifySubscriptionURLFromOldSubPath(t *testing.T) {
 	if err := s.AddHiddifyLegacySubscriptionAlias(HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.setString("subPath", "/subs/"); err != nil {
+	// The old saved /subs/ address can differ from the current listener path.
+	if err := s.setString("subPath", "/sub/"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.setString("subPort", "2096"); err != nil {
