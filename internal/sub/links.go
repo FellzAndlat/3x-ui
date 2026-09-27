@@ -63,16 +63,44 @@ func (p *LinkProvider) LinksForInbounds(host string, inbounds []*model.Inbound) 
 	return out
 }
 
+// splitLinkLines normalizes one generated multi-link entry into the lines that
+// can be placed in a generic multi-protocol subscription.
+//
+// Mieru is a special case. The generator keeps both the native full-profile
+// mieru:// form and the interoperable simple-sharing mierus:// form internally.
+// They describe the same endpoint. Generic subscription parsers such as
+// Hiddify/ray2sing treat both schemes as simple URLs, so feeding the native
+// protobuf mieru:// value produces a second, invalid Mieru node. Prefer the
+// simple-sharing form whenever the pair is present; a lone native link is kept
+// so callers that explicitly provide only that form do not lose it.
 func splitLinkLines(raw string) []string {
 	if raw == "" {
 		return nil
 	}
 	parts := strings.Split(raw, "\n")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
+	hasSimpleMieru := false
+	for _, part := range parts {
+		if strings.HasPrefix(strings.TrimSpace(part), "mierus://") {
+			hasSimpleMieru = true
+			break
 		}
+	}
+
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if hasSimpleMieru && strings.HasPrefix(p, "mieru://") {
+			continue
+		}
+		if _, duplicate := seen[p]; duplicate {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
 	}
 	return out
 }
