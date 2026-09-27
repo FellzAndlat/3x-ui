@@ -360,15 +360,14 @@ func (s *Server) subscriptionDomainValidator(primary string) gin.HandlerFunc {
 			return
 		}
 
+		// Legacy Hiddify URLs are intentionally host-independent after migration.
+		// The secret path and the user's UUID remain mandatory, so this bypass does
+		// not open regular 3x-ui subscription routes on arbitrary Host headers.
 		aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
 		if err == nil {
-			for _, alias := range aliases {
-				for _, domain := range alias.Domains {
-					if host == normalizeRequestHost(domain) {
-						c.Next()
-						return
-					}
-				}
+			if _, ok := legacyHiddifySubID(c.Request.URL.Path, aliases); ok {
+				c.Next()
+				return
 			}
 		}
 

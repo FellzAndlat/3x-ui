@@ -25,9 +25,9 @@ type hiddifyConfig struct {
 	Value any    `json:"value"`
 }
 
-// HiddifyBackup is the legacy JSON export produced by Hiddify Panel. The
-// proxy list describes templates, not independent listeners: several entries
-// share the same public port through Hiddify's external routing layer.
+// HiddifyBackup is the legacy JSON export produced by Hiddify Panel. Only the
+// users section is required for migration. Other sections are optional because
+// Hiddify backups/restores may contain selected groups only.
 type HiddifyBackup struct {
 	Users []struct {
 		UUID           string  `json:"uuid"`
@@ -67,8 +67,8 @@ func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error
 	if err := dec.Decode(&b); err != nil {
 		return nil, preview, fmt.Errorf("invalid Hiddify JSON: %w", err)
 	}
-	if len(b.Users) == 0 || len(b.Proxies) == 0 || len(b.Domains) == 0 || len(b.HConfigs) == 0 {
-		return nil, preview, fmt.Errorf("the file is not a complete Hiddify Panel backup")
+	if len(b.Users) == 0 {
+		return nil, preview, fmt.Errorf("the Hiddify backup does not contain users")
 	}
 	seen := make(map[string]bool, len(b.Users))
 	for _, user := range b.Users {
@@ -94,19 +94,20 @@ func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error
 	}
 	if legacyAlias.Path != "" {
 		preview.Warnings = append([]string{
-			fmt.Sprintf("Старые URL Hiddify с путём /%s/<UUID>/ будут сохранены как совместимые ссылки.", legacyAlias.Path),
+			fmt.Sprintf("Старые URL Hiddify с путём /%s/<UUID>/ будут сохранены и будут работать на любом домене, ведущем на сервер подписок.", legacyAlias.Path),
 		}, preview.Warnings...)
 	} else {
 		preview.Warnings = append([]string{
-			"В резервной копии не найден proxy_path_client, поэтому старые URL Hiddify автоматически сохранить нельзя.",
+			"В резервной копии не найден proxy_path_client: пользователи и их UUID будут восстановлены, но исходный путь старой ссылки Hiddify из этого файла определить нельзя.",
 		}, preview.Warnings...)
 	}
 
 	return &b, preview, nil
 }
 
-// HiddifyLegacySubscriptionAlias returns the public path and host names used by
-// Hiddify for links like https://domain/<proxy_path_client>/<UUID>/.
+// HiddifyLegacySubscriptionAlias returns the public path used by Hiddify for
+// links like https://domain/<proxy_path_client>/<UUID>/. Domains are retained
+// only as migration metadata; authorization of a legacy URL is path/UUID based.
 func (b *HiddifyBackup) HiddifyLegacySubscriptionAlias() (HiddifyLegacySubscriptionAlias, error) {
 	var alias HiddifyLegacySubscriptionAlias
 	for _, config := range b.HConfigs {
