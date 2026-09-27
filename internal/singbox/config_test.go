@@ -680,6 +680,9 @@ func TestTranslateXrayShadowTLSInbound(t *testing.T) {
 			},
 			"strictMode":  true,
 			"wildcardSni": "authed",
+			"handshakeForServerName": map[string]any{
+				"alt.example.com": map[string]any{"server": "alt.example.com", "serverPort": 8443},
+			},
 			"clients": []any{
 				map[string]any{
 					"email":    "alice",
@@ -698,6 +701,10 @@ func TestTranslateXrayShadowTLSInbound(t *testing.T) {
 	handshake, ok := got["handshake"].(map[string]any)
 	if !ok || handshake["server"] != "cloudflare.com" || handshake["server_port"] != 443 {
 		t.Fatalf("unexpected ShadowTLS handshake: %#v", got["handshake"])
+	}
+	named, ok := got["handshake_for_server_name"].(map[string]any)
+	if !ok || named["alt.example.com"].(map[string]any)["server_port"] != 8443 {
+		t.Fatalf("unexpected named ShadowTLS handshake: %#v", got["handshake_for_server_name"])
 	}
 	if got["strict_mode"] != true || got["wildcard_sni"] != "authed" {
 		t.Fatalf("unexpected ShadowTLS options: %#v", got)

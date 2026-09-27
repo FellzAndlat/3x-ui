@@ -1518,16 +1518,27 @@ func (s *SubJsonService) genNativeTLSLikeEndpoint(subReq *SubService, inbound *m
 		handshakeServer, _ = handshake["address"].(string)
 		handshakeServer = strings.TrimSpace(handshakeServer)
 	}
-	if handshakeServer == "" && settings["wildcardSni"] != "all" {
+	if handshakeServer == "" {
+		// With wildcard_sni=all the server may omit its fallback handshake
+		// target, but the client still needs a concrete SNI for the TLS hello.
 		handshakeServer = "cloudflare.com"
 	}
 	if endpoint.ep != nil {
 		if sni, ok := externalProxySNI(endpoint.ep); ok {
-			handshakeServer = sni
+			sni = strings.TrimSpace(sni)
+			wildcard, _ := settings["wildcardSni"].(string)
+			named, _ := settings["handshakeForServerName"].(map[string]any)
+			namedSNI := false
+			for name := range named {
+				if strings.EqualFold(strings.TrimSpace(name), sni) {
+					namedSNI = true
+					break
+				}
+			}
+			if sni != "" && (wildcard == "all" || wildcard == "authed" || net.ParseIP(handshakeServer) != nil || namedSNI) {
+				handshakeServer = sni
+			}
 		}
-	}
-	if handshakeServer == "" {
-		return nil
 	}
 	tls := map[string]any{"enabled": true, "server_name": handshakeServer}
 	applyNativeTLSHostOptions(tls, endpoint.ep)

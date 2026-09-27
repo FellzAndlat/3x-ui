@@ -271,11 +271,27 @@ func TestGenNativeShadowTLSExternalEndpoint(t *testing.T) {
 		t.Fatalf("unexpected ShadowTLS endpoint: %#v", got)
 	}
 	tls := transport["tls"].(map[string]any)
-	if tls["server_name"] != "front.example.com" {
+	if tls["server_name"] != "cloudflare.com" {
 		t.Fatalf("ShadowTLS endpoint SNI = %#v", tls)
 	}
 	if tls["insecure"] != true || !reflect.DeepEqual(tls["alpn"], []any{"h2"}) {
 		t.Fatalf("ShadowTLS endpoint TLS options = %#v", tls)
+	}
+}
+
+func TestGenNativeShadowTLSWildcardSNIUsesHostOverride(t *testing.T) {
+	svc := &SubJsonService{}
+	inbound := &model.Inbound{Protocol: model.ShadowTLS, Listen: "origin.example.com", Port: 443,
+		Settings: `{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","wildcardSni":"all","handshake":{}}`}
+	endpoint := ShareEndpoint{Address: "edge.example.com", Port: 8443, ep: map[string]any{"sni": "front.example.com"}}
+	got := svc.genNativeTLSLikeEndpoint(&SubService{}, inbound, model.Client{Email: "user", Password: "secret"}, endpoint)
+	if got == nil {
+		t.Fatal("wildcard ShadowTLS outbound is missing")
+	}
+	transport := got["_panel_shadowtls_transport"].(map[string]any)
+	tls := transport["tls"].(map[string]any)
+	if tls["server_name"] != "front.example.com" {
+		t.Fatalf("wildcard SNI override = %#v", tls)
 	}
 }
 

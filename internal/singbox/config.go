@@ -636,6 +636,29 @@ func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 			handshakeOut["domain_resolver"] = "local"
 		}
 		out["handshake"] = handshakeOut
+		if named, ok := settings["handshakeForServerName"].(map[string]any); ok && len(named) > 0 {
+			mapped := make(map[string]any, len(named))
+			for rawName, entry := range named {
+				name := strings.ToLower(strings.TrimSpace(rawName))
+				config, ok := entry.(map[string]any)
+				if !ok || name == "" || strings.TrimSpace(rawString(config, "server")) == "" {
+					return nil, fmt.Errorf("inbound %q has invalid ShadowTLS handshake for SNI %q", rawString(raw, "tag"), rawName)
+				}
+				port := rawInt(config, "serverPort")
+				if port == 0 {
+					port = rawInt(config, "server_port")
+				}
+				if port == 0 {
+					port = 443
+				}
+				if port < 1 || port > 65535 {
+					return nil, fmt.Errorf("inbound %q has invalid ShadowTLS handshake port for SNI %q", rawString(raw, "tag"), rawName)
+				}
+				target := strings.TrimSpace(rawString(config, "server"))
+				mapped[name] = map[string]any{"server": target, "server_port": port, "domain_resolver": "local"}
+			}
+			out["handshake_for_server_name"] = mapped
+		}
 		out["strict_mode"] = rawBool(settings, "strictMode")
 		if wildcard != "" {
 			out["wildcard_sni"] = wildcard

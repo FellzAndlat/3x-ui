@@ -25,9 +25,12 @@ export const ShadowTlsInboundSettingsSchema = z.object({
     server: z
       .string()
       .default('cloudflare.com')
-      .transform((value) => value.trim() || 'cloudflare.com'),
+      .transform((value) => value.trim()),
     serverPort: z.number().int().min(1).max(65535).default(443),
   }),
+  handshakeForServerName: z
+    .record(z.string(), z.object({ server: z.string().min(1), serverPort: z.number().int().min(1).max(65535).default(443) }))
+    .optional(),
   strictMode: z.boolean().default(false),
   wildcardSni: z.enum(['off', 'authed', 'all']).default('off'),
   clients: z.array(ShadowTlsClientSchema).default([]),
