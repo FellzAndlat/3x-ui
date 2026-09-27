@@ -785,6 +785,8 @@
         "shadowTlsWildcardSniAll": "Все",
         "shadowTlsHint": "ShadowTLS требует ядро sing-box и внутренний TCP-протокол. Обычно сервер рукопожатия — cloudflare.com:443. Клиентам нужна подписка JSON для sing-box/Hiddify.",
         "shadowTlsPassword": "Пароль внешнего слоя ShadowTLS",
+        "shadowTlsAdvanced": "Дополнительные настройки ShadowTLS",
+        "shadowTlsProtocol": "ShadowTLS поверх {{protocol}} по TCP",
         "pingtunnelHint": "ICMP-служба. Панель создаёт ключ и, если включено шифрование, секрет. На сервере может работать только один Pingtunnel; отдельные учётные записи и порт не используются. Для передачи UDP через вышестоящий прокси нужен SOCKS5.",
         "pingtunnelKey": "Ключ Pingtunnel (0 — создать)",
         "pingtunnelSecret": "Секрет шифрования (пусто — создать)",

@@ -900,7 +900,7 @@ export default function InboundFormModal({
         <Alert
           type="info"
           showIcon
-          message="Shadowsocks 2022 (AES-128-GCM)"
+          message={t('pages.inbounds.form.shadowTlsProtocol', { protocol })}
           description={t('pages.inbounds.form.shadowTlsHint')}
         />
       )}
@@ -948,6 +948,7 @@ export default function InboundFormModal({
           vlessAuthKind={vlessAuthKind}
           network={network}
           security={security}
+          shadowTlsEnabled={shadowTlsEnabled}
           getNewVlessEnc={getNewVlessEnc}
           clearVlessEnc={clearVlessEnc}
         />
@@ -989,6 +990,11 @@ export default function InboundFormModal({
       if (protocol === Protocols.SHADOWSOCKS) {
         setV('settings.method', '2022-blake3-aes-128-gcm');
         setV('settings.network', 'tcp');
+      }
+      if (protocol === Protocols.VLESS) {
+        // sing-box's VLESS inbound cannot use Xray's custom encryption here.
+        setV('settings.encryption', 'none');
+        setV('settings.decryption', 'none');
       }
       if (protocol === Protocols.MIXED) setV('settings.udp', false);
       setV('streamSettings', { network: 'tcp', security: 'none', tcpSettings: {} });

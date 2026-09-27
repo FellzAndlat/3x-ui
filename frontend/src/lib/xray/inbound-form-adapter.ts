@@ -172,10 +172,11 @@ export function rawInboundToFormValues(row: RawInboundRow): InboundFormValues {
   const protocol = (
     isShadowTls ? 'shadowsocks' : row.protocol || 'vless'
   ) as InboundSettings['protocol'];
-  const rawSettings =
+  const rawSettings = coerceJsonObject(
     row.protocol === 'sudoku'
       ? migrateSudokuSettings(coerceJsonObject(row.settings))
-      : coerceJsonObject(row.settings);
+      : row.settings,
+  );
   const settings = (
     isShadowTls
       ? {

@@ -12,6 +12,7 @@ interface VlessFieldsProps {
   vlessAuthKind: VlessAuthKind | null;
   network: string;
   security: string;
+  shadowTlsEnabled?: boolean;
   getNewVlessEnc: (kind: VlessAuthKind) => void;
   clearVlessEnc: () => void;
 }
@@ -22,6 +23,7 @@ export default function VlessFields({
   vlessAuthKind,
   network,
   security,
+  shadowTlsEnabled = false,
   getNewVlessEnc,
   clearVlessEnc,
 }: VlessFieldsProps) {
@@ -41,31 +43,37 @@ export default function VlessFields({
 
   return (
     <>
-      <FormField name={['settings', 'decryption']} label={t('pages.inbounds.decryption')}>
-        <Input />
-      </FormField>
-      <FormField name={['settings', 'encryption']} label={t('pages.inbounds.encryption')}>
-        <Input />
-      </FormField>
-      <Form.Item label={t('pages.inbounds.vlessAuthGenerate')}>
-        <Space size={8} wrap>
-          <Select
-            value={authKind}
-            onChange={(v) => setAuthKind(v)}
-            options={authOptions}
-            style={{ width: 240 }}
-          />
-          <Button type="primary" loading={saving} onClick={() => getNewVlessEnc(authKind)}>
-            {t('pages.inbounds.vlessAuthGenerateButton')}
-          </Button>
-          <Button danger onClick={clearVlessEnc}>
-            {t('clear')}
-          </Button>
-        </Space>
-        <Typography.Text type="secondary" className="vless-auth-state">
-          {t('pages.inbounds.vlessAuthSelected', { auth: selectedVlessAuth })}
-        </Typography.Text>
-      </Form.Item>
+      {!shadowTlsEnabled && (
+        <>
+          <FormField name={['settings', 'decryption']} label={t('pages.inbounds.decryption')}>
+            <Input />
+          </FormField>
+          <FormField name={['settings', 'encryption']} label={t('pages.inbounds.encryption')}>
+            <Input />
+          </FormField>
+        </>
+      )}
+      {!shadowTlsEnabled && (
+        <Form.Item label={t('pages.inbounds.vlessAuthGenerate')}>
+          <Space size={8} wrap>
+            <Select
+              value={authKind}
+              onChange={(v) => setAuthKind(v)}
+              options={authOptions}
+              style={{ width: 240 }}
+            />
+            <Button type="primary" loading={saving} onClick={() => getNewVlessEnc(authKind)}>
+              {t('pages.inbounds.vlessAuthGenerateButton')}
+            </Button>
+            <Button danger onClick={clearVlessEnc}>
+              {t('clear')}
+            </Button>
+          </Space>
+          <Typography.Text type="secondary" className="vless-auth-state">
+            {t('pages.inbounds.vlessAuthSelected', { auth: selectedVlessAuth })}
+          </Typography.Text>
+        </Form.Item>
+      )}
       {network === 'tcp' && (security === 'tls' || security === 'reality') && (
         <Form.Item
           label={t('pages.inbounds.form.visionTestseed')}

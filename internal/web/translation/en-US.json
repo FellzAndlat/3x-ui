@@ -785,6 +785,8 @@
         "shadowTlsWildcardSniAll": "All",
         "shadowTlsHint": "ShadowTLS requires the sing-box core and a TCP inner protocol. Keep cloudflare.com:443 as the handshake target for a typical configuration. Use the sing-box/Hiddify JSON subscription for clients.",
         "shadowTlsPassword": "ShadowTLS outer password",
+        "shadowTlsAdvanced": "Advanced ShadowTLS settings",
+        "shadowTlsProtocol": "ShadowTLS wrapping {{protocol}} over TCP",
         "pingtunnelHint": "ICMP listener. The panel generates a key and, when encryption is enabled, a secret. Only one Pingtunnel inbound can run on this server; it has no per-client accounts or port. UDP forwarding through an upstream proxy requires SOCKS5.",
         "pingtunnelKey": "Pingtunnel key (0 = generate)",
         "pingtunnelSecret": "Encryption secret (blank = generate)",
