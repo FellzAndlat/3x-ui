@@ -188,7 +188,82 @@ func (s *SettingService) HiddifySubscriptionURI(alias HiddifyLegacySubscriptionA
 			return "", fmt.Errorf("invalid subscription port")
 		}
 	}
+	// A public HTTPS URL cannot use the panel's plain HTTP subscription
+	// listener. This commonly happens when the old /subs/ URL is copied as
+	// the migration origin instead of the panel's HTTPS origin.
+	if parsed.Scheme == "https" && parsed.Port() != "" {
+		subPort, err := s.GetSubPort()
+		if err != nil {
+			return "", err
+		}
+		cert, err := s.GetSubCertFile()
+		if err != nil {
+			return "", err
+		}
+		key, err := s.GetSubKeyFile()
+		if err != nil {
+			return "", err
+		}
+		if parsed.Port() == strconv.Itoa(subPort) && (cert == "" || key == "") {
+			return "", fmt.Errorf("HTTPS on subscription port %d requires a subscription TLS certificate; use the public panel HTTPS domain without this port", subPort)
+		}
+	}
 	return parsed.Scheme + "://" + parsed.Host + "/" + alias.Path + "/", nil
+}
+
+// RepairHiddifySubscriptionURL updates addresses saved before the backup path
+// was used for displayed subscription URLs. An explicit custom path and a
+// multi-backup installation are left alone because their intent is ambiguous.
+func (s *SettingService) RepairHiddifySubscriptionURL() (string, error) {
+	aliases, err := s.GetHiddifyLegacySubscriptionAliases()
+	if err != nil || len(aliases) != 1 {
+		return "", err
+	}
+	current, err := s.GetSubURI()
+	if err != nil || current == "" {
+		return "", err
+	}
+	parsed, err := url.Parse(current)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", nil
+	}
+	subPath, err := s.GetSubPath()
+	if err != nil {
+		return "", err
+	}
+	if strings.Trim(parsed.Path, "/") != strings.Trim(subPath, "/") {
+		return "", nil
+	}
+	// The old URL often points HTTPS at the separate HTTP listener. The
+	// migrated path is also served by the panel on its public HTTPS origin.
+	if parsed.Scheme == "https" && parsed.Port() != "" {
+		subPort, err := s.GetSubPort()
+		if err != nil {
+			return "", err
+		}
+		cert, err := s.GetSubCertFile()
+		if err != nil {
+			return "", err
+		}
+		key, err := s.GetSubKeyFile()
+		if err != nil {
+			return "", err
+		}
+		if parsed.Port() == strconv.Itoa(subPort) && (cert == "" || key == "") {
+			parsed.Host = parsed.Hostname()
+			if strings.Contains(parsed.Host, ":") {
+				parsed.Host = "[" + parsed.Host + "]"
+			}
+		}
+	}
+	updated := parsed.Scheme + "://" + parsed.Host + "/" + aliases[0].Path + "/"
+	if updated == current {
+		return "", nil
+	}
+	if err := s.setString("subURI", updated); err != nil {
+		return "", err
+	}
+	return updated, nil
 }
 
 func (s *SettingService) SaveHiddifySubscriptionURL(alias HiddifyLegacySubscriptionAlias, uri string) error {

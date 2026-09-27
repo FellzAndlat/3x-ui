@@ -85,6 +85,49 @@ func TestSaveHiddifySubscriptionURLPersistsAliasAndDisplayedURL(t *testing.T) {
 	}
 }
 
+func TestRepairHiddifySubscriptionURLFromOldSubPath(t *testing.T) {
+	setupConflictDB(t)
+	s := &SettingService{}
+	if err := s.AddHiddifyLegacySubscriptionAlias(HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.setString("subPath", "/subs/"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.setString("subPort", "2096"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.setString("subURI", "https://cdn.example.com:2096/subs/"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.RepairHiddifySubscriptionURL()
+	if err != nil || updated != "https://cdn.example.com/BackupPath123/" {
+		t.Fatalf("repaired URL = %q, %v", updated, err)
+	}
+	stored, err := s.GetSubURI()
+	if err != nil || stored != updated {
+		t.Fatalf("stored URL = %q, %v", stored, err)
+	}
+	if updated, err := s.RepairHiddifySubscriptionURL(); err != nil || updated != "" {
+		t.Fatalf("second repair = %q, %v", updated, err)
+	}
+}
+
+func TestRepairHiddifySubscriptionURLPreservesCustomPath(t *testing.T) {
+	setupConflictDB(t)
+	s := &SettingService{}
+	if err := s.AddHiddifyLegacySubscriptionAlias(HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.setString("subURI", "https://cdn.example.com/custom/"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := s.RepairHiddifySubscriptionURL()
+	if err != nil || updated != "" {
+		t.Fatalf("custom URL changed: %q, %v", updated, err)
+	}
+}
+
 func TestParseHiddifyBackupReadsLegacySubscriptionPathFromBackup(t *testing.T) {
 	const backupTemplate = `{
 		"users":[{"uuid":"768e8bdd-bee3-4442-9006-b26464148aaa","name":"Vadlo","enable":true,"is_active":true,"usage_limit_GB":100,"current_usage_GB":10,"package_days":30}],
