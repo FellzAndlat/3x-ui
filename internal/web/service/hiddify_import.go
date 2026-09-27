@@ -60,6 +60,23 @@ type HiddifyPreview struct {
 	Warnings []string `json:"warnings"`
 }
 
+// hiddifyConfigString reads a value from this backup's hconfigs section.
+// There is deliberately no default value: migration-specific values such as
+// proxy_path_client must always come from the imported Hiddify backup itself.
+func (b *HiddifyBackup) hiddifyConfigString(key string) (string, bool, error) {
+	for _, config := range b.HConfigs {
+		if strings.TrimSpace(config.Key) != key {
+			continue
+		}
+		value, ok := config.Value.(string)
+		if !ok {
+			return "", true, fmt.Errorf("Hiddify %s must be a string", key)
+		}
+		return value, true, nil
+	}
+	return "", false, nil
+}
+
 func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error) {
 	var b HiddifyBackup
 	var preview HiddifyPreview
@@ -110,21 +127,18 @@ func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error
 // only as migration metadata; authorization of a legacy URL is path/UUID based.
 func (b *HiddifyBackup) HiddifyLegacySubscriptionAlias() (HiddifyLegacySubscriptionAlias, error) {
 	var alias HiddifyLegacySubscriptionAlias
-	for _, config := range b.HConfigs {
-		if config.Key != "proxy_path_client" {
-			continue
-		}
-		value, ok := config.Value.(string)
-		if !ok {
-			return alias, fmt.Errorf("Hiddify proxy_path_client must be a string")
-		}
-		path, err := normalizeHiddifyLegacySubPath(value)
-		if err != nil {
-			return alias, err
-		}
-		alias.Path = path
-		break
+	value, found, err := b.hiddifyConfigString("proxy_path_client")
+	if err != nil {
+		return alias, err
 	}
+	if !found {
+		return alias, nil
+	}
+	path, err := normalizeHiddifyLegacySubPath(value)
+	if err != nil {
+		return alias, err
+	}
+	alias.Path = path
 	if alias.Path == "" {
 		return alias, nil
 	}

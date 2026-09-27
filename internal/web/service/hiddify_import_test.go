@@ -5,30 +5,35 @@ import (
 	"testing"
 )
 
-func TestParseHiddifyBackupPreservesLegacySubscriptionAlias(t *testing.T) {
-	const backup = `{
+func TestParseHiddifyBackupReadsLegacySubscriptionPathFromBackup(t *testing.T) {
+	const backupTemplate = `{
 		"users":[{"uuid":"768e8bdd-bee3-4442-9006-b26464148aaa","name":"Vadlo","enable":true,"is_active":true,"usage_limit_GB":100,"current_usage_GB":10,"package_days":30}],
 		"proxies":[{"enable":true,"proto":"vless","transport":"tcp","l3":"reality","cdn":"direct"}],
 		"domains":[{"domain":"vetroff.fun","download_domain":"","show_domains":["vetroff.fun","sub.vetroff.fun"]}],
-		"hconfigs":[{"key":"proxy_path_client","value":"NvReJ7i2bXWM8kPqdZwz"}]
+		"hconfigs":[{"key":"proxy_path_client","value":"__PROXY_PATH_CLIENT__"}]
 	}`
 
-	parsed, preview, err := ParseHiddifyBackup(strings.NewReader(backup))
-	if err != nil {
-		t.Fatalf("ParseHiddifyBackup: %v", err)
-	}
-	alias, err := parsed.HiddifyLegacySubscriptionAlias()
-	if err != nil {
-		t.Fatalf("HiddifyLegacySubscriptionAlias: %v", err)
-	}
-	if alias.Path != "NvReJ7i2bXWM8kPqdZwz" {
-		t.Fatalf("legacy path = %q", alias.Path)
-	}
-	if len(alias.Domains) != 2 || alias.Domains[0] != "vetroff.fun" || alias.Domains[1] != "sub.vetroff.fun" {
-		t.Fatalf("legacy domains = %#v", alias.Domains)
-	}
-	if len(preview.Warnings) == 0 || !strings.Contains(preview.Warnings[0], "NvReJ7i2bXWM8kPqdZwz") || !strings.Contains(preview.Warnings[0], "любом домене") {
-		t.Fatalf("preview warnings = %#v", preview.Warnings)
+	for _, proxyPath := range []string{"BackupPathAlpha123", "Another_Backup-Path456"} {
+		t.Run(proxyPath, func(t *testing.T) {
+			backup := strings.Replace(backupTemplate, "__PROXY_PATH_CLIENT__", proxyPath, 1)
+			parsed, preview, err := ParseHiddifyBackup(strings.NewReader(backup))
+			if err != nil {
+				t.Fatalf("ParseHiddifyBackup: %v", err)
+			}
+			alias, err := parsed.HiddifyLegacySubscriptionAlias()
+			if err != nil {
+				t.Fatalf("HiddifyLegacySubscriptionAlias: %v", err)
+			}
+			if alias.Path != proxyPath {
+				t.Fatalf("legacy path = %q, want value from backup %q", alias.Path, proxyPath)
+			}
+			if len(alias.Domains) != 2 || alias.Domains[0] != "vetroff.fun" || alias.Domains[1] != "sub.vetroff.fun" {
+				t.Fatalf("legacy domains = %#v", alias.Domains)
+			}
+			if len(preview.Warnings) == 0 || !strings.Contains(preview.Warnings[0], proxyPath) || !strings.Contains(preview.Warnings[0], "любом домене") {
+				t.Fatalf("preview warnings = %#v", preview.Warnings)
+			}
+		})
 	}
 }
 
