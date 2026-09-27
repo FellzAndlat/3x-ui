@@ -19,7 +19,9 @@ export async function loadClientLinks(email: string, subId?: string): Promise<st
     if (!data?.success || !Array.isArray(data.obj)) return [];
     // A subscription ID can be shared by several clients. Sudoku keys belong
     // to one client, so only take those links from the email-scoped endpoint.
-    const validLinks = data.obj.filter((link): link is string => typeof link === 'string' && !!link);
+    const validLinks = data.obj.filter(
+      (link): link is string => typeof link === 'string' && !!link,
+    );
     return subId && index === 0 ? validLinks.filter((link) => !isSudokuLink(link)) : validLinks;
   });
   return [...new Set(links)];

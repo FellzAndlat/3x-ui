@@ -442,29 +442,31 @@ function ClientQrModalContent({
         children: <QrPanel value={subJsonLink} remark={`${client?.email || ''} — JSON`} />,
       });
     }
-    links.filter((link) => !isSudokuLink(link)).forEach((link, idx) => {
-      const parts = parseLinkParts(link);
-      const meta = parts ? linkMetaText(parts) : '';
-      const label: React.ReactNode = parts ? (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <LinkTags parts={parts} />
-          {meta && <span style={{ opacity: 0.6, fontSize: 12 }}>({meta})</span>}
-        </span>
-      ) : (
-        `${t('pages.clients.link')} ${idx + 1}`
-      );
-      out.push({
-        key: `l${idx}`,
-        label,
-        children: (
-          <QrPanel
-            value={link}
-            remark={parts?.remark || `${client?.email || ''} #${idx + 1}`}
-            showQr={!isPostQuantumLink(link)}
-          />
-        ),
+    links
+      .filter((link) => !isSudokuLink(link))
+      .forEach((link, idx) => {
+        const parts = parseLinkParts(link);
+        const meta = parts ? linkMetaText(parts) : '';
+        const label: React.ReactNode = parts ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <LinkTags parts={parts} />
+            {meta && <span style={{ opacity: 0.6, fontSize: 12 }}>({meta})</span>}
+          </span>
+        ) : (
+          `${t('pages.clients.link')} ${idx + 1}`
+        );
+        out.push({
+          key: `l${idx}`,
+          label,
+          children: (
+            <QrPanel
+              value={link}
+              remark={parts?.remark || `${client?.email || ''} #${idx + 1}`}
+              showQr={!isPostQuantumLink(link)}
+            />
+          ),
+        });
       });
-    });
     links.filter(isSudokuLink).forEach((link, idx) => {
       out.push({
         key: `sudoku-${idx}`,
