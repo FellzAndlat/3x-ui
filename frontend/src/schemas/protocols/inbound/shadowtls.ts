@@ -29,7 +29,13 @@ export const ShadowTlsInboundSettingsSchema = z.object({
     serverPort: z.number().int().min(1).max(65535).default(443),
   }),
   handshakeForServerName: z
-    .record(z.string(), z.object({ server: z.string().min(1), serverPort: z.number().int().min(1).max(65535).default(443) }))
+    .record(
+      z.string(),
+      z.object({
+        server: z.string().min(1),
+        serverPort: z.number().int().min(1).max(65535).default(443),
+      }),
+    )
     .optional(),
   strictMode: z.boolean().default(false),
   wildcardSni: z.enum(['off', 'authed', 'all']).default('off'),
