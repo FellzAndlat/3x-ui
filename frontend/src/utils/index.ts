@@ -2,6 +2,7 @@ import i18next from 'i18next';
 import { httpRequest } from '@/api/http-init';
 import type { HttpResponse } from '@/api/http-init';
 import { getMessage } from './messageBus';
+import { corePortBindError } from '@/lib/core-port-error';
 
 type RespEnvelope = { success?: unknown; msg?: unknown; obj?: unknown };
 
@@ -49,7 +50,7 @@ export class HttpUtil {
       }
       return;
     }
-    getMessage().error(msg.msg);
+    getMessage().error(corePortBindError(msg.msg) ?? msg.msg);
   }
 
   static _respToMsg(resp: HttpResponse | undefined): Msg {

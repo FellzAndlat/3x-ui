@@ -1,6 +1,6 @@
 import { lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, ConfigProvider, Layout, Modal, Result, Spin, message } from 'antd';
+import { Alert, Button, ConfigProvider, Layout, Modal, Result, Spin, message } from 'antd';
 import {
   CopyOutlined,
   CloudDownloadOutlined,
@@ -29,6 +29,7 @@ import { useMediaQuery } from '@/hooks/useMediaQuery';
 import AppSidebar from '@/layouts/AppSidebar';
 import { LazyMount } from '@/components/utility';
 import { setMessageInstance } from '@/utils/messageBus';
+import { corePortBindError } from '@/lib/core-port-error';
 import OverviewActionBar from './OverviewActionBar';
 import VitalTile from './VitalTile';
 import ThroughputCard from './ThroughputCard';
@@ -102,6 +103,7 @@ export default function IndexPage() {
     coreType === 'sing-box' ? coreRunning : status.xray.state === 'running';
   const displayCoreVersion = coreType === 'sing-box' ? coreVersion : status.xray.version;
   const displayCoreError = coreType === 'sing-box' ? coreError : status.xray.errorMsg || '';
+  const portBindError = corePortBindError(displayCoreError);
   const displayCoreColor = coreType === 'sing-box' ? coreColor : status.xray.color;
 
   useEffect(() => {
@@ -247,6 +249,9 @@ export default function IndexPage() {
                 />
               ) : (
                 <div className="ov-page">
+                  {portBindError && (
+                    <Alert type="error" showIcon message={portBindError} style={{ marginBottom: 16 }} />
+                  )}
                   <OverviewActionBar
                     status={status}
                     coreType={coreType}

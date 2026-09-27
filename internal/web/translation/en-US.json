@@ -141,6 +141,7 @@
       }
     },
     "index": {
+      "corePortInUse": "The core could not start: port {{port}} is already in use. Run sudo ss -ltnp '( sport = :{{port}} )' on the server to identify the owner, then free the port or change the inbound port.",
       "cpu": "CPU",
       "swap": "Swap",
       "storage": "Storage",
