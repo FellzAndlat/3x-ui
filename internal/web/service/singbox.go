@@ -53,6 +53,18 @@ func singBoxInboundRequiresUsers(protocol model.Protocol) bool {
 	}
 }
 
+// These listeners run in their own local processes, outside sing-box.
+// Never emit them as sing-box inbounds or reserve sing-box client lookups for them.
+func isLocalSidecarInbound(protocol model.Protocol) bool {
+	switch protocol {
+	case model.MTProto, model.AmneziaWG, model.TUIC, model.Mieru,
+		model.Pingtunnel, model.TrustTunnel, model.Sudoku, model.VKTurnProxy:
+		return true
+	default:
+		return false
+	}
+}
+
 func mustJSON(value map[string]any) []byte {
 	data, _ := json.Marshal(value)
 	return data
@@ -192,11 +204,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 
 	inboundIDs := make([]int, 0, len(inbounds))
 	for _, inbound := range inbounds {
-		if inbound == nil || !inbound.Enable || inbound.NodeID != nil {
-			continue
-		}
-		switch inbound.Protocol {
-		case model.MTProto, model.AmneziaWG, model.TUIC, model.Mieru:
+		if inbound == nil || !inbound.Enable || inbound.NodeID != nil || isLocalSidecarInbound(inbound.Protocol) {
 			continue
 		}
 		inboundIDs = append(inboundIDs, inbound.Id)
@@ -208,13 +216,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 
 	var unsupported []string
 	for _, inbound := range inbounds {
-		if inbound == nil || !inbound.Enable || inbound.NodeID != nil {
-			continue
-		}
-		// MTProto, AmneziaWG and TUIC are managed by their dedicated local
-		// sidecars. Emitting them into sing-box as well would either use an
-		// unsupported protocol or create a port conflict with the sidecar.
-		if inbound.Protocol == model.MTProto || inbound.Protocol == model.AmneziaWG || inbound.Protocol == model.TUIC || inbound.Protocol == model.Mieru || inbound.Protocol == model.Pingtunnel || inbound.Protocol == model.TrustTunnel {
+		if inbound == nil || !inbound.Enable || inbound.NodeID != nil || isLocalSidecarInbound(inbound.Protocol) {
 			continue
 		}
 		rawBytes, err := json.Marshal(inbound)

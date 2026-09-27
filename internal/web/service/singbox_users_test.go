@@ -30,3 +30,22 @@ func TestSingBoxInboundRequiresUsers(t *testing.T) {
 		})
 	}
 }
+
+func TestSingBoxExcludesLocalSidecarInbounds(t *testing.T) {
+	for _, protocol := range []model.Protocol{
+		model.MTProto, model.AmneziaWG, model.TUIC, model.Mieru,
+		model.Pingtunnel, model.TrustTunnel, model.Sudoku, model.VKTurnProxy,
+	} {
+		if !isLocalSidecarInbound(protocol) {
+			t.Errorf("%s must be handled by its local sidecar", protocol)
+		}
+	}
+	for _, protocol := range []model.Protocol{
+		model.VLESS, model.VMESS, model.Trojan, model.Shadowsocks,
+		model.AnyTLS, model.ShadowTLS, model.HTTP, model.Mixed,
+	} {
+		if isLocalSidecarInbound(protocol) {
+			t.Errorf("%s must remain available to sing-box", protocol)
+		}
+	}
+}
