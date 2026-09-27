@@ -921,7 +921,9 @@ export default function InboundFormModal({
 
       {protocol === Protocols.VK_TURN_PROXY && <VkTurnProxyFields />}
 
-      {protocol === Protocols.SHADOWSOCKS && !shadowTlsEnabled && <ShadowsocksFields isSSWith2022={isSSWith2022} />}
+      {protocol === Protocols.SHADOWSOCKS && !shadowTlsEnabled && (
+        <ShadowsocksFields isSSWith2022={isSSWith2022} />
+      )}
 
       {protocol === Protocols.VLESS && (
         <VlessFields
@@ -1086,7 +1088,8 @@ export default function InboundFormModal({
     </>
   );
 
-  const tlsOk = !shadowTlsEnabled && canEnableTls({ protocol, streamSettings: { network, security } });
+  const tlsOk =
+    !shadowTlsEnabled && canEnableTls({ protocol, streamSettings: { network, security } });
   const realityOk = canEnableReality({ protocol, streamSettings: { network, security } });
   const tlsOnly = protocol === Protocols.HYSTERIA;
 
@@ -1302,7 +1305,9 @@ export default function InboundFormModal({
                         children: streamTab,
                         forceRender: true,
                       },
-                      ...(protocol !== Protocols.WIREGUARD && protocol !== Protocols.TUNNEL && !shadowTlsEnabled
+                      ...(protocol !== Protocols.WIREGUARD &&
+                      protocol !== Protocols.TUNNEL &&
+                      !shadowTlsEnabled
                         ? [
                             {
                               key: 'security',
