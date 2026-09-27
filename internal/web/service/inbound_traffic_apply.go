@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"runtime/debug"
 	"strings"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
@@ -83,50 +84,69 @@ func (s *InboundService) applyTrafficRemotePlans(plans []trafficInboundUpdatePla
 	return needRestart
 }
 
+// applyTrafficLocalPlan isolates best-effort runtime updates from the durable
+// traffic writer. Traffic and lifecycle DB changes are already committed before
+// this runs; a runtime bug must therefore request a restart, not turn a
+// successful accounting write into a "traffic writer panic" response.
+func (s *InboundService) applyTrafficLocalPlan(plan *trafficLocalApplyPlan) (needRestart bool) {
+	if plan == nil {
+		return false
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.Errorf("traffic post-commit runtime apply panic for inbound %d (%s): %v\n%s", plan.inbound.Id, plan.inbound.Tag, recovered, debug.Stack())
+			needRestart = true
+		}
+	}()
+
+	if plan.inbound.Protocol == model.MTProto {
+		s.applyLocalMtproto(plan.inbound.Id)
+		return false
+	}
+	if plan.inbound.Protocol == model.AmneziaWG {
+		s.applyLocalAmneziaWG(plan.inbound.Id)
+		return false
+	}
+	if plan.inbound.Protocol == model.TUIC {
+		s.applyLocalTuic(plan.inbound.Id)
+		return false
+	}
+	if plan.inbound.Protocol == model.Mieru {
+		s.applyLocalMieru(plan.inbound.Id)
+		return false
+	}
+
+	rt, err := s.runtimeFor(&plan.inbound)
+	if err == nil {
+		switch plan.action {
+		case trafficAddUser:
+			err = rt.AddUser(context.Background(), &plan.inbound, plan.client)
+		case trafficRemoveUser:
+			err = rt.RemoveUser(context.Background(), &plan.inbound, plan.email)
+			if err != nil && strings.Contains(err.Error(), "not found") {
+				err = nil
+			}
+		case trafficDisableInbound:
+			err = rt.DelInbound(context.Background(), &plan.inbound)
+			if xray.IsMissingHandlerErr(err) {
+				err = nil
+			}
+		}
+	}
+	if err != nil {
+		logger.Debug("traffic post-commit runtime apply failed:", err)
+		return true
+	}
+	return false
+}
+
 func (s *InboundService) applyTrafficMutationBatch(b *trafficMutationBatch) bool {
 	if b == nil {
 		return false
 	}
 	needRestart := false
 	for i := range b.localPlans {
-		plan := &b.localPlans[i]
-		if plan.inbound.Protocol == model.MTProto {
-			s.applyLocalMtproto(plan.inbound.Id)
-			continue
-		}
-		if plan.inbound.Protocol == model.AmneziaWG {
-			s.applyLocalAmneziaWG(plan.inbound.Id)
-			continue
-		}
-		if plan.inbound.Protocol == model.TUIC {
-			s.applyLocalTuic(plan.inbound.Id)
-			continue
-		}
-		if plan.inbound.Protocol == model.Mieru {
-			s.applyLocalMieru(plan.inbound.Id)
-			continue
-		}
-		rt, err := s.runtimeFor(&plan.inbound)
-		if err == nil {
-			switch plan.action {
-			case trafficAddUser:
-				err = rt.AddUser(context.Background(), &plan.inbound, plan.client)
-			case trafficRemoveUser:
-				err = rt.RemoveUser(context.Background(), &plan.inbound, plan.email)
-				if err != nil && strings.Contains(err.Error(), "not found") {
-					err = nil
-				}
-			case trafficDisableInbound:
-				err = rt.DelInbound(context.Background(), &plan.inbound)
-				if xray.IsMissingHandlerErr(err) {
-					err = nil
-				}
-			}
-		}
-		if err != nil {
-			logger.Debug("traffic post-commit runtime apply failed:", err)
-			needRestart = true
-		}
+		needRestart = s.applyTrafficLocalPlan(&b.localPlans[i]) || needRestart
 	}
 	return needRestart
 }
