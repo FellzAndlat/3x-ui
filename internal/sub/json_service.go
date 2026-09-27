@@ -134,7 +134,7 @@ func (s *SubJsonService) GetJson(subId string, host string, alwaysReturnArray bo
 	// JSON uses Xray's outbound model. Refuse the whole format when any linked
 	// inbound cannot be represented, otherwise auto-detection could silently
 	// drop one connection and still return HTTP 200.
-	if containsUnsupportedJSONProtocol(inbounds) {
+	if containsUnsupportedJSONProtocol(inbounds) || containsShadowTLSTransport(inbounds) {
 		return "", "", errSubscriptionFormatUnsupported
 	}
 
@@ -433,7 +433,7 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 	// WireGuard + proxy subscription cannot be represented by the current
 	// separated-profile builder without routing one profile through another,
 	// so reject it instead of falling back to the deprecated WireGuard outbound.
-	shadowTLSForHiddify := hiddify && containsSubscriptionProtocol(inbounds, model.ShadowTLS)
+	shadowTLSForHiddify := hiddify && (containsSubscriptionProtocol(inbounds, model.ShadowTLS) || containsShadowTLSTransport(inbounds))
 	if !shadowTLSForHiddify && (containsSubscriptionProtocol(inbounds, model.WireGuard) || containsUnsupportedSingBoxProtocol(inbounds)) {
 		return "", "", errSubscriptionFormatUnsupported
 	}
@@ -460,6 +460,53 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 			seenEmails[client.Email] = struct{}{}
 			if client.Enable {
 				hasEnabledClient = true
+			}
+			if model.ShadowTLSTransport(inbound.Settings) != nil {
+				generated := 0
+				if inbound.Protocol == model.AnyTLS {
+					for _, endpoint := range subReq.shareEndpointsForInbound(inbound) {
+						if strings.EqualFold(strings.TrimSpace(endpoint.ForceTls), "none") {
+							continue
+						}
+						native := s.genNativeTLSLikeEndpoint(subReq, inbound, client, endpoint)
+						if s.wrapNativeShadowTLS(inbound, native, endpoint.ep) {
+							generated++
+							native["tag"] = fmt.Sprintf("ShadowTLS · %s-%d", client.Email, len(proxies)+1)
+							proxies = append(proxies, nativeOutbound{out: native})
+						}
+					}
+				} else {
+					for _, raw := range s.getConfig(subReq, inbound, client, host) {
+						var profile map[string]any
+						if json.Unmarshal(raw, &profile) != nil {
+							continue
+						}
+						outs, _ := profile["outbounds"].([]any)
+						if len(outs) == 0 {
+							continue
+						}
+						xray, _ := outs[0].(map[string]any)
+						if xray == nil {
+							continue
+						}
+						// ShadowTLS replaces the outer Xray transport, including any
+						// global FinalMask or TLS defaults in the JSON template.
+						xray["streamSettings"] = map[string]any{"network": "tcp", "security": "none"}
+						native, err := singbox.TranslateXrayOutbound(xray)
+						if err != nil || !s.wrapNativeShadowTLS(inbound, native, nil) {
+							continue
+						}
+						generated++
+						native["tag"] = fmt.Sprintf("ShadowTLS · %s-%d", client.Email, len(proxies)+1)
+						proxies = append(proxies, nativeOutbound{out: native})
+					}
+				}
+				if generated == 0 {
+					formatUnsupported = true
+				} else {
+					shadowTLSGenerated = true
+				}
+				continue
 			}
 			if inbound.Protocol == model.TUIC {
 				stream := unmarshalStreamSettings(inbound.StreamSettings)
@@ -1460,6 +1507,55 @@ func (s *SubJsonService) genServer(subReq *SubService, inbound *model.Inbound, s
 
 func (s *SubJsonService) genNativeTLSLike(subReq *SubService, inbound *model.Inbound, client model.Client) map[string]any {
 	return s.genNativeTLSLikeEndpoint(subReq, inbound, client, subReq.inboundDefaultEndpoint(inbound))
+}
+
+func containsShadowTLSTransport(inbounds []*model.Inbound) bool {
+	for _, inbound := range inbounds {
+		if inbound != nil && model.ShadowTLSTransport(inbound.Settings) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// Attach the native ShadowTLS outbound to an inner TCP proxy. The inner
+// protocol still owns per-client credentials; ShadowTLS owns the public dial.
+func (s *SubJsonService) wrapNativeShadowTLS(inbound *model.Inbound, inner map[string]any, endpoint map[string]any) bool {
+	if inner == nil {
+		return false
+	}
+	transport := model.ShadowTLSTransport(inbound.Settings)
+	password, _ := transport["password"].(string)
+	server, _ := inner["server"].(string)
+	port := inner["server_port"]
+	if server == "" || port == nil || password == "" {
+		return false
+	}
+	handshake, _ := transport["handshake"].(map[string]any)
+	sni, _ := handshake["server"].(string)
+	if strings.TrimSpace(sni) == "" {
+		sni = "cloudflare.com"
+	}
+	if endpoint != nil {
+		if override, ok := externalProxySNI(endpoint); ok && strings.TrimSpace(override) != "" {
+			wildcard, _ := transport["wildcardSni"].(string)
+			named, _ := transport["handshakeForServerName"].(map[string]any)
+			_, hasNamedSNI := named[strings.ToLower(strings.TrimSpace(override))]
+			if wildcard == "all" || wildcard == "authed" || net.ParseIP(sni) != nil || hasNamedSNI {
+				sni = strings.TrimSpace(override)
+			}
+		}
+	}
+	tls := map[string]any{"enabled": true, "server_name": sni}
+	applyNativeTLSHostOptions(tls, endpoint)
+	tag := "§hide§ shadowtls-transport"
+	inner["detour"] = tag
+	delete(inner, "flow")
+	inner["_panel_shadowtls_transport"] = map[string]any{
+		"type": "shadowtls", "tag": tag, "server": server,
+		"server_port": port, "version": 3, "password": password, "tls": tls,
+	}
+	return true
 }
 
 func (s *SubJsonService) genNativeTLSLikeEndpoint(subReq *SubService, inbound *model.Inbound, client model.Client, endpoint ShareEndpoint) map[string]any {

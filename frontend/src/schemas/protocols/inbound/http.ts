@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ShadowTlsTransportSchema } from './shadowtls';
 
 // HTTP proxy inbound — a classic forward proxy. Accounts are user/pass pairs;
 // `allowTransparent` exposes Xray's option to forward requests with the
@@ -11,6 +12,7 @@ export const HttpAccountSchema = z.object({
 export type HttpAccount = z.infer<typeof HttpAccountSchema>;
 
 export const HttpInboundSettingsSchema = z.object({
+  shadowTls: ShadowTlsTransportSchema.optional(),
   accounts: z.array(HttpAccountSchema).default([]),
   allowTransparent: z.boolean().default(false),
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ShadowTlsTransportSchema } from './shadowtls';
 
 export const TrojanFallbackSchema = z.object({
   name: z.string().default(''),
@@ -29,6 +30,7 @@ export const TrojanClientSchema = z.object({
 export type TrojanClient = z.infer<typeof TrojanClientSchema>;
 
 export const TrojanInboundSettingsSchema = z.object({
+  shadowTls: ShadowTlsTransportSchema.optional(),
   clients: z.array(TrojanClientSchema).default([]),
   fallbacks: z.array(TrojanFallbackSchema).default([]),
 });

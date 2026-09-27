@@ -76,6 +76,7 @@ export function inboundNetworkLabels(record: {
   streamSettings: unknown;
 }): string[] {
   const protocol = (record.protocol || '').toLowerCase().trim();
+  if (hasShadowTLSTransport(record.settings)) return ['ShadowTLS', 'TCP'];
 
   if (protocol === 'vmess' || protocol === 'vless' || protocol === 'trojan') {
     const stream = readStreamHints(record.streamSettings);
@@ -102,6 +103,7 @@ export function inboundNetworkLabels(record: {
     case 'trusttunnel':
       return ['TCP', 'UDP'];
     case 'anytls':
+      return ['TCP'];
     case 'shadowtls':
       return ['ShadowTLS', 'TCP'];
     case 'mtproto':
@@ -135,6 +137,11 @@ export function inboundNetworkLabels(record: {
     default:
       return [];
   }
+}
+
+export function hasShadowTLSTransport(settings: unknown): boolean {
+  const value = coerceInboundJsonField(settings).shadowTls;
+  return !!value && typeof value === 'object' && (value as { enabled?: boolean }).enabled === true;
 }
 
 export function readSettings(settings: unknown): {

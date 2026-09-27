@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { SSMethodSchema } from '../shared/shadowsocks';
-import { ShadowTlsInboundSettingsSchema } from './shadowtls';
+import { ShadowTlsTransportSchema } from './shadowtls';
 
 export const SSNetworkSchema = z.enum(['tcp', 'udp', 'tcp,udp']);
 export type SSNetwork = z.infer<typeof SSNetworkSchema>;
@@ -38,11 +38,6 @@ export const ShadowsocksInboundSettingsSchema = z.object({
   ivCheck: z.boolean().default(false),
   // Form-only transport configuration. The wire adapter translates this to
   // the sing-box ShadowTLS listener with a Shadowsocks 2022 inner inbound.
-  shadowTls: ShadowTlsInboundSettingsSchema.omit({ clients: true })
-    .extend({
-      enabled: z.boolean().default(false),
-      innerKey: z.string().optional(),
-    })
-    .optional(),
+  shadowTls: ShadowTlsTransportSchema.optional(),
 });
 export type ShadowsocksInboundSettings = z.infer<typeof ShadowsocksInboundSettingsSchema>;

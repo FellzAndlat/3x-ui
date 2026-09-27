@@ -996,6 +996,10 @@ func (s *SubService) shareEndpointsForInbound(inbound *model.Inbound) []ShareEnd
 // (socks, http, mixed, dokodemo, tunnel). The returned string may contain multiple
 // `\n`-separated URLs when externalProxy/host endpoints fan out.
 func (s *SubService) GetLink(inbound *model.Inbound, email string) string {
+	if model.ShadowTLSTransport(inbound.Settings) != nil {
+		// A plain URI cannot describe an outbound detouring through ShadowTLS.
+		return ""
+	}
 	if !sudokuInboundUsable(inbound) {
 		return ""
 	}

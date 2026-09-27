@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ShadowTlsTransportSchema } from './shadowtls';
 
 export const MixedAuthSchema = z.enum(['password', 'noauth']);
 export type MixedAuth = z.infer<typeof MixedAuthSchema>;
@@ -13,6 +14,7 @@ export const MixedAccountSchema = z.object({
 export type MixedAccount = z.infer<typeof MixedAccountSchema>;
 
 export const MixedInboundSettingsSchema = z.object({
+  shadowTls: ShadowTlsTransportSchema.optional(),
   auth: MixedAuthSchema.default('password'),
   accounts: z.array(MixedAccountSchema).optional(),
   udp: z.boolean().default(false),

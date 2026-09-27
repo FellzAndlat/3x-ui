@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ShadowTlsTransportSchema } from './shadowtls';
 
 export const ANYTLS_DEFAULT_PADDING_SCHEME = [
   'stop=8',
@@ -41,6 +42,7 @@ export type AnyTlsServerTls = z.infer<typeof AnyTlsServerTlsSchema>;
 
 export const AnyTlsInboundSettingsSchema = z
   .object({
+    shadowTls: ShadowTlsTransportSchema.optional(),
     paddingScheme: z.array(z.string()).default(ANYTLS_DEFAULT_PADDING_SCHEME),
     tls: AnyTlsServerTlsSchema.default({
       enabled: true,

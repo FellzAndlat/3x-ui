@@ -1585,6 +1585,10 @@ export interface GenAllLinksInput {
 // subscription remark model was removed; subscription output uses the template).
 export function genAllLinks(input: GenAllLinksInput): GenAllLinksEntry[] {
   const { inbound, remark = '', client, hostOverride = '', fallbackHostname } = input;
+  if ((inbound.settings as { shadowTls?: { enabled?: boolean } }).shadowTls?.enabled) {
+    // Share URIs cannot carry both the inner protocol and its ShadowTLS detour.
+    return [];
+  }
 
   const addr = resolveAddr(inbound, hostOverride, fallbackHostname);
   const port = inbound.port;

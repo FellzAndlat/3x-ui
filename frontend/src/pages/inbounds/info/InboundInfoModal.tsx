@@ -18,6 +18,7 @@ import {
 } from '@/lib/xray/inbound-link';
 import { inboundFromDb } from '@/lib/xray/inbound-from-db';
 import { withMtprotoHostEndpoints } from '@/lib/hosts/host-link';
+import { hasShadowTLSTransport } from '../list/helpers';
 
 import {
   buildInboundInfo,
@@ -621,10 +622,8 @@ export default function InboundInfoModal({
         <div className="info-row">
           <dt>{t('pages.inbounds.protocol')}</dt>
           <dd>
-            <Tag color="purple">
-              {dbInbound.protocol === 'shadowtls' ? 'shadowsocks' : dbInbound.protocol}
-            </Tag>
-            {dbInbound.protocol === 'shadowtls' && <Tag color="green">ShadowTLS</Tag>}
+            <Tag color="purple">{dbInbound.protocol === 'shadowtls' ? 'shadowsocks' : dbInbound.protocol}</Tag>
+            {(dbInbound.protocol === 'shadowtls' || hasShadowTLSTransport(dbInbound.settings)) && <Tag color="green">ShadowTLS</Tag>}
           </dd>
         </div>
         <div className="info-row">

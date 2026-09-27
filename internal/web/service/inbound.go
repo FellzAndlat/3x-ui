@@ -1110,6 +1110,14 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	inbound.TrafficResetDay = normalizeTrafficResetDay(inbound.TrafficResetDay)
 	// Normalize streamSettings based on protocol
 	s.normalizeStreamSettings(inbound)
+	if err := validateShadowTLSTransport(inbound); err != nil {
+		return inbound, false, err
+	}
+	var shadowTLSErr error
+	inbound.Settings, shadowTLSErr = model.EnsureShadowTLSTransportPassword(inbound.Settings, "")
+	if shadowTLSErr != nil {
+		return inbound, false, shadowTLSErr
+	}
 	if err := validateInboundRuntimeProtocol(inbound.Protocol, nil); err != nil {
 		return inbound, false, err
 	}
@@ -1772,6 +1780,13 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	s.normalizeMtprotoSecret(inbound)
 
 	oldInbound, err := s.GetInbound(inbound.Id)
+	if err != nil {
+		return inbound, false, err
+	}
+	if err := validateShadowTLSTransport(inbound); err != nil {
+		return inbound, false, err
+	}
+	inbound.Settings, err = model.EnsureShadowTLSTransportPassword(inbound.Settings, oldInbound.Settings)
 	if err != nil {
 		return inbound, false, err
 	}

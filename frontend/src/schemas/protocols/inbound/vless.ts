@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { FlowSchema, SniffingSchema } from '@/schemas/primitives';
+import { ShadowTlsTransportSchema } from './shadowtls';
 
 export const VlessFallbackSchema = z.object({
   name: z.string().default(''),
@@ -38,6 +39,7 @@ export const VlessClientSchema = z.object({
 export type VlessClient = z.infer<typeof VlessClientSchema>;
 
 export const VlessInboundSettingsSchema = z.object({
+  shadowTls: ShadowTlsTransportSchema.optional(),
   clients: z.array(VlessClientSchema).default([]),
   decryption: z.string().min(1).default('none'),
   encryption: z.string().min(1).default('none'),

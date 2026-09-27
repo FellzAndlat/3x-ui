@@ -42,3 +42,10 @@ export const ShadowTlsInboundSettingsSchema = z.object({
   clients: z.array(ShadowTlsClientSchema).default([]),
 });
 export type ShadowTlsInboundSettings = z.infer<typeof ShadowTlsInboundSettingsSchema>;
+
+// ShadowTLS is a TCP wrapper around an injectable sing-box inbound.
+export const ShadowTlsTransportSchema = ShadowTlsInboundSettingsSchema.omit({ clients: true }).extend({
+  enabled: z.boolean().default(false),
+  password: z.string().optional(),
+  innerKey: z.string().optional(), // legacy Shadowsocks 2022 detour
+});

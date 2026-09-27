@@ -689,6 +689,60 @@ func shadowTLSInnerTag(tag string) string {
 	return "__shadowtls_ss_" + tag
 }
 
+// TranslateShadowTLSWrappedInbound keeps the actual proxy protocol as the
+// injectable inner listener; ShadowTLS only owns the public TCP socket.
+func TranslateShadowTLSWrappedInbound(raw map[string]any) (map[string]any, map[string]any, error) {
+	protocol := model.Protocol(rawString(raw, "protocol"))
+	if !model.SupportsShadowTLSTransport(protocol) {
+		return nil, nil, fmt.Errorf("ShadowTLS cannot wrap %s", protocol)
+	}
+	settings := rawObject(raw, "settings")
+	transport := rawObject(settings, "shadowTls")
+	password := strings.TrimSpace(rawString(transport, "password"))
+	if password == "" {
+		return nil, nil, fmt.Errorf("inbound %q has no ShadowTLS transport password", rawString(raw, "tag"))
+	}
+	inner, err := TranslateXrayInbound(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	if protocol == model.HTTP || protocol == model.Mixed {
+		accounts, _ := settings["accounts"].([]any)
+		users := make([]map[string]any, 0, len(accounts))
+		for _, entry := range accounts {
+			account, _ := entry.(map[string]any)
+			if user, pass := rawString(account, "user"), rawString(account, "pass"); user != "" && pass != "" {
+				users = append(users, map[string]any{"username": user, "password": pass})
+			}
+		}
+		inner["users"] = users
+	}
+	delete(inner, "listen")
+	delete(inner, "listen_port")
+	delete(inner, "network")
+	if users, ok := inner["users"].([]map[string]any); ok {
+		for _, user := range users {
+			delete(user, "flow") // Vision requires inner TLS/REALITY, removed by this wrapper.
+		}
+	}
+	outerRaw := map[string]any{
+		"protocol": "shadowtls", "tag": "__shadowtls_transport_" + rawString(raw, "tag"),
+		"listen": rawString(raw, "listen"), "port": raw["port"],
+		"settings": map[string]any{
+			"version": 3, "handshake": transport["handshake"],
+			"handshakeForServerName": transport["handshakeForServerName"],
+			"strictMode": transport["strictMode"], "wildcardSni": transport["wildcardSni"],
+			"clients": []any{map[string]any{"email": "panel", "password": password}},
+		},
+	}
+	outer, err := TranslateXrayInbound(outerRaw)
+	if err != nil {
+		return nil, nil, err
+	}
+	outer["detour"] = rawString(inner, "tag")
+	return outer, inner, nil
+}
+
 // TranslateShadowTLSInnerInbound builds the destination-carrying protocol for
 // a ShadowTLS inbound. Shadowsocks 2022 encrypts the payload after ShadowTLS
 // unwraps it; SOCKS would leave the tunneled traffic in cleartext.

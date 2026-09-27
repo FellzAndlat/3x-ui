@@ -1,6 +1,9 @@
 package service
 
 import (
+	"encoding/json"
+	"strings"
+
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
 )
@@ -29,6 +32,43 @@ func validateInboundRuntimeProtocol(protocol model.Protocol, existing *model.Inb
 	default:
 		return common.NewErrorf("%s requires sing-box as the selected core", protocol)
 	}
+}
+
+func validateShadowTLSTransport(inbound *model.Inbound) error {
+	if model.ShadowTLSTransport(inbound.Settings) == nil {
+		return nil
+	}
+	if !model.SupportsShadowTLSTransport(inbound.Protocol) {
+		return common.NewErrorf("ShadowTLS cannot wrap %s", inbound.Protocol)
+	}
+	if inbound.Protocol == model.Mixed {
+		var settings struct {
+			UDP bool `json:"udp"`
+		}
+		_ = json.Unmarshal([]byte(inbound.Settings), &settings)
+		if settings.UDP {
+			return common.NewError("ShadowTLS only supports TCP; disable Mixed UDP")
+		}
+	}
+	if inbound.Protocol == model.VLESS {
+		var settings struct {
+			Encryption string `json:"encryption"`
+			Decryption string `json:"decryption"`
+		}
+		_ = json.Unmarshal([]byte(inbound.Settings), &settings)
+		if (settings.Encryption != "" && settings.Encryption != "none") || (settings.Decryption != "" && settings.Decryption != "none") {
+			return common.NewError("sing-box cannot represent VLESS encryption with ShadowTLS")
+		}
+	}
+	var stream struct {
+		Network  string `json:"network"`
+		Security string `json:"security"`
+	}
+	_ = json.Unmarshal([]byte(inbound.StreamSettings), &stream)
+	if (stream.Network != "" && stream.Network != "tcp") || (stream.Security != "" && !strings.EqualFold(stream.Security, "none")) {
+		return common.NewError("ShadowTLS requires RAW TCP without inner TLS or REALITY")
+	}
+	return validateInboundRuntimeProtocol(model.ShadowTLS, nil)
 }
 
 func isXrayManagedProtocol(protocol model.Protocol) bool {

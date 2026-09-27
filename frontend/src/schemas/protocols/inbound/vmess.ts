@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { VmessSecuritySchema } from '../shared/vmess';
+import { ShadowTlsTransportSchema } from './shadowtls';
 
 export const VmessClientSchema = z.object({
   id: z.string().min(1),
@@ -24,6 +25,7 @@ export const VmessClientSchema = z.object({
 export type VmessClient = z.infer<typeof VmessClientSchema>;
 
 export const VmessInboundSettingsSchema = z.object({
+  shadowTls: ShadowTlsTransportSchema.optional(),
   clients: z.array(VmessClientSchema).default([]),
 });
 export type VmessInboundSettings = z.infer<typeof VmessInboundSettingsSchema>;

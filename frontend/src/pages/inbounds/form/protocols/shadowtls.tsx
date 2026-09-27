@@ -2,12 +2,17 @@ import { useTranslation } from 'react-i18next';
 import { Input, InputNumber, Select, Space, Switch, Typography } from 'antd';
 import { FormField } from '@/components/form/rhf';
 
-export default function ShadowTlsFields({ prefix = '' }: { prefix?: string }) {
+export default function ShadowTlsFields({ prefix = '', showPassword = false }: { prefix?: string; showPassword?: boolean }) {
   const { t } = useTranslation();
   const field = (name: string) => ['settings', ...(prefix ? [prefix] : []), ...name.split('.')];
 
   return (
     <>
+      {showPassword && (
+        <FormField name={field('password')} label={t('pages.inbounds.form.shadowTlsPassword')}>
+          <Input.Password autoComplete="off" />
+        </FormField>
+      )}
       <FormField
         name={field('handshake.server')}
         label={t('pages.inbounds.form.shadowTlsHandshakeServer')}

@@ -16,7 +16,7 @@ import {
   SPEED_TAG_STYLE,
 } from '@/components/utility/speedTagStyle';
 import { InboundSpeedTag, isActiveSpeed } from './InboundSpeedTag';
-import { readStreamHints, formatHostRemarksLabel, inboundNetworkLabels } from './helpers';
+import { readStreamHints, formatHostRemarksLabel, inboundNetworkLabels, hasShadowTLSTransport } from './helpers';
 import type { ClientCountEntry, DBInboundRecord, InboundSpeedEntry, RowAction } from './types';
 
 interface UseInboundColumnsParams {
@@ -235,7 +235,7 @@ export function useInboundColumns({
 
           const stream = readStreamHints(record.streamSettings);
           if (
-            stream.isTls &&
+            !hasShadowTLSTransport(record.settings) && stream.isTls &&
             ['vmess', 'vless', 'trojan', 'shadowsocks'].includes(record.protocol)
           ) {
             tags.push(

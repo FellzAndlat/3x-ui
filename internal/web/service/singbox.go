@@ -357,6 +357,15 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 		}
 
 		raw["settings"] = settings
+		if model.ShadowTLSTransport(inbound.Settings) != nil {
+			outer, inner, err := singbox.TranslateShadowTLSWrappedInbound(raw)
+			if err != nil {
+				unsupported = append(unsupported, fmt.Sprintf("%s: %v", inbound.Tag, err))
+				continue
+			}
+			cfg.Inbounds = append(cfg.Inbounds, inner, outer)
+			continue
+		}
 
 		translated, err := singbox.TranslateXrayInbound(raw)
 		if err != nil {

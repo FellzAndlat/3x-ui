@@ -55,7 +55,7 @@ func (s *SubClashService) getClash(subId string, host string, legacy bool) (stri
 	// Refuse partial Clash output for protocols this renderer cannot represent.
 	// Returning the format-unsupported sentinel makes auto-detection keep the
 	// complete raw subscription instead of silently dropping an inbound.
-	if containsUnsupportedClashProtocol(inbounds) {
+	if containsUnsupportedClashProtocol(inbounds) || containsShadowTLSTransport(inbounds) {
 		return "", "", errSubscriptionFormatUnsupported
 	}
 	if legacy && containsSubscriptionProtocol(inbounds, model.Sudoku) {

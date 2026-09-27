@@ -22,6 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
 )
 
@@ -546,7 +547,7 @@ func (a *SUBController) hasShadowTLSSubscription(subID string) bool {
 		return false
 	}
 	for _, inbound := range inbounds {
-		if inbound.Protocol == "shadowtls" {
+		if inbound.Protocol == "shadowtls" || model.ShadowTLSTransport(inbound.Settings) != nil {
 			return true
 		}
 	}
