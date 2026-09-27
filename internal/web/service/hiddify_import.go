@@ -1,0 +1,150 @@
+package service
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"math"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/google/uuid"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+)
+
+// HiddifyBackup is the legacy JSON export produced by Hiddify Panel. The
+// proxy list describes templates, not independent listeners: several entries
+// share the same public port through Hiddify's external routing layer.
+type HiddifyBackup struct {
+	Users []struct {
+		UUID           string  `json:"uuid"`
+		Name           string  `json:"name"`
+		Comment        string  `json:"comment"`
+		Enable         bool    `json:"enable"`
+		IsActive       bool    `json:"is_active"`
+		UsageLimitGB   float64 `json:"usage_limit_GB"`
+		CurrentUsageGB float64 `json:"current_usage_GB"`
+		PackageDays    int     `json:"package_days"`
+		StartDate      *string `json:"start_date"`
+		TelegramID     int64   `json:"telegram_id"`
+		WGPrivateKey   string  `json:"wg_pk"`
+		WGPublicKey    string  `json:"wg_pub"`
+		WGPreSharedKey string  `json:"wg_psk"`
+	} `json:"users"`
+	Proxies []struct {
+		Enable    bool   `json:"enable"`
+		Proto     string `json:"proto"`
+		Transport string `json:"transport"`
+		L3        string `json:"l3"`
+		CDN       string `json:"cdn"`
+	} `json:"proxies"`
+	Domains  []json.RawMessage `json:"domains"`
+	HConfigs []json.RawMessage `json:"hconfigs"`
+}
+
+type HiddifyPreview struct {
+	Users    int      `json:"users"`
+	Warnings []string `json:"warnings"`
+}
+
+func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error) {
+	var b HiddifyBackup
+	var preview HiddifyPreview
+	dec := json.NewDecoder(io.LimitReader(reader, 8<<20))
+	if err := dec.Decode(&b); err != nil {
+		return nil, preview, fmt.Errorf("invalid Hiddify JSON: %w", err)
+	}
+	if len(b.Users) == 0 || len(b.Proxies) == 0 || len(b.Domains) == 0 || len(b.HConfigs) == 0 {
+		return nil, preview, fmt.Errorf("the file is not a complete Hiddify Panel backup")
+	}
+	seen := make(map[string]bool, len(b.Users))
+	for _, user := range b.Users {
+		if _, err := uuid.Parse(user.UUID); err != nil || seen[user.UUID] {
+			return nil, preview, fmt.Errorf("backup contains an invalid or repeated user UUID")
+		}
+		seen[user.UUID] = true
+		if math.IsNaN(user.UsageLimitGB) || math.IsNaN(user.CurrentUsageGB) || user.UsageLimitGB < 0 || user.CurrentUsageGB < 0 {
+			return nil, preview, fmt.Errorf("backup contains an invalid traffic allowance")
+		}
+	}
+	preview.Users = len(b.Users)
+	preview.Warnings = []string{
+		"Пользователи будут без подключений. После создания входящих подключений прикрепите к ним пользователей — тогда в подписках появятся профили.",
+		"UUID сохранится как ID подписки. Старые URL Hiddify имеют другой путь; для их сохранения потребуется настроить перенаправление отдельно.",
+		"Для пользователей без даты первого подключения срок действия начнётся в день импорта.",
+		"Ключи SSH (Ed25519) из Hiddify не переносятся: в модели пользователей панели нет полей для них.",
+	}
+	return &b, preview, nil
+}
+
+// HiddifyClients preserves each user's UUID as the VPN credential and sub ID.
+// Used traffic is subtracted from the allowance because Hiddify's counter is
+// per user, while the new traffic records start at zero.
+func (b *HiddifyBackup) HiddifyClients() ([]ClientCreatePayload, error) {
+	items := make([]ClientCreatePayload, 0, len(b.Users))
+	for _, user := range b.Users {
+		remaining := user.UsageLimitGB - user.CurrentUsageGB
+		if remaining < 0 {
+			remaining = 0
+		}
+		var total int64
+		if user.UsageLimitGB > 0 {
+			if remaining > float64(math.MaxInt64)/(1<<30) {
+				return nil, fmt.Errorf("traffic allowance exceeds int64")
+			}
+			total = int64(remaining * (1 << 30))
+			// Zero means unlimited in 3x-ui. A depleted limited account is disabled.
+		}
+		expiry := int64(0)
+		if user.PackageDays > 0 {
+			started := time.Now().UTC()
+			if user.StartDate != nil && strings.TrimSpace(*user.StartDate) != "" {
+				var err error
+				started, err = time.Parse(time.RFC3339Nano, *user.StartDate)
+				if err != nil {
+					started, err = time.Parse("2006-01-02 15:04:05.999999", *user.StartDate)
+				}
+				if err != nil {
+					started, err = time.Parse("2006-01-02", *user.StartDate)
+				}
+				if err != nil {
+					return nil, fmt.Errorf("invalid Hiddify start date for user %s", user.UUID)
+				}
+			}
+			expiry = started.AddDate(0, 0, user.PackageDays).UnixMilli()
+		}
+		items = append(items, ClientCreatePayload{
+			Client: model.Client{
+				ID: user.UUID, Password: user.UUID, Auth: user.UUID,
+				SubID: user.UUID, Email: hiddifyEmail(user.Name, user.UUID),
+				PrivateKey: user.WGPrivateKey, PublicKey: user.WGPublicKey,
+				PreSharedKey: user.WGPreSharedKey,
+				Group:        "Hiddify", Comment: strings.TrimSpace(user.Name + " " + user.Comment),
+				TotalGB: total, ExpiryTime: expiry,
+				Enable: user.Enable && user.IsActive && (user.UsageLimitGB == 0 || remaining > 0),
+				TgID:   user.TelegramID,
+			},
+		})
+	}
+	return items, nil
+}
+
+func hiddifyEmail(name, id string) string {
+	var safe strings.Builder
+	for _, r := range strings.TrimSpace(name) {
+		if safe.Len() >= 40 {
+			break
+		}
+		if r == '/' || r == '\\' || unicode.IsSpace(r) || r < 0x20 || r == 0x7f {
+			safe.WriteByte('_')
+		} else {
+			safe.WriteRune(r)
+		}
+	}
+	if safe.Len() == 0 {
+		safe.WriteString("user")
+	}
+	return "hiddify_" + safe.String() + "_" + id[:8]
+}

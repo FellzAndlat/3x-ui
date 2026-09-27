@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"regexp"
 	"slices"
@@ -31,6 +32,7 @@ type ServerController struct {
 	panelService       panel.PanelService
 	xrayMetricsService service.XrayMetricsService
 	singBoxService     service.SingBoxService
+	clientService      service.ClientService
 }
 
 // NewServerController creates a new ServerController, initializes routes, and starts background tasks.
@@ -81,6 +83,8 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.POST("/xraylogs/:count", a.getXrayLogs)
 	g.POST("/amneziawglogs/:count", a.getAmneziaWGLogs)
 	g.POST("/importDB", a.importDB)
+	g.POST("/hiddify/preview", a.previewHiddify)
+	g.POST("/hiddify/import", a.importHiddify)
 	g.POST("/getNewEchCert", a.getNewEchCert)
 	g.POST("/getCertHash", a.getCertHash)
 	g.POST("/getRemoteCertHash", a.getRemoteCertHash)
@@ -89,6 +93,53 @@ func (a *ServerController) initRouter(g *gin.RouterGroup) {
 	g.POST("/clientIps", a.setClientIps)
 
 	a.initVKTurnProxyRouter(g)
+}
+
+func (a *ServerController) readHiddify(c *gin.Context) (*service.HiddifyBackup, service.HiddifyPreview, error) {
+	var empty service.HiddifyPreview
+	core, err := a.settingService.GetCoreType()
+	if err != nil {
+		return nil, empty, err
+	}
+	if core != service.CoreTypeSingBox {
+		return nil, empty, fmt.Errorf("select and save sing-box as the core first")
+	}
+	file, header, err := c.Request.FormFile("backup")
+	if err != nil {
+		return nil, empty, fmt.Errorf("select a Hiddify JSON backup: %w", err)
+	}
+	defer file.Close()
+	if header.Size > 8<<20 {
+		return nil, empty, fmt.Errorf("Hiddify backup exceeds 8 MiB")
+	}
+	return service.ParseHiddifyBackup(io.LimitReader(file, 8<<20))
+}
+
+func (a *ServerController) previewHiddify(c *gin.Context) {
+	_, preview, err := a.readHiddify(c)
+	jsonObj(c, preview, err)
+}
+
+func (a *ServerController) importHiddify(c *gin.Context) {
+	backup, _, err := a.readHiddify(c)
+	if err != nil {
+		jsonMsg(c, "Hiddify import failed", err)
+		return
+	}
+	items, err := backup.HiddifyClients()
+	if err != nil {
+		jsonMsg(c, "Hiddify import failed", err)
+		return
+	}
+	result, _, err := a.clientService.ImportClients(nil, items)
+	if err != nil {
+		jsonMsg(c, "Hiddify import failed", err)
+		return
+	}
+	if result.Created > 0 {
+		notifyClientsChanged()
+	}
+	jsonObj(c, gin.H{"created": result.Created, "skipped": result.Skipped}, nil)
 }
 
 // startTask registers the @2s ticker that refreshes server status, samples

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
-import { Button, Input, InputNumber, Radio, Select, Space, Switch, Tabs, Tag } from 'antd';
+import { Alert, Button, Input, InputNumber, Modal, Radio, Select, Space, Switch, Tabs, Tag, message } from 'antd';
 import {
   ApartmentOutlined,
   BellOutlined,
@@ -78,6 +78,51 @@ export default function GeneralTab({
   const [singBoxInstalled, setSingBoxInstalled] = useState<boolean | null>(null);
   const [singBoxInstalling, setSingBoxInstalling] = useState(false);
   const [runningCore, setRunningCore] = useState<'xray' | 'sing-box' | 'none'>('none');
+  const [hiddifyOpen, setHiddifyOpen] = useState(false);
+  const [hiddifyFile, setHiddifyFile] = useState<File | null>(null);
+  const [hiddifyPreview, setHiddifyPreview] = useState<{ users: number; warnings: string[] } | null>(null);
+  const [hiddifyResult, setHiddifyResult] = useState<{ created: number; skipped: { email: string; reason: string }[] } | null>(null);
+  const [hiddifyBusy, setHiddifyBusy] = useState(false);
+
+  const hiddifyRequest = async (action: 'preview' | 'import', file: File) => {
+    const form = new FormData();
+    form.append('backup', file);
+    return HttpUtil.post<{ users?: number; warnings?: string[]; created?: number; skipped?: unknown[] }>(
+      `/panel/api/server/hiddify/${action}`, form, { silentSuccess: true },
+    );
+  };
+
+  const previewHiddify = async (file: File) => {
+    setHiddifyFile(file);
+    setHiddifyPreview(null);
+    setHiddifyResult(null);
+    setHiddifyBusy(true);
+    try {
+      const result = await hiddifyRequest('preview', file);
+      if (result.success && typeof result.obj?.users === 'number') {
+        setHiddifyPreview({ users: result.obj.users, warnings: result.obj.warnings ?? [] });
+      }
+    } finally { setHiddifyBusy(false); }
+  };
+
+  const importHiddify = async () => {
+    if (!hiddifyFile || !hiddifyPreview) return;
+    setHiddifyBusy(true);
+    try {
+      const result = await hiddifyRequest('import', hiddifyFile);
+      if (result.success) {
+        const skipped = (result.obj?.skipped ?? []) as { email: string; reason: string }[];
+        const created = result.obj?.created ?? 0;
+        setHiddifyResult({ created, skipped });
+        if (skipped.length === 0) {
+          message.success(`Импортировано пользователей: ${created}.`);
+          setHiddifyOpen(false);
+          setHiddifyFile(null);
+          setHiddifyPreview(null);
+        }
+      }
+    } finally { setHiddifyBusy(false); }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -295,6 +340,7 @@ export default function GeneralTab({
   );
 
   return (
+    <>
     <Tabs
       activeKey={activeTab}
       onChange={onTabChange}
@@ -571,6 +617,11 @@ export default function GeneralTab({
                         </div>
                       )}
                     <Space wrap style={{ width: '100%' }}>
+                      {allSetting.coreType === 'sing-box' && (
+                        <Button onClick={() => setHiddifyOpen(true)}>
+                          Импорт пользователей Hiddify
+                        </Button>
+                      )}
                       <Button icon={<SwapOutlined />} onClick={() => onOpenSwap?.()}>
                         {t('pages.settings.swap.openFromCore')}
                       </Button>
@@ -932,5 +983,48 @@ export default function GeneralTab({
         },
       ]}
     />
+    <Modal
+      open={hiddifyOpen}
+      title="Импорт пользователей Hiddify"
+      okText="Импортировать пользователей"
+      okButtonProps={{ disabled: !hiddifyPreview, loading: hiddifyBusy }}
+      onOk={() => void importHiddify()}
+      onCancel={() => { setHiddifyOpen(false); setHiddifyFile(null); setHiddifyPreview(null); setHiddifyResult(null); }}
+    >
+      <p>Выберите JSON резервной копии Hiddify. Подключения и настройки сервера не импортируются.</p>
+      <input
+        type="file"
+        accept=".json,application/json"
+        aria-label="Резервная копия Hiddify JSON"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void previewHiddify(file);
+        }}
+      />
+      {hiddifyBusy && <p>Обработка резервной копии…</p>}
+      {hiddifyPreview && (
+        <Alert
+          style={{ marginTop: 16 }}
+          type="info"
+          showIcon
+          message={`Пользователей в копии: ${hiddifyPreview.users}`}
+          description={
+            <ul style={{ paddingLeft: 20, marginBottom: 0 }}>
+              {hiddifyPreview.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          }
+        />
+      )}
+      {hiddifyResult && hiddifyResult.skipped.length > 0 && (
+        <Alert
+          style={{ marginTop: 12 }}
+          type="warning"
+          showIcon
+          message={`Добавлено: ${hiddifyResult.created}. Пропущено: ${hiddifyResult.skipped.length}.`}
+          description={hiddifyResult.skipped.map((item) => <div key={item.email}>{item.email}: {item.reason}</div>)}
+        />
+      )}
+    </Modal>
+    </>
   );
 }
