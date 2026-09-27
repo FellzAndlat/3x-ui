@@ -669,6 +669,45 @@ func sudokuInboundUsable(inbound *model.Inbound) bool {
 	return inbound.Enable && (inbound.NodeID != nil || sudoku.IsInstalled(config.GetBinFolderPath()))
 }
 
+// A failed or interrupted save can leave an enabled Sudoku inbound without
+// client keys. Retry provisioning before exporting its subscription. The
+// provider serializes generation and only writes settings when keys are missing.
+func (s *SubService) refreshSudokuCredentials(inbound *model.Inbound) {
+	if inbound == nil || inbound.Protocol != model.Sudoku || inbound.NodeID != nil ||
+		!sudoku.IsInstalled(config.GetBinFolderPath()) {
+		return
+	}
+	clients, err := s.inboundService.GetClients(inbound)
+	if err != nil {
+		return
+	}
+	settings := s.linkSettings(inbound)
+	key, _ := settings["key"].(string)
+	missing := strings.TrimSpace(key) == ""
+	for _, client := range clients {
+		if !sudoku.ValidPrivateKey(client.SudokuPrivateKey) {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return
+	}
+	if err := service.EnsureSudokuCredentials(inbound.Id); err != nil {
+		logger.Warning("Sudoku subscription credentials:", err)
+		return
+	}
+	var updated model.Inbound
+	if err := database.GetDB().First(&updated, inbound.Id).Error; err != nil {
+		logger.Warning("Sudoku subscription reload:", err)
+		return
+	}
+	*inbound = updated
+	delete(s.settingsByInbound, inbound.Id)
+	delete(s.clientsByInbound, inbound.Id)
+	delete(s.fullyPrimedInbounds, inbound.Id)
+}
+
 func (s *SubService) inboundLinks(inbound *model.Inbound) []string {
 	if !sudokuInboundUsable(inbound) {
 		return nil
@@ -835,6 +874,9 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) 
 	inbounds = slices.DeleteFunc(inbounds, func(inbound *model.Inbound) bool {
 		return !sudokuInboundUsable(inbound)
 	})
+	for _, inbound := range inbounds {
+		s.refreshSudokuCredentials(inbound)
+	}
 	inboundIDs := make([]int, 0, len(inbounds))
 	for _, inbound := range inbounds {
 		inboundIDs = append(inboundIDs, inbound.Id)

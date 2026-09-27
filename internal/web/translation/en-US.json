@@ -1037,6 +1037,8 @@
       "tunnelKeepAliveHint": "How often the client sends a keepalive packet. 25 is the usual value: it holds the NAT mapping open and brings an idle peer back on its own after any drop, including a panel restart. 0 disables it — an idle client then stays disconnected until it sends traffic.",
       "amneziaWgConfig": "AmneziaWG config",
       "sudokuConfig": "Sudoku connection",
+      "sudokuImportHint": "Copy the sudoku:// link or scan its QR code in Sudodroid / Sudoku Desktop. Use a Clash / Mihomo subscription if enabled; sing-box does not support Sudoku.",
+      "sudokuUnavailableHint": "The Sudoku link is not available yet. Check that the inbound is enabled, the Sudoku core is installed under core settings, and this client is attached. Reload after installation to generate the client key automatically.",
       "tuicConfig": "TUIC config (Clash)",
       "mtprotoSecret": "MTProto secret",
       "mtprotoSecretHint": "The client's FakeTLS secret. Regenerate to rotate it.",

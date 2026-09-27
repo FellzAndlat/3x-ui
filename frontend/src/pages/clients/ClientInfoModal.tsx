@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Divider, Modal, Popover, Tag, Tooltip, message } from 'antd';
+import { Alert, Button, Divider, Modal, Popover, Tag, Tooltip, message } from 'antd';
 import {
   CopyOutlined,
   DownloadOutlined,
@@ -160,6 +160,9 @@ export default function ClientInfoModal({
 
   const standardLinks = links.filter((link) => !isSudokuLink(link));
   const sudokuLinks = links.filter(isSudokuLink);
+  const hasSudokuInbound = client?.inboundIds?.some(
+    (id) => inboundsById[id]?.protocol === 'sudoku',
+  ) ?? false;
 
   const traffic = client?.traffic || null;
   const totalBytes = client?.totalGB || 0;
@@ -793,9 +796,19 @@ export default function ClientInfoModal({
               </>
             )}
 
-            {sudokuLinks.length > 0 && client && (
+            {hasSudokuInbound && client && (
               <>
                 <Divider>{t('pages.clients.sudokuConfig')}</Divider>
+                <Alert
+                  type={sudokuLinks.length > 0 ? 'info' : 'warning'}
+                  showIcon
+                  description={t(
+                    sudokuLinks.length > 0
+                      ? 'pages.clients.sudokuImportHint'
+                      : 'pages.clients.sudokuUnavailableHint',
+                  )}
+                  style={{ marginBottom: 12 }}
+                />
                 {sudokuLinks.map((link, idx) => (
                   <ConfigBlock
                     key={link}
