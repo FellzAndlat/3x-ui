@@ -12,6 +12,7 @@ func (a *ServerController) initVKTurnProxyRouter(g *gin.RouterGroup) {
 	g.POST("/vk-turn-proxy/install/:version", a.installVKTurnProxy)
 	g.POST("/vk-turn-proxy/upload", a.uploadVKTurnProxyBinary)
 	a.initExternalVPNRouter(g)
+	a.initHiddifyExportRouter(g)
 }
 
 func (a *ServerController) getVKTurnProxyLogs(c *gin.Context) {
