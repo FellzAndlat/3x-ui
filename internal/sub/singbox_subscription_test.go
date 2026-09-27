@@ -73,11 +73,11 @@ func TestBuildSeparatedSingBoxSubscription_AlwaysReturnArrayForSingleProxy(t *te
 	}
 }
 
-func TestBuildShadowTLSSubscriptionsKeepTransportAndVisibleSOCKS(t *testing.T) {
+func TestBuildShadowTLSSubscriptionsKeepTransportAndVisibleShadowsocks(t *testing.T) {
 	makeProxy := func(tag string) map[string]any {
 		return map[string]any{
-			"type": "socks", "tag": tag, "username": tag, "password": "secret",
-			"server": "127.0.0.1", "server_port": 1, "detour": "§hide§ shadowtls-transport",
+			"type": "shadowsocks", "tag": tag, "method": "2022-blake3-aes-128-gcm",
+			"password": "MDEyMzQ1Njc4OWFiY2RlZg==:MDEyMzQ1Njc4OWFiY2RlZg==", "detour": "§hide§ shadowtls-transport",
 			"_panel_shadowtls_transport": map[string]any{
 				"type": "shadowtls", "tag": "§hide§ shadowtls-transport",
 				"server": "edge.example.com", "server_port": 443, "version": 3, "password": "secret",
@@ -93,7 +93,7 @@ func TestBuildShadowTLSSubscriptionsKeepTransportAndVisibleSOCKS(t *testing.T) {
 		t.Fatal(err)
 	}
 	outs := profile["outbounds"].([]any)
-	if len(outs) != 4 || outs[0].(map[string]any)["type"] != "socks" || outs[1].(map[string]any)["type"] != "shadowtls" {
+	if len(outs) != 4 || outs[0].(map[string]any)["type"] != "shadowsocks" || outs[1].(map[string]any)["type"] != "shadowtls" {
 		t.Fatalf("invalid standalone ShadowTLS profile: %s", separated)
 	}
 	if _, leaked := outs[0].(map[string]any)["_panel_shadowtls_transport"]; leaked {
@@ -114,7 +114,7 @@ func TestBuildShadowTLSSubscriptionsKeepTransportAndVisibleSOCKS(t *testing.T) {
 	for i := 0; i < 4; i += 2 {
 		transport := outs[i].(map[string]any)
 		proxy := outs[i+1].(map[string]any)
-		if transport["type"] != "shadowtls" || proxy["type"] != "socks" || proxy["detour"] != transport["tag"] {
+		if transport["type"] != "shadowtls" || proxy["type"] != "shadowsocks" || proxy["detour"] != transport["tag"] {
 			t.Fatalf("broken Hiddify transport binding: %s", hiddify)
 		}
 	}
@@ -232,15 +232,16 @@ func TestGenNativeShadowTLSUsesHandshakeServer(t *testing.T) {
 		Protocol: model.ShadowTLS,
 		Listen:   "shadowtls.example.com",
 		Port:     443,
-		Settings: `{"version":3,"handshake":{"server":"cloudflare.com","serverPort":443},"clients":[{"email":"user","password":"secret"}]}`,
+		Settings: `{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","handshake":{"server":"cloudflare.com","serverPort":443},"clients":[{"email":"user","password":"secret"}]}`,
 	}
 	subReq := &SubService{}
 	got := svc.genNativeTLSLike(subReq, inbound, model.Client{Email: "user", Password: "secret"})
 	if got == nil {
 		t.Fatal("genNativeTLSLike returned nil")
 	}
-	if got["type"] != "socks" || got["username"] != "user" || got["password"] != "secret" {
-		t.Fatalf("unexpected inner SOCKS outbound: %#v", got)
+	if got["type"] != "shadowsocks" || got["method"] != "2022-blake3-aes-128-gcm" ||
+		got["password"] != "MDEyMzQ1Njc4OWFiY2RlZg==:"+model.ShadowTLSClientKey("user", "secret") {
+		t.Fatalf("unexpected inner Shadowsocks outbound: %#v", got)
 	}
 	transport, ok := got["_panel_shadowtls_transport"].(map[string]any)
 	if !ok || transport["type"] != "shadowtls" || transport["server"] != "shadowtls.example.com" ||
@@ -256,7 +257,7 @@ func TestGenNativeShadowTLSUsesHandshakeServer(t *testing.T) {
 func TestGenNativeShadowTLSExternalEndpoint(t *testing.T) {
 	svc := &SubJsonService{}
 	inbound := &model.Inbound{Protocol: model.ShadowTLS, Listen: "origin.example.com", Port: 443,
-		Settings: `{"version":3,"handshake":{"server":"cloudflare.com"}}`}
+		Settings: `{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","handshake":{"server":"cloudflare.com"}}`}
 	subReq := &SubService{}
 	endpoint := ShareEndpoint{Address: "edge.example.com", Port: 8443, ep: map[string]any{
 		"sni": "front.example.com", "allowInsecure": true, "alpn": []any{"h2"},

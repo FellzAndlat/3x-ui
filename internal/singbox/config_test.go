@@ -1,6 +1,10 @@
 package singbox
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+)
 
 func TestTranslateXrayVLESSWebSocketTLS(t *testing.T) {
 	raw := map[string]any{
@@ -669,6 +673,7 @@ func TestTranslateXrayShadowTLSInbound(t *testing.T) {
 		"port":     443,
 		"settings": map[string]any{
 			"version": 3,
+			"innerKey": "MDEyMzQ1Njc4OWFiY2RlZg==",
 			"handshake": map[string]any{
 				"server":     "cloudflare.com",
 				"serverPort": 443,
@@ -687,7 +692,7 @@ func TestTranslateXrayShadowTLSInbound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["type"] != "shadowtls" || got["version"] != 3 || got["listen_port"] != 443 || got["detour"] != "__shadowtls_socks_shadowtls-443" {
+	if got["type"] != "shadowtls" || got["version"] != 3 || got["listen_port"] != 443 || got["detour"] != "__shadowtls_ss_shadowtls-443" {
 		t.Fatalf("unexpected ShadowTLS config: %#v", got)
 	}
 	handshake, ok := got["handshake"].(map[string]any)
@@ -706,9 +711,11 @@ func TestTranslateXrayShadowTLSInbound(t *testing.T) {
 		t.Fatal(err)
 	}
 	innerUsers, ok := inner["users"].([]map[string]any)
-	if inner["type"] != "socks" || inner["tag"] != got["detour"] || inner["listen"] != "127.0.0.1" ||
-		inner["listen_port"] != 0 || !ok || len(innerUsers) != 1 || innerUsers[0]["username"] != "alice" || innerUsers[0]["password"] != "secret" {
-		t.Fatalf("unexpected inner SOCKS inbound: %#v", inner)
+	if inner["type"] != "shadowsocks" || inner["tag"] != got["detour"] || inner["listen"] != "127.0.0.1" ||
+		inner["listen_port"] != 0 || inner["method"] != "2022-blake3-aes-128-gcm" ||
+		inner["password"] != "MDEyMzQ1Njc4OWFiY2RlZg==" || !ok || len(innerUsers) != 1 ||
+		innerUsers[0]["name"] != "alice" || innerUsers[0]["password"] != model.ShadowTLSClientKey("alice", "secret") {
+		t.Fatalf("unexpected inner Shadowsocks inbound: %#v", inner)
 	}
 }
 

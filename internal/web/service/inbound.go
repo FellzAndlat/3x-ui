@@ -1125,6 +1125,13 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		return inbound, false, err
 	}
 	s.normalizeMtprotoSecret(inbound)
+	if inbound.Protocol == model.ShadowTLS {
+		var keyErr error
+		inbound.Settings, keyErr = model.EnsureShadowTLSInnerKey(inbound.Settings, "")
+		if keyErr != nil {
+			return inbound, false, keyErr
+		}
+	}
 	if err := s.normalizeMtprotoXrayPort(inbound, ""); err != nil {
 		return inbound, false, err
 	}
@@ -1767,6 +1774,12 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	oldInbound, err := s.GetInbound(inbound.Id)
 	if err != nil {
 		return inbound, false, err
+	}
+	if inbound.Protocol == model.ShadowTLS {
+		inbound.Settings, err = model.EnsureShadowTLSInnerKey(inbound.Settings, oldInbound.Settings)
+		if err != nil {
+			return inbound, false, err
+		}
 	}
 	if err := validateInboundRuntimeProtocol(inbound.Protocol, oldInbound); err != nil {
 		return inbound, false, err

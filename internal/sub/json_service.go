@@ -1484,6 +1484,10 @@ func (s *SubJsonService) genNativeTLSLikeEndpoint(subReq *SubService, inbound *m
 	}
 
 	settings := subReq.linkSettings(inbound)
+	masterKey, _ := settings[model.ShadowTLSInnerKeyField].(string)
+	if inbound.Protocol == model.ShadowTLS && !model.ValidShadowTLSInnerKey(masterKey) {
+		return nil
+	}
 	if inbound.Protocol == model.AnyTLS {
 		out := map[string]any{
 			"type":        "anytls",
@@ -1537,11 +1541,12 @@ func (s *SubJsonService) genNativeTLSLikeEndpoint(subReq *SubService, inbound *m
 		"password":    client.Password,
 		"tls":         tls,
 	}
-	// ShadowTLS carries bytes but has no destination protocol. SOCKS supplies
-	// the target address and authenticates the same user inside the tunnel.
+	// Match Hiddify's ShadowTLS + Shadowsocks 2022 detour: the inner protocol
+	// carries the destination and encrypts the payload after the TLS handshake.
 	return map[string]any{
-		"type": "socks", "server": "127.0.0.1", "server_port": 1,
-		"username": client.Email, "password": client.Password,
+		"type": "shadowsocks", "method": "2022-blake3-aes-128-gcm",
+		"password": masterKey + ":" + model.ShadowTLSClientKey(client.Email, client.Password),
+		"udp_over_tcp": map[string]any{"enabled": true, "version": 2},
 		"detour": transportTag,
 		"_panel_shadowtls_transport": transport,
 	}

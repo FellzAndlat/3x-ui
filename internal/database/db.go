@@ -167,6 +167,9 @@ func initModels() error {
 	if err := dedupeInboundSettingsClients(); err != nil {
 		return err
 	}
+	if err := migrateShadowTLSInnerKeys(); err != nil {
+		return err
+	}
 	if err := migrateLegacySocksInboundsToMixed(); err != nil {
 		return err
 	}
@@ -191,6 +194,32 @@ func initModels() error {
 	if IsPostgres() {
 		if err := resyncPostgresSequences(db, models); err != nil {
 			log.Printf("Error resyncing postgres sequences: %v", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateShadowTLSInnerKeys() error {
+	var inbounds []model.Inbound
+	if err := db.Model(&model.Inbound{}).Select("id", "settings").Where("protocol = ?", model.ShadowTLS).Find(&inbounds).Error; err != nil {
+		return err
+	}
+	for _, inbound := range inbounds {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(inbound.Settings), &fields); err != nil {
+			return fmt.Errorf("ShadowTLS inbound %d settings: %w", inbound.Id, err)
+		}
+		var key string
+		_ = json.Unmarshal(fields[model.ShadowTLSInnerKeyField], &key)
+		if model.ValidShadowTLSInnerKey(key) {
+			continue
+		}
+		settings, err := model.EnsureShadowTLSInnerKey(inbound.Settings, "")
+		if err != nil {
+			return err
+		}
+		if err := db.Model(&model.Inbound{}).Where("id = ?", inbound.Id).UpdateColumn("settings", settings).Error; err != nil {
 			return err
 		}
 	}

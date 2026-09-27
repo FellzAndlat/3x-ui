@@ -162,7 +162,7 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	}
 	shadowtls := &model.Inbound{
 		UserId: 1, Tag: "shadowtls", Enable: true, Listen: "shadowtls.example.com", Port: 9443, Protocol: model.ShadowTLS,
-		Settings: fmt.Sprintf(`{"version":3,"handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
+		Settings: fmt.Sprintf(`{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
 		StreamSettings: `{}`,
 	}
 	for _, inbound := range []*model.Inbound{anytls, shadowtls} {
@@ -224,7 +224,7 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	request.Header.Set("User-Agent", "Hiddify/2.0")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type": "shadowtls"`) || !strings.Contains(response.Body.String(), `"type": "socks"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type": "shadowtls"`) || !strings.Contains(response.Body.String(), `"type": "shadowsocks"`) {
 		t.Fatalf("Hiddify subscription must contain native ShadowTLS: HTTP %d: %s", response.Code, response.Body.String())
 	}
 	var hiddifyProfile map[string]any

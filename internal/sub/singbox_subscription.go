@@ -124,7 +124,7 @@ func buildSeparatedSingBoxSubscription(template map[string]any, proxies []map[st
 
 // Hiddify's JSON importer expects one object with outbounds, not an array of
 // full profiles. Give each ShadowTLS transport a unique hidden tag so only its
-// inner SOCKS proxy appears in the selector.
+// inner Shadowsocks proxy appears in the selector.
 func buildHiddifySingBoxSubscription(proxies []map[string]any) (string, error) {
 	if len(proxies) == 0 {
 		return "", nil

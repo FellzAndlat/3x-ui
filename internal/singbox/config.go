@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 )
 
 type Config struct {
@@ -639,8 +641,7 @@ func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 			out["wildcard_sni"] = wildcard
 		}
 		// ShadowTLS authenticates and unwraps a TCP stream; it does not carry a
-		// destination. Send that stream to an inner SOCKS inbound so clients can
-		// request their actual target through the same authenticated tunnel.
+		// destination. Deliver the stream to the encrypted Shadowsocks inbound.
 		out["detour"] = shadowTLSInnerTag(rawString(raw, "tag"))
 	}
 	out["type"] = singProtocol
@@ -662,14 +663,18 @@ func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 }
 
 func shadowTLSInnerTag(tag string) string {
-	return "__shadowtls_socks_" + tag
+	return "__shadowtls_ss_" + tag
 }
 
 // TranslateShadowTLSInnerInbound builds the destination-carrying protocol for
-// a ShadowTLS inbound. The listener is loopback-only and requires the same
-// per-client credentials as the outer transport.
+// a ShadowTLS inbound. Shadowsocks 2022 encrypts the payload after ShadowTLS
+// unwraps it; SOCKS would leave the tunneled traffic in cleartext.
 func TranslateShadowTLSInnerInbound(raw map[string]any) (map[string]any, error) {
 	settings := rawObject(raw, "settings")
+	masterKey := rawString(settings, model.ShadowTLSInnerKeyField)
+	if !model.ValidShadowTLSInnerKey(masterKey) {
+		return nil, fmt.Errorf("ShadowTLS inbound %q has no valid inner Shadowsocks key", rawString(raw, "tag"))
+	}
 	clients, _ := settings["clients"].([]any)
 	users := make([]map[string]any, 0, len(clients))
 	for _, item := range clients {
@@ -679,17 +684,18 @@ func TranslateShadowTLSInnerInbound(raw map[string]any) (map[string]any, error) 
 		}
 		name := rawString(client, "email")
 		password := rawString(client, "password")
-		if name == "" || password == "" || len(name) > 255 || len(password) > 255 {
-			return nil, fmt.Errorf("ShadowTLS inner SOCKS user requires a name and password of at most 255 bytes")
+		if name == "" || password == "" {
+			return nil, fmt.Errorf("ShadowTLS inner Shadowsocks user requires a name and password")
 		}
-		users = append(users, map[string]any{"username": name, "password": password})
+		users = append(users, map[string]any{"name": name, "password": model.ShadowTLSClientKey(name, password)})
 	}
 	if len(users) == 0 {
 		return nil, fmt.Errorf("ShadowTLS inbound %q has no users", rawString(raw, "tag"))
 	}
 	return map[string]any{
-		"type": "socks", "tag": shadowTLSInnerTag(rawString(raw, "tag")),
-		"listen": "127.0.0.1", "listen_port": 0, "users": users,
+		"type": "shadowsocks", "tag": shadowTLSInnerTag(rawString(raw, "tag")),
+		"listen": "127.0.0.1", "listen_port": 0, "method": "2022-blake3-aes-128-gcm",
+		"password": masterKey, "users": users,
 	}, nil
 }
 
