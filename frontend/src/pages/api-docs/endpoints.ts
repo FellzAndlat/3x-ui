@@ -929,6 +929,36 @@ export const sections: readonly Section[] = [
       },
       {
         method: 'POST',
+        path: '/panel/api/server/hiddify/preview',
+        summary: 'Preview the number of VPN users in a Hiddify Panel JSON backup.',
+        description:
+          'Available when sing-box is the saved core. The uploaded file is not imported.',
+        params: [
+          {
+            name: 'backup',
+            in: 'body (multipart)',
+            type: 'file',
+            desc: 'Hiddify JSON backup, up to 8 MiB.',
+          },
+        ],
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/server/hiddify/import',
+        summary: 'Import VPN users from a Hiddify Panel JSON backup without inbound connections.',
+        description:
+          'Preserves UUID subscription IDs, remaining traffic, expiration, and WireGuard keys. Existing users are skipped.',
+        params: [
+          {
+            name: 'backup',
+            in: 'body (multipart)',
+            type: 'file',
+            desc: 'Hiddify JSON backup, up to 8 MiB.',
+          },
+        ],
+      },
+      {
+        method: 'POST',
         path: '/panel/api/server/getNewEchCert',
         summary:
           'Generate a new ECH (Encrypted Client Hello) keypair and config list for the given SNI.',

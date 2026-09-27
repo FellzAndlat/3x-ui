@@ -7866,6 +7866,108 @@
         }
       }
     },
+    "/panel/api/server/hiddify/preview": {
+      "post": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Preview the number of VPN users in a Hiddify Panel JSON backup.",
+        "operationId": "post_panel_api_server_hiddify_preview",
+        "description": "Available when sing-box is the saved core. The uploaded file is not imported.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "backup": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Hiddify JSON backup, up to 8 MiB."
+                  }
+                },
+                "required": [
+                  "backup"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/hiddify/import": {
+      "post": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Import VPN users from a Hiddify Panel JSON backup without inbound connections.",
+        "operationId": "post_panel_api_server_hiddify_import",
+        "description": "Preserves UUID subscription IDs, remaining traffic, expiration, and WireGuard keys. Existing users are skipped.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "backup": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Hiddify JSON backup, up to 8 MiB."
+                  }
+                },
+                "required": [
+                  "backup"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/server/getNewEchCert": {
       "post": {
         "tags": [
