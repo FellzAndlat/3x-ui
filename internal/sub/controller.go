@@ -456,11 +456,9 @@ func dedupeEmails(emails []string) []string {
 
 func buildRawSubscriptionBody(subs []string) string {
 	var result strings.Builder
-	for _, sub := range subs {
-		for _, link := range splitLinkLines(sub) {
-			result.WriteString(link)
-			result.WriteString("\n")
-		}
+	for _, link := range normalizeGeneratedLinks(subs) {
+		result.WriteString(link)
+		result.WriteByte('\n')
 	}
 	return result.String()
 }

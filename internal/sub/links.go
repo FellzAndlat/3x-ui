@@ -28,11 +28,7 @@ func (p *LinkProvider) SubLinksForSubId(host, subId string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(links))
-	for _, l := range links {
-		out = append(out, splitLinkLines(l)...)
-	}
-	return out, nil
+	return normalizeGeneratedLinks(links), nil
 }
 
 func (p *LinkProvider) LinksForClient(host string, inbound *model.Inbound, email string) []string {
@@ -52,13 +48,31 @@ func (p *LinkProvider) LinksForClient(host string, inbound *model.Inbound, email
 
 func (p *LinkProvider) LinksForInbounds(host string, inbounds []*model.Inbound) []string {
 	svc := p.build(host)
-	var out []string
+	var raw []string
 	for _, inbound := range inbounds {
 		if !sudokuInboundUsable(inbound) {
 			continue
 		}
 		svc.refreshSudokuCredentials(inbound)
-		out = append(out, svc.inboundLinks(inbound)...)
+		raw = append(raw, svc.inboundLinks(inbound)...)
+	}
+	return normalizeGeneratedLinks(raw)
+}
+
+// normalizeGeneratedLinks flattens multi-link entries and removes exact
+// duplicates while preserving their first-seen order. This is shared by the
+// raw subscription endpoint and link-export APIs so clients see the same set.
+func normalizeGeneratedLinks(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, entry := range raw {
+		for _, link := range splitLinkLines(entry) {
+			if _, duplicate := seen[link]; duplicate {
+				continue
+			}
+			seen[link] = struct{}{}
+			out = append(out, link)
+		}
 	}
 	return out
 }

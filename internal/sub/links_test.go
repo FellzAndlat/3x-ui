@@ -33,6 +33,23 @@ func TestSplitLinkLines(t *testing.T) {
 	}
 }
 
+func TestNormalizeGeneratedLinks_DeduplicatesAcrossEntries(t *testing.T) {
+	entries := []string{
+		"vless://same\nmieru://QUJDRA==\nmierus://user:pass@example.com?port=443&protocol=TCP#Mieru",
+		"vless://same",
+		"vmess://other",
+		"vmess://other\n",
+	}
+	want := []string{
+		"vless://same",
+		"mierus://user:pass@example.com?port=443&protocol=TCP#Mieru",
+		"vmess://other",
+	}
+	if got := normalizeGeneratedLinks(entries); !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeGeneratedLinks() = %#v, want %#v", got, want)
+	}
+}
+
 func TestSplitLinkLines_EmptyInputIsNil(t *testing.T) {
 	if got := splitLinkLines(""); got != nil {
 		t.Fatalf("splitLinkLines(\"\") = %#v, want nil", got)
