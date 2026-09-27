@@ -25,6 +25,31 @@ type hiddifyConfig struct {
 	Value any    `json:"value"`
 }
 
+type hiddifyConfigs []hiddifyConfig
+
+// UnmarshalJSON accepts both Hiddify's common [{key,value}] settings export and
+// backups that serialize hconfigs as a plain object. The actual legacy path is
+// also discovered from the complete backup below, so nested backup variants are
+// supported without inventing a default path.
+func (c *hiddifyConfigs) UnmarshalJSON(data []byte) error {
+	var list []hiddifyConfig
+	if err := json.Unmarshal(data, &list); err == nil {
+		*c = list
+		return nil
+	}
+
+	var object map[string]any
+	if err := json.Unmarshal(data, &object); err != nil {
+		return fmt.Errorf("invalid Hiddify hconfigs: %w", err)
+	}
+	list = make([]hiddifyConfig, 0, len(object))
+	for key, value := range object {
+		list = append(list, hiddifyConfig{Key: key, Value: value})
+	}
+	*c = list
+	return nil
+}
+
 // HiddifyBackup is the legacy JSON export produced by Hiddify Panel. Only the
 // users section is required for migration. Other sections are optional because
 // Hiddify backups/restores may contain selected groups only.
@@ -52,7 +77,9 @@ type HiddifyBackup struct {
 		CDN       string `json:"cdn"`
 	} `json:"proxies"`
 	Domains  []hiddifyDomain `json:"domains"`
-	HConfigs []hiddifyConfig `json:"hconfigs"`
+	HConfigs hiddifyConfigs  `json:"hconfigs"`
+
+	legacyProxyPath string
 }
 
 type HiddifyPreview struct {
@@ -80,8 +107,16 @@ func (b *HiddifyBackup) hiddifyConfigString(key string) (string, bool, error) {
 func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error) {
 	var b HiddifyBackup
 	var preview HiddifyPreview
-	dec := json.NewDecoder(io.LimitReader(reader, 8<<20))
-	if err := dec.Decode(&b); err != nil {
+
+	const maxBackupSize = 8 << 20
+	raw, err := io.ReadAll(io.LimitReader(reader, maxBackupSize+1))
+	if err != nil {
+		return nil, preview, fmt.Errorf("read Hiddify JSON: %w", err)
+	}
+	if len(raw) > maxBackupSize {
+		return nil, preview, fmt.Errorf("Hiddify JSON exceeds 8 MiB")
+	}
+	if err := json.Unmarshal(raw, &b); err != nil {
 		return nil, preview, fmt.Errorf("invalid Hiddify JSON: %w", err)
 	}
 	if len(b.Users) == 0 {
@@ -98,6 +133,10 @@ func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error
 		}
 	}
 
+	b.legacyProxyPath, err = discoverHiddifyLegacySubPath(raw)
+	if err != nil {
+		return nil, preview, err
+	}
 	legacyAlias, err := b.HiddifyLegacySubscriptionAlias()
 	if err != nil {
 		return nil, preview, err
@@ -122,23 +161,96 @@ func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error
 	return &b, preview, nil
 }
 
+// discoverHiddifyLegacySubPath finds proxy_path_client in backup variants where
+// Hiddify stores settings either as [{"key":"...","value":"..."}], as an
+// object field, or below a nested settings block. The path is always taken from
+// the imported JSON; no installation-specific legacy path is hard-coded.
+func discoverHiddifyLegacySubPath(raw []byte) (string, error) {
+	if len(raw) == 0 {
+		return "", nil
+	}
+	var root any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return "", fmt.Errorf("invalid Hiddify JSON: %w", err)
+	}
+
+	found := ""
+	add := func(value any) error {
+		text, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("Hiddify proxy_path_client must be a string")
+		}
+		path, err := normalizeHiddifyLegacySubPath(text)
+		if err != nil {
+			return err
+		}
+		if path == "" {
+			return nil
+		}
+		if found != "" && found != path {
+			return fmt.Errorf("Hiddify backup contains conflicting proxy_path_client values")
+		}
+		found = path
+		return nil
+	}
+
+	var walk func(any) error
+	walk = func(value any) error {
+		switch node := value.(type) {
+		case map[string]any:
+			for key, child := range node {
+				if strings.EqualFold(key, "proxy_path_client") {
+					if err := add(child); err != nil {
+						return err
+					}
+				}
+			}
+			if key, ok := node["key"].(string); ok && strings.EqualFold(key, "proxy_path_client") {
+				if child, exists := node["value"]; exists {
+					if err := add(child); err != nil {
+						return err
+					}
+				}
+			}
+			for _, child := range node {
+				if err := walk(child); err != nil {
+					return err
+				}
+			}
+		case []any:
+			for _, child := range node {
+				if err := walk(child); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(root); err != nil {
+		return "", err
+	}
+	return found, nil
+}
+
 // HiddifyLegacySubscriptionAlias returns the public path used by Hiddify for
 // links like https://domain/<proxy_path_client>/<UUID>/. Domains are retained
 // only as migration metadata; authorization of a legacy URL is path/UUID based.
 func (b *HiddifyBackup) HiddifyLegacySubscriptionAlias() (HiddifyLegacySubscriptionAlias, error) {
 	var alias HiddifyLegacySubscriptionAlias
-	value, found, err := b.hiddifyConfigString("proxy_path_client")
-	if err != nil {
-		return alias, err
+	alias.Path = b.legacyProxyPath
+	if alias.Path == "" {
+		value, found, err := b.hiddifyConfigString("proxy_path_client")
+		if err != nil {
+			return alias, err
+		}
+		if found {
+			path, err := normalizeHiddifyLegacySubPath(value)
+			if err != nil {
+				return alias, err
+			}
+			alias.Path = path
+		}
 	}
-	if !found {
-		return alias, nil
-	}
-	path, err := normalizeHiddifyLegacySubPath(value)
-	if err != nil {
-		return alias, err
-	}
-	alias.Path = path
 	if alias.Path == "" {
 		return alias, nil
 	}

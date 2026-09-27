@@ -33,8 +33,11 @@ type expandedLink struct {
 	Name string
 }
 
-// getClientExternalLinksBySubId returns active rows with owner state attached.
-// Consumers keep inactive owners as metadata but omit their link values.
+// getClientExternalLinksBySubId returns external-link rows with owner state
+// attached. A client that exists globally but currently has no enabled external
+// link is represented by an inactive sentinel entry. That lets subscription
+// callers distinguish a valid user with zero connections from an unknown SubID
+// without manufacturing a real connection or weakening URL validation.
 func (s *SubService) getClientExternalLinksBySubId(subId string) ([]externalLinkEntry, error) {
 	db := database.GetDB()
 	var recs []model.ClientRecord
@@ -60,13 +63,12 @@ func (s *SubService) getClientExternalLinksBySubId(subId string) ([]externalLink
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
 
-	out := make([]externalLinkEntry, 0, len(rows))
+	out := make([]externalLinkEntry, 0, max(len(rows), len(recs)))
+	represented := make(map[int]struct{}, len(rows))
 	for _, r := range rows {
 		rec := byId[r.ClientId]
+		represented[r.ClientId] = struct{}{}
 		out = append(out, externalLinkEntry{
 			Kind:       r.Kind,
 			Value:      r.Value,
@@ -75,6 +77,21 @@ func (s *SubService) getClientExternalLinksBySubId(subId string) ([]externalLink
 			Email:      rec.Email,
 			Enable:     rec.Enable,
 			Active:     rec.Enable && (rec.ExpiryTime <= 0 || rec.ExpiryTime > now),
+		})
+	}
+
+	// Keep globally restored/imported users addressable even before an inbound
+	// or external link is attached. getSubs treats inactive entries as metadata:
+	// it returns a non-nil empty subscription and never calls expandEntry, so no
+	// fake link is exposed to clients.
+	for _, rec := range recs {
+		if _, ok := represented[rec.Id]; ok {
+			continue
+		}
+		out = append(out, externalLinkEntry{
+			Email:  rec.Email,
+			Enable: rec.Enable,
+			Active: false,
 		})
 	}
 	return out, nil

@@ -37,6 +37,47 @@ func TestParseHiddifyBackupReadsLegacySubscriptionPathFromBackup(t *testing.T) {
 	}
 }
 
+func TestParseHiddifyBackupReadsProxyPathFromAlternativeLayouts(t *testing.T) {
+	tests := []struct {
+		name   string
+		backup string
+		want   string
+	}{
+		{
+			name: "hconfigs object",
+			backup: `{
+				"users":[{"uuid":"768e8bdd-bee3-4442-9006-b26464148aaa","enable":true,"is_active":true}],
+				"hconfigs":{"proxy_path_client":"AnotherSecretPath01"}
+			}`,
+			want: "AnotherSecretPath01",
+		},
+		{
+			name: "nested settings",
+			backup: `{
+				"users":[{"uuid":"bb9f1752-1aba-4638-8ca5-0ee5e3948a88","enable":true,"is_active":true}],
+				"backup_meta":{"settings":{"proxy_path_client":"PerBackupPath_02"}}
+			}`,
+			want: "PerBackupPath_02",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, _, err := ParseHiddifyBackup(strings.NewReader(tt.backup))
+			if err != nil {
+				t.Fatalf("ParseHiddifyBackup: %v", err)
+			}
+			alias, err := parsed.HiddifyLegacySubscriptionAlias()
+			if err != nil {
+				t.Fatalf("HiddifyLegacySubscriptionAlias: %v", err)
+			}
+			if alias.Path != tt.want {
+				t.Fatalf("legacy path = %q, want %q", alias.Path, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseHiddifyBackupAcceptsUsersOnly(t *testing.T) {
 	const backup = `{
 		"users":[{"uuid":"768e8bdd-bee3-4442-9006-b26464148aaa","name":"Vadlo","enable":true,"is_active":true,"usage_limit_GB":100,"current_usage_GB":10,"package_days":30}]
@@ -87,6 +128,18 @@ func TestParseHiddifyBackupRejectsUnsafeLegacyPath(t *testing.T) {
 
 	if _, _, err := ParseHiddifyBackup(strings.NewReader(backup)); err == nil {
 		t.Fatal("expected unsafe proxy_path_client to be rejected")
+	}
+}
+
+func TestParseHiddifyBackupRejectsConflictingProxyPaths(t *testing.T) {
+	const backup = `{
+		"users":[{"uuid":"768e8bdd-bee3-4442-9006-b26464148aaa","enable":true,"is_active":true}],
+		"hconfigs":[{"key":"proxy_path_client","value":"PathOne"}],
+		"settings":{"proxy_path_client":"PathTwo"}
+	}`
+
+	if _, _, err := ParseHiddifyBackup(strings.NewReader(backup)); err == nil {
+		t.Fatal("expected conflicting proxy_path_client values to be rejected")
 	}
 }
 
