@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Divider, InputNumber, Select, Switch } from 'antd';
+import { Collapse, InputNumber, Select, Switch } from 'antd';
 
 import { FormField } from '@/components/form/rhf';
 
@@ -58,54 +58,63 @@ export default function MieruFields() {
         />
       </FormField>
 
-      <Divider plain titlePlacement="start" style={{ margin: '8px 0 12px' }}>
-        {t('pages.inbounds.form.mieruClientSettings')}
-      </Divider>
+      <Collapse
+        ghost
+        items={[
+          {
+            key: 'advanced',
+            label: t('pages.inbounds.form.mieruClientSettings'),
+            children: (
+              <>
+                <FormField
+                  name={['settings', 'multiplexing']}
+                  label={t('pages.inbounds.form.mieruMultiplexing')}
+                  tooltip={t('pages.inbounds.form.mieruMultiplexingHint')}
+                >
+                  <Select
+                    options={multiplexingValues.map((value) => ({
+                      value,
+                      label: t(`pages.inbounds.form.mieruMultiplexingOptions.${value}`),
+                    }))}
+                  />
+                </FormField>
 
-      <FormField
-        name={['settings', 'multiplexing']}
-        label={t('pages.inbounds.form.mieruMultiplexing')}
-        tooltip={t('pages.inbounds.form.mieruMultiplexingHint')}
-      >
-        <Select
-          options={multiplexingValues.map((value) => ({
-            value,
-            label: t(`pages.inbounds.form.mieruMultiplexingOptions.${value}`),
-          }))}
-        />
-      </FormField>
+                <FormField
+                  name={['settings', 'handshakeMode']}
+                  label={t('pages.inbounds.form.mieruHandshakeMode')}
+                  tooltip={t('pages.inbounds.form.mieruHandshakeModeHint')}
+                >
+                  <Select
+                    options={handshakeValues.map((value) => ({
+                      value,
+                      label: t(`pages.inbounds.form.mieruHandshakeOptions.${value}`),
+                    }))}
+                  />
+                </FormField>
 
-      <FormField
-        name={['settings', 'handshakeMode']}
-        label={t('pages.inbounds.form.mieruHandshakeMode')}
-        tooltip={t('pages.inbounds.form.mieruHandshakeModeHint')}
-      >
-        <Select
-          options={handshakeValues.map((value) => ({
-            value,
-            label: t(`pages.inbounds.form.mieruHandshakeOptions.${value}`),
-          }))}
-        />
-      </FormField>
+                <FormField name={['settings', 'mtu']} label={t('pages.inbounds.form.mieruMtu')}>
+                  <InputNumber min={1280} max={1400} style={{ width: '100%' }} />
+                </FormField>
 
-      <FormField name={['settings', 'mtu']} label={t('pages.inbounds.form.mieruMtu')}>
-        <InputNumber min={1280} max={1400} style={{ width: '100%' }} />
-      </FormField>
+                <FormField
+                  name={['settings', 'loggingLevel']}
+                  label={t('pages.inbounds.form.mieruLoggingLevel')}
+                >
+                  <Select options={loggingOptions} />
+                </FormField>
 
-      <FormField
-        name={['settings', 'loggingLevel']}
-        label={t('pages.inbounds.form.mieruLoggingLevel')}
-      >
-        <Select options={loggingOptions} />
-      </FormField>
-
-      <FormField
-        name={['settings', 'userHintIsMandatory']}
-        label={t('pages.inbounds.form.mieruUserHintMandatory')}
-        valueProp="checked"
-      >
-        <Switch />
-      </FormField>
+                <FormField
+                  name={['settings', 'userHintIsMandatory']}
+                  label={t('pages.inbounds.form.mieruUserHintMandatory')}
+                  valueProp="checked"
+                >
+                  <Switch />
+                </FormField>
+              </>
+            ),
+          },
+        ]}
+      />
     </>
   );
 }

@@ -113,6 +113,9 @@ func (s *InboundService) addInboundTraffic(tx *gorm.DB, traffics []*xray.Traffic
 	var err error
 
 	for _, traffic := range traffics {
+		if traffic == nil {
+			continue
+		}
 		if traffic.IsInbound {
 			err = tx.Model(&model.Inbound{}).Where("tag = ? AND node_id IS NULL", traffic.Tag).
 				Updates(map[string]any{
@@ -134,7 +137,13 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 
 	emails := make([]string, 0, len(traffics))
 	for _, traffic := range traffics {
+		if traffic == nil {
+			continue
+		}
 		emails = append(emails, traffic.Email)
+	}
+	if len(emails) == 0 {
+		return nil
 	}
 	dbClientTraffics := make([]*xray.ClientTraffic, 0, len(traffics))
 	// Match purely by email. client_traffics is email-keyed (one shared row per

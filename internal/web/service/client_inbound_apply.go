@@ -222,6 +222,9 @@ func (s *ClientService) delInboundClients(inboundSvc *InboundService, inboundId 
 	// Apply runtime deletes after commit — outside the serialized writer so a
 	// slow node call can't stall traffic accounting.
 	nodePushFailed := false
+	if oldInbound.NodeID == nil && oldInbound.Protocol == model.Mieru && len(targets) > 0 {
+		inboundSvc.applyLocalMieru(oldInbound.Id)
+	}
 	for _, t := range targets {
 		if len(t.email) == 0 {
 			continue
@@ -594,6 +597,8 @@ func (s *ClientService) AddInboundClient(inboundSvc *InboundService, data *model
 			inboundSvc.applyLocalAmneziaWG(oldInbound.Id)
 		} else if oldInbound.Protocol == model.TUIC {
 			inboundSvc.applyLocalTuic(oldInbound.Id)
+		} else if oldInbound.Protocol == model.Mieru {
+			inboundSvc.applyLocalMieru(oldInbound.Id)
 		} else {
 			for _, client := range clients {
 				if len(client.Email) == 0 {
@@ -1046,6 +1051,8 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 				inboundSvc.applyLocalAmneziaWG(oldInbound.Id)
 			} else if oldInbound.Protocol == model.TUIC {
 				inboundSvc.applyLocalTuic(oldInbound.Id)
+			} else if oldInbound.Protocol == model.Mieru {
+				inboundSvc.applyLocalMieru(oldInbound.Id)
 			} else {
 				if oldClients[clientIndex].Enable {
 					err1 := rt.RemoveUser(context.Background(), oldInbound, oldEmail)
@@ -1243,6 +1250,8 @@ func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inbo
 				inboundSvc.applyLocalAmneziaWG(oldInbound.Id)
 			} else if oldInbound.Protocol == model.TUIC {
 				inboundSvc.applyLocalTuic(oldInbound.Id)
+			} else if oldInbound.Protocol == model.Mieru {
+				inboundSvc.applyLocalMieru(oldInbound.Id)
 			} else if needApiDel {
 				// Local inbound: a disabled client isn't in the running Xray, so only
 				// a live one (needApiDel) needs an API removal.

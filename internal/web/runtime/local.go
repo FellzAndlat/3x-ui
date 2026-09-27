@@ -12,6 +12,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
+	"github.com/SawaMEN/3x-ui/v3/internal/mieru"
 	"github.com/SawaMEN/3x-ui/v3/internal/mtproto"
 	"github.com/SawaMEN/3x-ui/v3/internal/tuic"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
@@ -52,6 +53,9 @@ func (l *Local) applyCoreChange(ctx context.Context) error {
 func (l *Local) withAPI(fn func(api *xray.XrayAPI) error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.deps.APIPort == nil {
+		return errors.New("local xray API port is not configured")
+	}
 	port := l.deps.APIPort()
 	if port == 0 {
 		return nil
@@ -68,6 +72,13 @@ func (l *Local) withAPI(fn func(api *xray.XrayAPI) error) error {
 }
 
 func (l *Local) AddInbound(ctx context.Context, ib *model.Inbound) error {
+	if ib.Protocol == model.Mieru {
+		inst, ok := mieru.InstanceFromInbound(ib)
+		if !ok {
+			return nil
+		}
+		return mieru.GetManager().Ensure(inst)
+	}
 	if ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel {
 		inst, err := externalvpn.FromInbound(ib)
 		if err != nil {
@@ -111,6 +122,10 @@ func (l *Local) AddInbound(ctx context.Context, ib *model.Inbound) error {
 }
 
 func (l *Local) DelInbound(ctx context.Context, ib *model.Inbound) error {
+	if ib.Protocol == model.Mieru {
+		mieru.GetManager().Remove(ib.Id)
+		return nil
+	}
 	if ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel {
 		externalvpn.GetManager().Remove(ib.Id)
 		return nil
@@ -146,8 +161,11 @@ func (l *Local) UpdateInbound(ctx context.Context, oldIb, newIb *model.Inbound) 
 		}
 		return nil
 	}
-	if l.isSingBox() && oldIb.Protocol != model.MTProto && oldIb.Protocol != model.AmneziaWG && oldIb.Protocol != model.TUIC && newIb.Protocol != model.MTProto && newIb.Protocol != model.AmneziaWG && newIb.Protocol != model.TUIC {
+	if l.isSingBox() && oldIb.Protocol != model.MTProto && oldIb.Protocol != model.AmneziaWG && oldIb.Protocol != model.TUIC && oldIb.Protocol != model.Mieru && newIb.Protocol != model.MTProto && newIb.Protocol != model.AmneziaWG && newIb.Protocol != model.TUIC && newIb.Protocol != model.Mieru {
 		return l.applyCoreChange(ctx)
+	}
+	if oldIb.Protocol == model.Mieru || newIb.Protocol == model.Mieru {
+		return l.updateMieruInbound(ctx, oldIb, newIb)
 	}
 	if oldIb.Protocol == model.MTProto || newIb.Protocol == model.MTProto {
 		return l.updateMtprotoInbound(ctx, oldIb, newIb)
@@ -237,8 +255,31 @@ func (l *Local) updateTuicInbound(ctx context.Context, oldIb, newIb *model.Inbou
 	return tuic.GetManager().Ensure(inst)
 }
 
+func (l *Local) updateMieruInbound(ctx context.Context, oldIb, newIb *model.Inbound) error {
+	if oldIb.Protocol == model.Mieru && newIb.Protocol != model.Mieru {
+		mieru.GetManager().Remove(oldIb.Id)
+		if !newIb.Enable {
+			return nil
+		}
+		return l.AddInbound(ctx, newIb)
+	}
+	if oldIb.Protocol != model.Mieru {
+		_ = l.DelInbound(ctx, oldIb)
+	}
+	if !newIb.Enable {
+		mieru.GetManager().Remove(newIb.Id)
+		return nil
+	}
+	inst, ok := mieru.InstanceFromInbound(newIb)
+	if !ok {
+		mieru.GetManager().Remove(newIb.Id)
+		return nil
+	}
+	return mieru.GetManager().Ensure(inst)
+}
+
 func (l *Local) AddUser(ctx context.Context, ib *model.Inbound, userMap map[string]any) error {
-	if ib.Protocol == model.MTProto || ib.Protocol == model.AmneziaWG || ib.Protocol == model.TUIC || ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel {
+	if ib.Protocol == model.MTProto || ib.Protocol == model.AmneziaWG || ib.Protocol == model.TUIC || ib.Protocol == model.Mieru || ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel {
 		return nil
 	}
 	if l.isSingBox() {
@@ -248,7 +289,7 @@ func (l *Local) AddUser(ctx context.Context, ib *model.Inbound, userMap map[stri
 }
 
 func (l *Local) RemoveUser(ctx context.Context, ib *model.Inbound, email string) error {
-	if ib.Protocol == model.MTProto || ib.Protocol == model.AmneziaWG || ib.Protocol == model.TUIC || ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel {
+	if ib.Protocol == model.MTProto || ib.Protocol == model.AmneziaWG || ib.Protocol == model.TUIC || ib.Protocol == model.Mieru || ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel {
 		return nil
 	}
 	if l.isSingBox() {
@@ -278,6 +319,9 @@ func (l *Local) DeleteUser(ctx context.Context, ib *model.Inbound, email string)
 }
 func (l *Local) DeleteClient(context.Context, string) error { return nil }
 func (l *Local) UpdateUser(ctx context.Context, ib *model.Inbound, oldEmail string, payload model.Client) error {
+	if ib.Protocol == model.Mieru {
+		return nil // The caller reapplies the full inbound after committing its client list.
+	}
 	if l.isSingBox() {
 		// sing-box reads the client list from the database when regenerating
 		// its config. Avoid the remove+add double restart used by Xray's API.

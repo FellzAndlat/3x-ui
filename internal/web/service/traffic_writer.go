@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -133,7 +134,7 @@ func safeApply(fn func() error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("traffic writer panic: %v", r)
-			logger.Error(err.Error())
+			logger.Errorf("%s\n%s", err, debug.Stack())
 		}
 	}()
 	return fn()
