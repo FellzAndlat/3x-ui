@@ -17,11 +17,11 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/locale"
-	"github.com/SawaMEN/3x-ui/v3/internal/web/middleware"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/network"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // Server represents the subscription server that serves subscription links and JSON configurations.
@@ -61,7 +61,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	}
 
 	if subDomain != "" {
-		engine.Use(middleware.DomainValidatorMiddleware(subDomain))
+		engine.Use(s.subscriptionDomainValidator(subDomain))
 	}
 
 	LinksPath, err := s.settingService.GetSubPath()
@@ -343,7 +343,92 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 		WithSUBIncyRoutingRules(SubIncyRoutingRules),
 	)
 
+	// Hiddify migration keeps the original /<proxy_path_client>/<UUID>/ URL as
+	// a compatibility alias. NoRoute is used so configured 3x-ui paths keep
+	// precedence and legacy aliases can be added by an import without restart.
+	engine.NoRoute(s.legacyHiddifySubscription)
+
 	return engine, nil
+}
+
+func (s *Server) subscriptionDomainValidator(primary string) gin.HandlerFunc {
+	primary = normalizeRequestHost(primary)
+	return func(c *gin.Context) {
+		host := normalizeRequestHost(c.Request.Host)
+		if host == primary {
+			c.Next()
+			return
+		}
+
+		aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
+		if err == nil {
+			for _, alias := range aliases {
+				for _, domain := range alias.Domains {
+					if host == normalizeRequestHost(domain) {
+						c.Next()
+						return
+					}
+				}
+			}
+		}
+
+		c.AbortWithStatus(http.StatusForbidden)
+	}
+}
+
+func normalizeRequestHost(host string) string {
+	host = strings.TrimSpace(host)
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	} else {
+		host = strings.Trim(host, "[]")
+	}
+	return strings.TrimSuffix(strings.ToLower(host), ".")
+}
+
+func (s *Server) legacyHiddifySubscription(c *gin.Context) {
+	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
+	if err != nil {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	subID, ok := legacyHiddifySubID(c.Request.URL.Path, aliases)
+	if !ok {
+		c.Status(http.StatusNotFound)
+		return
+	}
+
+	c.AddParam("subid", subID)
+	s.sub.subs(c)
+}
+
+func legacyHiddifySubID(requestPath string, aliases []service.HiddifyLegacySubscriptionAlias) (string, bool) {
+	for _, alias := range aliases {
+		path := strings.Trim(strings.TrimSpace(alias.Path), "/")
+		if path == "" {
+			continue
+		}
+		prefix := "/" + path + "/"
+		if !strings.HasPrefix(requestPath, prefix) {
+			continue
+		}
+
+		tail := strings.TrimPrefix(requestPath, prefix)
+		tail = strings.TrimSuffix(tail, "/")
+		if tail == "" || strings.Contains(tail, "/") {
+			continue
+		}
+		if _, err := uuid.Parse(tail); err != nil {
+			continue
+		}
+		return tail, true
+	}
+	return "", false
 }
 
 // Start initializes and starts the subscription server with configured settings.

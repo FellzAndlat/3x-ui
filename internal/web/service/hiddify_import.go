@@ -14,6 +14,17 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 )
 
+type hiddifyDomain struct {
+	Domain         string   `json:"domain"`
+	DownloadDomain string   `json:"download_domain"`
+	ShowDomains    []string `json:"show_domains"`
+}
+
+type hiddifyConfig struct {
+	Key   string `json:"key"`
+	Value any    `json:"value"`
+}
+
 // HiddifyBackup is the legacy JSON export produced by Hiddify Panel. The
 // proxy list describes templates, not independent listeners: several entries
 // share the same public port through Hiddify's external routing layer.
@@ -40,8 +51,8 @@ type HiddifyBackup struct {
 		L3        string `json:"l3"`
 		CDN       string `json:"cdn"`
 	} `json:"proxies"`
-	Domains  []json.RawMessage `json:"domains"`
-	HConfigs []json.RawMessage `json:"hconfigs"`
+	Domains  []hiddifyDomain `json:"domains"`
+	HConfigs []hiddifyConfig `json:"hconfigs"`
 }
 
 type HiddifyPreview struct {
@@ -69,20 +80,83 @@ func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error
 			return nil, preview, fmt.Errorf("backup contains an invalid traffic allowance")
 		}
 	}
+
+	legacyAlias, err := b.HiddifyLegacySubscriptionAlias()
+	if err != nil {
+		return nil, preview, err
+	}
+
 	preview.Users = len(b.Users)
 	preview.Warnings = []string{
 		"Пользователи будут без подключений. После создания входящих подключений прикрепите к ним пользователей — тогда в подписках появятся профили.",
-		"UUID сохранится как ID подписки. Старые URL Hiddify имеют другой путь; для их сохранения потребуется настроить перенаправление отдельно.",
 		"Для пользователей без даты первого подключения срок действия начнётся в день импорта.",
 		"Ключи SSH (Ed25519) из Hiddify не переносятся: в модели пользователей панели нет полей для них.",
 	}
+	if legacyAlias.Path != "" {
+		preview.Warnings = append([]string{
+			fmt.Sprintf("Старые URL Hiddify с путём /%s/<UUID>/ будут сохранены как совместимые ссылки.", legacyAlias.Path),
+		}, preview.Warnings...)
+	} else {
+		preview.Warnings = append([]string{
+			"В резервной копии не найден proxy_path_client, поэтому старые URL Hiddify автоматически сохранить нельзя.",
+		}, preview.Warnings...)
+	}
+
 	return &b, preview, nil
+}
+
+// HiddifyLegacySubscriptionAlias returns the public path and host names used by
+// Hiddify for links like https://domain/<proxy_path_client>/<UUID>/.
+func (b *HiddifyBackup) HiddifyLegacySubscriptionAlias() (HiddifyLegacySubscriptionAlias, error) {
+	var alias HiddifyLegacySubscriptionAlias
+	for _, config := range b.HConfigs {
+		if config.Key != "proxy_path_client" {
+			continue
+		}
+		value, ok := config.Value.(string)
+		if !ok {
+			return alias, fmt.Errorf("Hiddify proxy_path_client must be a string")
+		}
+		path, err := normalizeHiddifyLegacySubPath(value)
+		if err != nil {
+			return alias, err
+		}
+		alias.Path = path
+		break
+	}
+	if alias.Path == "" {
+		return alias, nil
+	}
+
+	seenDomains := make(map[string]struct{})
+	for _, item := range b.Domains {
+		values := make([]string, 0, 2+len(item.ShowDomains))
+		values = append(values, item.Domain, item.DownloadDomain)
+		values = append(values, item.ShowDomains...)
+		for _, value := range values {
+			domain, err := normalizeHiddifyLegacyDomain(value)
+			if err != nil || domain == "" {
+				continue
+			}
+			if _, exists := seenDomains[domain]; exists {
+				continue
+			}
+			seenDomains[domain] = struct{}{}
+			alias.Domains = append(alias.Domains, domain)
+		}
+	}
+	return alias, nil
 }
 
 // HiddifyClients preserves each user's UUID as the VPN credential and sub ID.
 // Used traffic is subtracted from the allowance because Hiddify's counter is
 // per user, while the new traffic records start at zero.
 func (b *HiddifyBackup) HiddifyClients() ([]ClientCreatePayload, error) {
+	legacyAlias, err := b.HiddifyLegacySubscriptionAlias()
+	if err != nil {
+		return nil, err
+	}
+
 	items := make([]ClientCreatePayload, 0, len(b.Users))
 	for _, user := range b.Users {
 		remaining := user.UsageLimitGB - user.CurrentUsageGB
@@ -127,6 +201,11 @@ func (b *HiddifyBackup) HiddifyClients() ([]ClientCreatePayload, error) {
 				TgID:   user.TelegramID,
 			},
 		})
+	}
+	if legacyAlias.Path != "" {
+		if err := (&SettingService{}).AddHiddifyLegacySubscriptionAlias(legacyAlias); err != nil {
+			return nil, fmt.Errorf("save legacy Hiddify subscription URL: %w", err)
+		}
 	}
 	return items, nil
 }
