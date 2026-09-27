@@ -40,6 +40,21 @@ func TestAppendTelemtWebProxyConfig(t *testing.T) {
 	}
 }
 
+func TestTelemtWebSubscriptionLocationsRouteImportedHiddifyPath(t *testing.T) {
+	locations := renderTelemtWebSubscriptionLocations([]HiddifyLegacySubscriptionAlias{
+		{Path: "BackupPath123"},
+		{Path: "../../other"},
+	}, "http://127.0.0.1:2096")
+	if !strings.Contains(locations, "location ^~ /BackupPath123/") ||
+		!strings.Contains(locations, "proxy_pass http://127.0.0.1:2096;") ||
+		!strings.Contains(locations, "proxy_set_header Host $host;") {
+		t.Fatalf("missing subscription route: %s", locations)
+	}
+	if strings.Contains(locations, "other") || strings.Contains(locations, "location / {") {
+		t.Fatalf("unsafe or overly broad subscription route: %s", locations)
+	}
+}
+
 func TestPickTelemtWebListenPort(t *testing.T) {
 	port, err := pickTelemtWebListenPort(telemtWebListenPort)
 	if err != nil || port == telemtWebListenPort {

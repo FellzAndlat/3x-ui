@@ -133,6 +133,9 @@ func runWebServer() {
 	if err != nil {
 		log.Fatalf("Error starting sub server: %v", err)
 	}
+	if err := service.RefreshTelemtWebSubscriptionRoutes(); err != nil {
+		logger.Warning("Could not update Telemt WEB subscription routes: ", err)
+	}
 
 	sigCh := make(chan os.Signal, 8)
 	// Trap shutdown signals

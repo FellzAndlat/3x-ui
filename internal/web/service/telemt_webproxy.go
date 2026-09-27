@@ -514,11 +514,95 @@ func writeTelemtWebNginxConfig(state TelemtWebProxyState) error {
 	if host, _, err := net.SplitHostPort(state.PublicAddr); err == nil && net.ParseIP(host) != nil && net.ParseIP(host).To4() == nil {
 		listen = "listen [::]:443 ssl;"
 	}
-	config := fmt.Sprintf("map $http_upgrade $xui_telemt_connection_upgrade {\n    default upgrade;\n    ''      '';\n}\n\nupstream xui_telemt_web {\n    server %s:%d;\n    keepalive 64;\n}\n\nserver {\n    %s\n    server_name %s;\n    access_log off;\n\n    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    client_max_body_size 2m;\n\n    location / {\n        proxy_pass http://xui_telemt_web;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Forwarded-For $remote_addr;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection $xui_telemt_connection_upgrade;\n        proxy_connect_timeout 5s;\n        proxy_read_timeout 65s;\n        proxy_send_timeout 65s;\n        proxy_request_buffering off;\n        proxy_buffering off;\n        proxy_next_upstream off;\n    }\n}\n", telemtWebListenIP, state.ListenPort, listen, state.Domain, state.CertFile, state.KeyFile)
+	locations, err := telemtWebSubscriptionLocations(&SettingService{})
+	if err != nil {
+		return err
+	}
+	config := fmt.Sprintf("map $http_upgrade $xui_telemt_connection_upgrade {\n    default upgrade;\n    ''      '';\n}\n\nupstream xui_telemt_web {\n    server %s:%d;\n    keepalive 64;\n}\n\nserver {\n    %s\n    server_name %s;\n    access_log off;\n\n    ssl_certificate %s;\n    ssl_certificate_key %s;\n    ssl_protocols TLSv1.2 TLSv1.3;\n    client_max_body_size 2m;\n\n%s    location / {\n        proxy_pass http://xui_telemt_web;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Forwarded-For $remote_addr;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection $xui_telemt_connection_upgrade;\n        proxy_connect_timeout 5s;\n        proxy_read_timeout 65s;\n        proxy_send_timeout 65s;\n        proxy_request_buffering off;\n        proxy_buffering off;\n        proxy_next_upstream off;\n    }\n}\n", telemtWebListenIP, state.ListenPort, listen, state.Domain, state.CertFile, state.KeyFile, locations)
 	if err := os.MkdirAll(filepath.Dir(telemtWebNginxConf), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(telemtWebNginxConf, []byte(config), 0o644)
+}
+
+// The Telemt WEB vhost normally sends every URL to its decoy backend. Imported
+// Hiddify subscription paths must reach the subscription listener instead.
+func telemtWebSubscriptionLocations(s *SettingService) (string, error) {
+	aliases, err := s.GetHiddifyLegacySubscriptionAliases()
+	if err != nil || len(aliases) == 0 {
+		return "", err
+	}
+	port, err := s.GetSubPort()
+	if err != nil {
+		return "", err
+	}
+	listen, err := s.GetSubListen()
+	if err != nil {
+		return "", err
+	}
+	if listen == "" || listen == "0.0.0.0" {
+		listen = "127.0.0.1"
+	} else if listen == "::" {
+		listen = "::1"
+	} else if net.ParseIP(listen) == nil {
+		return "", fmt.Errorf("invalid subscription listen address %q for Telemt WEB proxy", listen)
+	}
+	cert, err := s.GetSubCertFile()
+	if err != nil {
+		return "", err
+	}
+	key, err := s.GetSubKeyFile()
+	if err != nil {
+		return "", err
+	}
+	scheme := "http"
+	if cert != "" && key != "" {
+		scheme = "https"
+	}
+	return renderTelemtWebSubscriptionLocations(aliases, scheme+"://"+net.JoinHostPort(listen, fmt.Sprint(port))), nil
+}
+
+func renderTelemtWebSubscriptionLocations(aliases []HiddifyLegacySubscriptionAlias, upstream string) string {
+	var locations strings.Builder
+	for _, alias := range aliases {
+		path, err := normalizeHiddifyLegacySubPath(alias.Path)
+		if err != nil || path == "" {
+			continue
+		}
+		fmt.Fprintf(&locations, "    location ^~ /%s/ {\n        proxy_pass %s;\n        proxy_set_header Host $host;\n        proxy_set_header X-Forwarded-For $remote_addr;\n        proxy_connect_timeout 5s;\n        proxy_read_timeout 65s;\n    }\n\n", path, upstream)
+	}
+	return locations.String()
+}
+
+// RefreshTelemtWebSubscriptionRoutes updates a previously generated Telemt
+// vhost when aliases are imported or after the panel is upgraded.
+func RefreshTelemtWebSubscriptionRoutes() error {
+	state, err := readTelemtWebState()
+	if err != nil || !state.Enabled {
+		return err
+	}
+	previous, err := os.ReadFile(telemtWebNginxConf)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := writeTelemtWebNginxConfig(state); err != nil {
+		return err
+	}
+	updated, err := os.ReadFile(telemtWebNginxConf)
+	if err != nil {
+		return err
+	}
+	if string(updated) == string(previous) || !telemtWebNginxActive() {
+		return nil
+	}
+	if err := telemtWebReloadNginx(); err != nil {
+		_ = os.WriteFile(telemtWebNginxConf, previous, 0o644)
+		return err
+	}
+	return nil
 }
 
 func removeTelemtWebNginxConfig() error {

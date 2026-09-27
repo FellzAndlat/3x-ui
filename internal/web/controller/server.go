@@ -154,6 +154,10 @@ func (a *ServerController) importHiddify(c *gin.Context) {
 			jsonMsg(c, "Hiddify users imported, but saving their legacy subscription URL failed", err)
 			return
 		}
+		if err := service.RefreshTelemtWebSubscriptionRoutes(); err != nil {
+			jsonMsg(c, "Hiddify users imported, but updating the Telemt WEB proxy subscription route failed", err)
+			return
+		}
 	}
 	jsonObj(c, gin.H{"created": result.Created, "skipped": result.Skipped, "subscriptionURI": legacyURI}, nil)
 }
