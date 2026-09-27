@@ -1741,7 +1741,8 @@ export const sections: readonly Section[] = [
         params: [
           { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
         ],
-        response: '{\n  "success": true,\n  "obj": [\n    "vless://uuid@host:443?...#user1"\n  ]\n}',
+        response:
+          '{\n  "success": true,\n  "obj": [\n    "vless://uuid@host:443?...#user1"\n  ]\n}',
       },
     ],
   },
@@ -2066,7 +2067,8 @@ export const sections: readonly Section[] = [
         path: '/panel/api/setting/testSmtp',
         summary:
           'Test SMTP connection with stage-by-stage reporting (connect, auth, send). Returns structured result with stage and message.',
-        response: '{\n  "success": true,\n  "stage": "send",\n  "msg": "Test email sent successfully"\n}',
+        response:
+          '{\n  "success": true,\n  "stage": "send",\n  "msg": "Test email sent successfully"\n}',
       },
       {
         method: 'POST',
