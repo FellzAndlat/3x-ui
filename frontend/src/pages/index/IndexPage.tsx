@@ -250,7 +250,12 @@ export default function IndexPage() {
               ) : (
                 <div className="ov-page">
                   {portBindError && (
-                    <Alert type="error" showIcon message={portBindError} style={{ marginBottom: 16 }} />
+                    <Alert
+                      type="error"
+                      showIcon
+                      message={portBindError}
+                      style={{ marginBottom: 16 }}
+                    />
                   )}
                   <OverviewActionBar
                     status={status}
