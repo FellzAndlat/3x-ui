@@ -164,7 +164,7 @@ jobs:
           cp internal/Telemt/telemt.service x-ui/
           cp internal/Telemt/telemt-update.service x-ui/
           cp internal/Telemt/telemt-update.timer x-ui/
-          cp internal/Telemt/telemt-update.sh x-ui/
+          install -m 0755 internal/Telemt/telemt-update.sh x-ui/telemt-update.sh
           cp internal/Telemt/telemt.toml.example x-ui/
           cp internal/Telemt/telemt-meko-fix.sh x-ui/
           cp internal/Telemt/telemt-meko-fix.service x-ui/

@@ -261,7 +261,7 @@ func telemtLatestVersion(current string) (string, bool) {
 	latest := ""
 	if _, err := os.Stat("/usr/local/x-ui/telemt-update.sh"); err == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		out, _ := exec.CommandContext(ctx, "/usr/local/x-ui/telemt-update.sh", "--check").CombinedOutput()
+		out, _ := telemtUpdaterCommand(ctx, telemtUpdaterPath, "--check").CombinedOutput()
 		cancel()
 
 		for _, line := range strings.Split(string(out), "\n") {
@@ -329,9 +329,32 @@ func fetchTelemtLatestRelease() string {
 const telemtUpdaterPath = "/usr/local/x-ui/telemt-update.sh"
 const telemtUpdaterURL = "https://raw.githubusercontent.com/SawaMEN/3x-ui/main/internal/Telemt/telemt-update.sh"
 
-func ensureTelemtUpdater() error {
-	if _, err := os.Stat(telemtUpdaterPath); err == nil {
+func telemtUpdaterCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
+	// Bash can read a previously installed 0644 script even before its mode is
+	// repaired. It also works when an old archive lost the executable bit.
+	return exec.CommandContext(ctx, "/bin/bash", append([]string{path}, args...)...)
+}
+
+func repairTelemtUpdaterMode(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("telemt: updater is not a regular file: %s", path)
+	}
+	if info.Mode().Perm() == 0o755 {
 		return nil
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		return fmt.Errorf("telemt: repair updater permissions: %w", err)
+	}
+	return nil
+}
+
+func ensureTelemtUpdater() error {
+	if _, err := os.Lstat(telemtUpdaterPath); err == nil {
+		return repairTelemtUpdaterMode(telemtUpdaterPath)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("telemt: check updater: %w", err)
 	}
@@ -376,7 +399,7 @@ func ensureTelemtUpdater() error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("telemt: install updater: %w", err)
 	}
-	return nil
+	return repairTelemtUpdaterMode(telemtUpdaterPath)
 }
 
 func telemtUpdate() error {
@@ -385,7 +408,7 @@ func telemtUpdate() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, telemtUpdaterPath).CombinedOutput()
+	out, err := telemtUpdaterCommand(ctx, telemtUpdaterPath).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("telemt: update failed: %s: %w", strings.TrimSpace(string(out)), err)
 	}
