@@ -615,7 +615,7 @@ func (a *SettingController) setSwappiness(c *gin.Context) {
 }
 
 func (a *SettingController) systemUpdateStatus(c *gin.Context) {
-	status, err := systemupdate.GetStatus(c.Request.Context())
+	status, err := systemupdate.GetStatus(c.Request.Context(), c.Query("allPackages") == "true")
 	if err != nil {
 		jsonObj(c, status, err)
 		return
@@ -624,7 +624,7 @@ func (a *SettingController) systemUpdateStatus(c *gin.Context) {
 }
 
 func (a *SettingController) systemUpdateCheck(c *gin.Context) {
-	status, err := systemupdate.Refresh(c.Request.Context())
+	status, err := systemupdate.Refresh(c.Request.Context(), c.Query("allPackages") == "true")
 	if err != nil {
 		jsonObj(c, status, err)
 		return
@@ -633,7 +633,7 @@ func (a *SettingController) systemUpdateCheck(c *gin.Context) {
 }
 
 func (a *SettingController) systemUpdateApply(c *gin.Context) {
-	result, err := systemupdate.Apply(c.Request.Context())
+	result, err := systemupdate.Apply(c.Request.Context(), c.Query("allPackages") == "true")
 	if err != nil {
 		jsonObj(c, result, err)
 		return

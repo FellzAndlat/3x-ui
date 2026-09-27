@@ -6,8 +6,10 @@ import {
   Card,
   Descriptions,
   Modal,
+  Pagination,
   Popconfirm,
   Space,
+  Switch,
   Table,
   Tag,
   Typography,
@@ -86,6 +88,7 @@ type SystemUpdateStatus = {
   updatesAvailable: boolean;
   missingPackages: boolean;
   canUpdate: boolean;
+  allPackages: boolean;
   notes: string[];
 };
 
@@ -167,6 +170,7 @@ function normalizeSystemUpdate(value: unknown): SystemUpdateStatus {
     updatesAvailable: raw.updatesAvailable === true,
     missingPackages: raw.missingPackages === true,
     canUpdate: raw.canUpdate === true,
+    allPackages: raw.allPackages === true,
     notes: Array.isArray(raw.notes)
       ? raw.notes.filter((item): item is string => typeof item === 'string')
       : [],
@@ -199,6 +203,8 @@ export default function SystemUpdateModal({
   const [systemUpdateBusy, setSystemUpdateBusy] = useState(false);
   const [systemUpdate, setSystemUpdate] = useState<SystemUpdateStatus | null>(null);
   const [systemUpdateResult, setSystemUpdateResult] = useState<SystemUpdateResult | null>(null);
+  const [includeAllPackages, setIncludeAllPackages] = useState(false);
+  const [packagePage, setPackagePage] = useState(1);
   const [dependencies, setDependencies] = useState<DependencyStatus[]>([]);
   const [dependencyBusy, setDependencyBusy] = useState<DependencyKey | null>(null);
 
@@ -386,7 +392,9 @@ export default function SystemUpdateModal({
     setSystemUpdateBusy(true);
     try {
       const [msg] = await Promise.all([
-        HttpUtil.post('/panel/api/setting/system/update/check') as Promise<ApiMsg<unknown>>,
+        HttpUtil.post(
+          `/panel/api/setting/system/update/check?allPackages=${includeAllPackages}`,
+        ) as Promise<ApiMsg<unknown>>,
         loadDependencyUpdates(),
       ]);
       if (!msg?.success) throw new Error(msg?.msg || 'Failed to check system updates');
@@ -397,7 +405,7 @@ export default function SystemUpdateModal({
     } finally {
       setSystemUpdateBusy(false);
     }
-  }, [loadDependencyUpdates, messageApi]);
+  }, [includeAllPackages, loadDependencyUpdates, messageApi]);
 
   const requestDependencyUpdate = useCallback(async (dependency: DependencyStatus) => {
     switch (dependency.key) {
@@ -454,10 +462,14 @@ export default function SystemUpdateModal({
         await waitForUpdateRecovery(delay);
       }
 
-      const status = await HttpUtil.get('/panel/api/setting/system/update/status', undefined, {
-        silent: true,
-        timeout: 15000,
-      });
+      const status = await HttpUtil.get(
+        `/panel/api/setting/system/update/status?allPackages=${includeAllPackages}`,
+        undefined,
+        {
+          silent: true,
+          timeout: 15000,
+        },
+      );
       if (status.success) {
         const normalized = normalizeSystemUpdate(status.obj);
         setSystemUpdate(normalized);
@@ -466,13 +478,13 @@ export default function SystemUpdateModal({
     }
 
     return null;
-  }, []);
+  }, [includeAllPackages]);
 
   const applyAllUpdates = async () => {
     setSystemUpdateBusy(true);
     try {
       const systemMsg = (await HttpUtil.post(
-        '/panel/api/setting/system/update/apply',
+        `/panel/api/setting/system/update/apply?allPackages=${includeAllPackages}`,
       )) as ApiMsg<unknown>;
       let systemUpdateRecovered = Boolean(systemMsg?.success);
 
@@ -579,7 +591,7 @@ export default function SystemUpdateModal({
   const systemUpdateRows = useMemo(
     () =>
       (systemUpdate?.packages ?? [])
-        .filter((item) => item.required || item.kernel)
+        .filter((item) => systemUpdate?.allPackages || item.required || item.kernel)
         .map((item) => ({
           ...item,
           key: item.kernel ? 'kernel:' + item.name : 'package:' + item.name,
@@ -602,7 +614,11 @@ export default function SystemUpdateModal({
   const renderPackageStatus = (row: SystemUpdatePackage) => (
     <Space size={4} wrap>
       <Tag color={row.kernel ? 'geekblue' : 'blue'}>
-        {row.kernel ? t('pages.settings.swap.kernelPackage') : t('pages.settings.swap.dependency')}
+        {row.kernel
+          ? t('pages.settings.swap.kernelPackage')
+          : row.required
+            ? t('pages.settings.swap.dependency')
+            : t('pages.settings.swap.otherPackage')}
       </Tag>
       {row.updateAvailable && (
         <Tag color="warning">{t('pages.settings.swap.updatesAvailable')}</Tag>
@@ -647,11 +663,11 @@ export default function SystemUpdateModal({
               </Button>
             )}
             <Popconfirm
-              title={
-                unstableComponentUpdateAvailable
-                  ? t('pages.settings.swap.unstableUpdateConfirmTitle')
-                  : t('pages.settings.swap.updateConfirm')
-              }
+              title={t(
+                includeAllPackages
+                  ? 'pages.settings.swap.updateAllConfirm'
+                  : 'pages.settings.swap.updateConfirm',
+              )}
               description={
                 unstableComponentUpdateAvailable
                   ? t('pages.settings.swap.unstableUpdateConfirm')
@@ -678,7 +694,11 @@ export default function SystemUpdateModal({
                   (!systemUpdate.canUpdate && !componentUpdatesAvailable)
                 }
               >
-                {t('pages.settings.swap.updateNow')}
+                {t(
+                  includeAllPackages
+                    ? 'pages.settings.swap.updateAllNow'
+                    : 'pages.settings.swap.updateNow',
+                )}
               </Button>
             </Popconfirm>
           </div>
@@ -688,6 +708,19 @@ export default function SystemUpdateModal({
           <Alert type="info" showIcon title={t('pages.settings.swap.checkUpdates')} />
         ) : (
           <div className="system-update-content">
+            <Space wrap>
+              <Switch
+                checked={includeAllPackages}
+                disabled={systemUpdateBusy || dependencyBusy !== null}
+                onChange={(checked) => {
+                  setIncludeAllPackages(checked);
+                  setPackagePage(1);
+                  setSystemUpdate(null);
+                  setSystemUpdateResult(null);
+                }}
+              />
+              <Typography.Text>{t('pages.settings.swap.allPackagesOption')}</Typography.Text>
+            </Space>
             <Descriptions
               size="small"
               bordered
@@ -854,7 +887,7 @@ export default function SystemUpdateModal({
             >
               {isMobile ? (
                 <div className="system-package-list">
-                  {systemUpdateRows.map((row) => (
+                  {systemUpdateRows.slice((packagePage - 1) * 20, packagePage * 20).map((row) => (
                     <Card key={row.key} size="small" className="system-package-card">
                       <Typography.Text strong>{row.name}</Typography.Text>
                       <div className="system-package-meta">
@@ -872,11 +905,20 @@ export default function SystemUpdateModal({
                       {renderPackageStatus(row)}
                     </Card>
                   ))}
+                  {systemUpdateRows.length > 20 && (
+                    <Pagination
+                      simple
+                      current={packagePage}
+                      total={systemUpdateRows.length}
+                      pageSize={20}
+                      onChange={setPackagePage}
+                    />
+                  )}
                 </div>
               ) : (
                 <Table
                   size="small"
-                  pagination={false}
+                  pagination={systemUpdateRows.length > 20 ? { pageSize: 20 } : false}
                   rowKey="key"
                   dataSource={systemUpdateRows}
                   columns={[

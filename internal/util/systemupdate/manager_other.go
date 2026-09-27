@@ -7,15 +7,15 @@ import (
 	"fmt"
 )
 
-func GetStatus(ctx context.Context) (Status, error) {
+func GetStatus(ctx context.Context, allPackages bool) (Status, error) {
 	return Status{}, fmt.Errorf("system package management is only supported on Linux")
 }
 
-func Refresh(ctx context.Context) (Status, error) {
+func Refresh(ctx context.Context, allPackages bool) (Status, error) {
 	return Status{}, fmt.Errorf("system package management is only supported on Linux")
 }
 
-func Apply(ctx context.Context) (UpdateResult, error) {
+func Apply(ctx context.Context, allPackages bool) (UpdateResult, error) {
 	return UpdateResult{}, fmt.Errorf("system package management is only supported on Linux")
 }
 

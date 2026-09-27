@@ -29,6 +29,7 @@ type Status struct {
 	UpdatesAvailable bool            `json:"updatesAvailable"`
 	MissingPackages  bool            `json:"missingPackages"`
 	CanUpdate        bool            `json:"canUpdate"`
+	AllPackages      bool            `json:"allPackages"`
 	Notes            []string        `json:"notes"`
 }
 

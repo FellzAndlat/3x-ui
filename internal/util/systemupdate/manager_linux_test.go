@@ -211,7 +211,7 @@ func TestCollectPackageStatusesIncludesOnlyRequiredAndKernelUpdates(t *testing.T
 		"bash":             "5.2.0",
 	}
 
-	packages, kernels, missing := collectPackageStatuses("ubuntu", upgrades, lookup)
+	packages, kernels, missing := collectPackageStatuses("ubuntu", upgrades, lookup, false)
 	if missing {
 		t.Fatalf("collectPackageStatuses() reported missing required packages")
 	}
@@ -245,6 +245,24 @@ func TestCollectPackageStatusesIncludesOnlyRequiredAndKernelUpdates(t *testing.T
 	}
 	if len(kernels) != 1 || kernels[0].Name != "linux-image-test" {
 		t.Fatalf("kernel packages = %#v", kernels)
+	}
+}
+
+func TestAllPackagesScopeShowsOnlyInstalledUpgrades(t *testing.T) {
+	upgrades := map[string]string{"curl": "2", "bash": "2", "linux-image-test": "2", "not-installed": "2"}
+	lookup := func(name string) (string, bool) {
+		if name == "not-installed" {
+			return "", false
+		}
+		return "1", true
+	}
+	packages, _, _ := collectPackageStatuses("ubuntu", upgrades, lookup, true)
+	selected := packagesToUpgrade(packages, true)
+	if got := strings.Join(selected, ","); got != "bash,curl,linux-image-test" {
+		t.Fatalf("all packages upgrade = %s", got)
+	}
+	if got := strings.Join(packagesToUpgrade(packages, false), ","); got != "curl,linux-image-test" {
+		t.Fatalf("panel packages upgrade = %s", got)
 	}
 }
 

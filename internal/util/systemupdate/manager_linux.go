@@ -52,7 +52,7 @@ func (d distroInfo) distributionForPackages() string {
 
 var packageVersionPattern = regexp.MustCompile("^(.+)-([0-9][^[:space:]]*)[[:space:]]+<[[:space:]]+(.+)$")
 
-func GetStatus(ctx context.Context) (Status, error) {
+func GetStatus(ctx context.Context, allPackages bool) (Status, error) {
 	info := detectDistribution()
 	status := Status{
 		Distribution:   info.id,
@@ -60,6 +60,7 @@ func GetStatus(ctx context.Context) (Status, error) {
 		PackageManager: info.manager,
 		Supported:      info.manager != "",
 		RunningAsRoot:  os.Geteuid() == 0,
+		AllPackages:     allPackages,
 	}
 	if !status.Supported {
 		return status, fmt.Errorf("unsupported Linux distribution or package manager")
@@ -80,6 +81,7 @@ func GetStatus(ctx context.Context) (Status, error) {
 			}
 			return installedPackageVersion(info.manager, name)
 		},
+		allPackages,
 	)
 	status.Packages = packages
 	status.MissingPackages = missingPackages
@@ -127,14 +129,14 @@ func GetStatus(ctx context.Context) (Status, error) {
 	}
 	return status, nil
 }
-func Refresh(ctx context.Context) (Status, error) {
+func Refresh(ctx context.Context, allPackages bool) (Status, error) {
 	info := detectDistribution()
 	if info.manager == "" {
 		return Status{}, fmt.Errorf("unsupported Linux distribution or package manager")
 	}
 
 	refreshErr := refreshPackageDatabase(ctx, info.manager)
-	status, statusErr := GetStatus(ctx)
+	status, statusErr := GetStatus(ctx, allPackages)
 	if statusErr != nil {
 		if refreshErr != nil {
 			return status, fmt.Errorf("package metadata refresh failed: %w; status check failed: %v", refreshErr, statusErr)
@@ -153,7 +155,7 @@ func newUpdateContext(_ context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), commandTimeout)
 }
 
-func Apply(ctx context.Context) (UpdateResult, error) {
+func Apply(ctx context.Context, allPackages bool) (UpdateResult, error) {
 	updateMu.Lock()
 	defer updateMu.Unlock()
 
@@ -172,7 +174,7 @@ func Apply(ctx context.Context) (UpdateResult, error) {
 	if err := refreshPackageDatabase(updateCtx, info.manager); err != nil {
 		return UpdateResult{}, err
 	}
-	status, err := GetStatus(updateCtx)
+	status, err := GetStatus(updateCtx, allPackages)
 	if err != nil {
 		return UpdateResult{}, err
 	}
@@ -204,15 +206,21 @@ func Apply(ctx context.Context) (UpdateResult, error) {
 		}
 	}
 
-	upgradeArgs := packageUpgradeCommand(info.manager)
-	if info.manager == "pacman" && len(missing) > 0 {
-		upgradeArgs = packageUpgradeCommand(info.manager, missing)
+	selected := packagesToUpgrade(status.Packages, allPackages)
+	var upgradeErr error
+	if info.manager == "pacman" {
+		// Arch cannot safely upgrade only selected packages after a sync.
+		args := packageUpgradeCommand(info.manager, missing)
+		output, err := runCommand(updateCtx, args[0], args[1:]...)
+		outputs, upgradeErr = append(outputs, output), err
+	} else if len(selected) > 0 {
+		args := packageUpgradeCommand(info.manager, selected)
+		output, err := runCommand(updateCtx, args[0], args[1:]...)
+		outputs, upgradeErr = append(outputs, output), err
 	}
-	output, upgradeErr := runCommand(updateCtx, upgradeArgs[0], upgradeArgs[1:]...)
-	outputs = append(outputs, output)
 
 	result := UpdateResult{
-		Updated:        upgradeErr == nil,
+		Updated:        upgradeErr == nil && (len(selected) > 0 || len(missing) > 0),
 		Output:         truncateOutput(strings.Join(outputs, "\n"), 20000),
 		RebootRequired: status.Kernel.UpdateAvailable || status.Kernel.RebootRequired,
 	}
@@ -223,6 +231,17 @@ func Apply(ctx context.Context) (UpdateResult, error) {
 
 	result.RebootRequired = result.RebootRequired || rebootRequired(info.manager)
 	return result, nil
+}
+
+func packagesToUpgrade(packages []PackageStatus, allPackages bool) []string {
+	selected := make([]string, 0)
+	for _, item := range packages {
+		if item.Installed && item.UpdateAvailable && (allPackages || item.Required || item.Kernel) {
+			selected = append(selected, item.Name)
+		}
+	}
+	sort.Strings(selected)
+	return selected
 }
 
 func packageInstallCommand(manager string, names []string) ([]string, bool) {
@@ -395,6 +414,7 @@ func collectPackageStatuses(
 	distribution string,
 	upgrades map[string]string,
 	lookup func(string) (string, bool),
+	allPackages bool,
 ) ([]PackageStatus, []PackageStatus, bool) {
 	packages := make([]PackageStatus, 0, len(upgrades)+len(requiredPackages(distribution)))
 	seen := make(map[string]bool)
@@ -431,14 +451,14 @@ func collectPackageStatuses(
 	}
 
 	for name, availableVersion := range upgrades {
-		if seen[name] || !isKernelPackage(name) {
+		if seen[name] || (!allPackages && !isKernelPackage(name)) {
 			continue
 		}
 		_, installed := lookup(name)
 		if !installed {
 			continue
 		}
-		appendPackage(name, availableVersion, false, true)
+		appendPackage(name, availableVersion, false, isKernelPackage(name))
 	}
 
 	sort.Slice(packages, func(i, j int) bool {

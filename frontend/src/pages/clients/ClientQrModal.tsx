@@ -42,11 +42,6 @@ interface ClientQrModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-interface ApiMsg<T = unknown> {
-  success?: boolean;
-  obj?: T;
-}
-
 type QrVariant = 'standard' | 'happ';
 type HappError = 'too_long' | 'unavailable' | null;
 
