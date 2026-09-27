@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -146,6 +148,57 @@ func (s *SettingService) AddHiddifyLegacySubscriptionAlias(value HiddifyLegacySu
 
 	aliases = append(aliases, alias)
 	return s.saveHiddifyLegacySubscriptionAliases(aliases)
+}
+
+// HiddifySubscriptionURI uses the path from the backup and the public origin
+// chosen by the operator. An empty origin reuses the current subscription
+// origin, then falls back to the first domain present in the backup.
+func (s *SettingService) HiddifySubscriptionURI(alias HiddifyLegacySubscriptionAlias, publicOrigin string) (string, error) {
+	if alias.Path == "" {
+		return "", nil
+	}
+	if strings.TrimSpace(publicOrigin) == "" {
+		current, err := s.GetSubURI()
+		if err != nil {
+			return "", err
+		}
+		if parsed, err := url.Parse(current); err == nil && parsed.Scheme != "" && parsed.Host != "" {
+			publicOrigin = parsed.Scheme + "://" + parsed.Host
+		} else if len(alias.Domains) > 0 {
+			publicOrigin = "https://" + alias.Domains[0]
+		} else {
+			return "", nil
+		}
+	}
+	publicOrigin = strings.TrimSpace(publicOrigin)
+	if !strings.Contains(publicOrigin, "://") {
+		publicOrigin = "https://" + publicOrigin
+	}
+	parsed, err := url.Parse(publicOrigin)
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("enter a public subscription domain or an http(s) origin without a path")
+	}
+	if _, err := normalizeHiddifyLegacyDomain(parsed.Hostname()); err != nil {
+		return "", fmt.Errorf("invalid subscription domain: %w", err)
+	}
+	if port := parsed.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("invalid subscription port")
+		}
+	}
+	return parsed.Scheme + "://" + parsed.Host + "/" + alias.Path + "/", nil
+}
+
+func (s *SettingService) SaveHiddifySubscriptionURL(alias HiddifyLegacySubscriptionAlias, uri string) error {
+	if err := s.AddHiddifyLegacySubscriptionAlias(alias); err != nil {
+		return err
+	}
+	if uri == "" {
+		return nil
+	}
+	return s.setString("subURI", uri)
 }
 
 func (s *SettingService) saveHiddifyLegacySubscriptionAliases(aliases []HiddifyLegacySubscriptionAlias) error {

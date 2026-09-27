@@ -29,6 +29,7 @@ import (
 	systemswap "github.com/SawaMEN/3x-ui/v3/internal/util/swap"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/sys"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/controller"
+	"github.com/SawaMEN/3x-ui/v3/internal/web/global"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/job"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/locale"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/middleware"
@@ -281,6 +282,10 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	// Let unknown panel document routes fall back to the SPA shell, while every
 	// non-SPA miss still returns a hard 404.
 	engine.NoRoute(func(c *gin.Context) {
+		if subServer := global.GetSubServer(); subServer != nil && subServer.ServeLegacySubscription(c.Writer, c.Request) {
+			c.Abort()
+			return
+		}
 		if s.panel.HandleNoRoutePanelSPA(c) {
 			return
 		}

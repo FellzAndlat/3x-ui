@@ -3,6 +3,7 @@ package global
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	_ "unsafe"
 
@@ -12,6 +13,7 @@ import (
 var (
 	webServer WebServer
 	subServer SubServer
+	subServerMu sync.RWMutex
 
 	restartHookMu sync.RWMutex
 	restartHook   func()
@@ -27,6 +29,7 @@ type WebServer interface {
 // SubServer interface defines methods for accessing the subscription server instance.
 type SubServer interface {
 	GetCtx() context.Context // Get the server context
+	ServeLegacySubscription(http.ResponseWriter, *http.Request) bool
 }
 
 // SetWebServer sets the global web server instance.
@@ -41,11 +44,15 @@ func GetWebServer() WebServer {
 
 // SetSubServer sets the global subscription server instance.
 func SetSubServer(s SubServer) {
+	subServerMu.Lock()
 	subServer = s
+	subServerMu.Unlock()
 }
 
 // GetSubServer returns the global subscription server instance.
 func GetSubServer() SubServer {
+	subServerMu.RLock()
+	defer subServerMu.RUnlock()
 	return subServer
 }
 

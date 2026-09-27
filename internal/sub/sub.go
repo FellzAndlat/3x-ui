@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
@@ -27,6 +28,7 @@ import (
 // Server represents the subscription server that serves subscription links and JSON configurations.
 type Server struct {
 	httpServer *http.Server
+	routerMu sync.RWMutex
 	listener   net.Listener
 
 	sub            *SUBController
@@ -430,6 +432,33 @@ func legacyHiddifySubID(requestPath string, aliases []service.HiddifyLegacySubsc
 	return "", false
 }
 
+// ServeLegacySubscription lets the panel's public domain serve migrated URLs
+// when its reverse proxy points to the panel listener rather than the separate
+// subscription listener. Only an imported secret path plus a UUID is forwarded.
+func (s *Server) ServeLegacySubscription(w http.ResponseWriter, r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
+	if err != nil {
+		return false
+	}
+	if _, ok := legacyHiddifySubID(r.URL.Path, aliases); !ok {
+		return false
+	}
+	s.routerMu.RLock()
+	var handler http.Handler
+	if s.httpServer != nil {
+		handler = s.httpServer.Handler
+	}
+	s.routerMu.RUnlock()
+	if handler == nil {
+		return false
+	}
+	handler.ServeHTTP(w, r)
+	return true
+}
+
 // Start initializes and starts the subscription server with configured settings.
 func (s *Server) Start() (err error) {
 	// This is an anonymous function, no function name
@@ -493,6 +522,7 @@ func (s *Server) Start() (err error) {
 	}
 	s.listener = listener
 
+	s.routerMu.Lock()
 	s.httpServer = &http.Server{
 		Handler: engine,
 		// The subscription server is the most exposed (public) listener; without
@@ -503,6 +533,7 @@ func (s *Server) Start() (err error) {
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
+	s.routerMu.Unlock()
 
 	go network.ServeHTTP(s.httpServer, listener, "Subscription server")
 

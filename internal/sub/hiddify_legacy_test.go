@@ -1,9 +1,12 @@
 package sub
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
+	"github.com/gin-gonic/gin"
 )
 
 func TestLegacyHiddifySubID(t *testing.T) {
@@ -31,6 +34,81 @@ func TestLegacyHiddifySubID(t *testing.T) {
 	} {
 		if got, ok := legacyHiddifySubID(path, aliases); ok {
 			t.Fatalf("legacyHiddifySubID(%q) unexpectedly matched %q", path, got)
+		}
+	}
+}
+
+func TestLegacyHiddifyRouteAcceptsNewSubscriptionDomain(t *testing.T) {
+	initSubDB(t)
+	const id = "b1337b29-8d60-4491-a468-c2bf120cb878"
+	if err := (&service.SettingService{}).AddHiddifyLegacySubscriptionAlias(service.HiddifyLegacySubscriptionAlias{Path: "BackupPath123", Domains: []string{"old.example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer()
+	router := gin.New()
+	router.Use(s.subscriptionDomainValidator("old.example.com"))
+	router.NoRoute(func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/BackupPath123/" + id, http.StatusNoContent},
+		{"/BackupPath123/" + id + "/", http.StatusNoContent},
+		{"/wrong/" + id, http.StatusForbidden},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "http://cdn.example.com"+tc.path, nil)
+		res := httptest.NewRecorder()
+		router.ServeHTTP(res, req)
+		if res.Code != tc.want {
+			t.Fatalf("GET %s on CDN host: HTTP %d, want %d", tc.path, res.Code, tc.want)
+		}
+	}
+}
+
+func TestPanelForwardsOnlyImportedHiddifySubscriptionPath(t *testing.T) {
+	initSubDB(t)
+	const id = "b1337b29-8d60-4491-a468-c2bf120cb878"
+	if err := (&service.SettingService{}).AddHiddifyLegacySubscriptionAlias(service.HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer()
+	inner := gin.New()
+	inner.NoRoute(func(c *gin.Context) { c.Status(http.StatusOK) })
+	s.httpServer = &http.Server{Handler: inner}
+	panel := gin.New()
+	panel.NoRoute(func(c *gin.Context) {
+		if s.ServeLegacySubscription(c.Writer, c.Request) {
+			c.Abort()
+			return
+		}
+		c.Status(http.StatusNotFound)
+	})
+	for _, tc := range []struct {
+		path string
+		forward bool
+	}{
+		{"/BackupPath123/" + id, true},
+		{"/other/" + id, false},
+		{"/BackupPath123/not-a-uuid", false},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "https://cdn.example.com"+tc.path, nil)
+		res := httptest.NewRecorder()
+		forwarded := s.ServeLegacySubscription(res, req)
+		if forwarded != tc.forward {
+			t.Fatalf("%s forwarded = %v, want %v", tc.path, forwarded, tc.forward)
+		}
+		if forwarded && res.Code != http.StatusOK {
+			t.Fatalf("%s: HTTP %d", tc.path, res.Code)
+		}
+		res = httptest.NewRecorder()
+		panel.ServeHTTP(res, req)
+		want := http.StatusNotFound
+		if tc.forward {
+			want = http.StatusOK
+		}
+		if res.Code != want {
+			t.Fatalf("panel GET %s: HTTP %d, want %d", tc.path, res.Code, want)
 		}
 	}
 }

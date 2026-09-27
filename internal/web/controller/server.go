@@ -136,6 +136,11 @@ func (a *ServerController) importHiddify(c *gin.Context) {
 		jsonMsg(c, "Hiddify import failed", err)
 		return
 	}
+	legacyURI, err := a.settingService.HiddifySubscriptionURI(legacyAlias, c.PostForm("subscriptionDomain"))
+	if err != nil {
+		jsonMsg(c, "Hiddify import failed", err)
+		return
+	}
 	result, _, err := a.clientService.ImportClients(nil, items)
 	if err != nil {
 		jsonMsg(c, "Hiddify import failed", err)
@@ -145,12 +150,12 @@ func (a *ServerController) importHiddify(c *gin.Context) {
 		notifyClientsChanged()
 	}
 	if legacyAlias.Path != "" {
-		if err := a.settingService.AddHiddifyLegacySubscriptionAlias(legacyAlias); err != nil {
+		if err := a.settingService.SaveHiddifySubscriptionURL(legacyAlias, legacyURI); err != nil {
 			jsonMsg(c, "Hiddify users imported, but saving their legacy subscription URL failed", err)
 			return
 		}
 	}
-	jsonObj(c, gin.H{"created": result.Created, "skipped": result.Skipped}, nil)
+	jsonObj(c, gin.H{"created": result.Created, "skipped": result.Skipped, "subscriptionURI": legacyURI}, nil)
 }
 
 // startTask registers the @2s ticker that refreshes server status, samples

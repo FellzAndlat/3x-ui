@@ -93,6 +93,7 @@ export default function GeneralTab({
   const [runningCore, setRunningCore] = useState<'xray' | 'sing-box' | 'none'>('none');
   const [hiddifyOpen, setHiddifyOpen] = useState(false);
   const [hiddifyFile, setHiddifyFile] = useState<File | null>(null);
+  const [hiddifyDomain, setHiddifyDomain] = useState('');
   const [hiddifyPreview, setHiddifyPreview] = useState<{
     users: number;
     warnings: string[];
@@ -106,11 +107,13 @@ export default function GeneralTab({
   const hiddifyRequest = async (action: 'preview' | 'import', file: File) => {
     const form = new FormData();
     form.append('backup', file);
+    if (action === 'import') form.append('subscriptionDomain', hiddifyDomain.trim());
     return HttpUtil.post<{
       users?: number;
       warnings?: string[];
       created?: number;
       skipped?: unknown[];
+      subscriptionURI?: string;
     }>(`/panel/api/server/hiddify/${action}`, form, { silentSuccess: true });
   };
 
@@ -138,6 +141,10 @@ export default function GeneralTab({
         const skipped = (result.obj?.skipped ?? []) as { email: string; reason: string }[];
         const created = result.obj?.created ?? 0;
         setHiddifyResult({ created, skipped });
+        if (result.obj?.subscriptionURI) {
+          updateSetting({ subURI: result.obj.subscriptionURI });
+          message.success(`URL подписки сохранён: ${result.obj.subscriptionURI}`);
+        }
         if (skipped.length === 0) {
           message.success(`Импортировано пользователей: ${created}.`);
           setHiddifyOpen(false);
@@ -647,7 +654,12 @@ export default function GeneralTab({
                         )}
                       <Space wrap style={{ width: '100%' }}>
                         {allSetting.coreType === 'sing-box' && (
-                          <Button onClick={() => setHiddifyOpen(true)}>
+                          <Button
+                            onClick={() => {
+                              setHiddifyDomain(window.location.origin);
+                              setHiddifyOpen(true);
+                            }}
+                          >
                             Импорт пользователей Hiddify
                           </Button>
                         )}
@@ -1028,7 +1040,19 @@ export default function GeneralTab({
         }}
       >
         <p>
-          Выберите JSON резервной копии Hiddify. Подключения и настройки сервера не импортируются.
+          Выберите JSON резервной копии Hiddify. Подключения не импортируются. Путь подписки будет
+          взят из копии.
+        </p>
+        <Input
+          aria-label="Публичный домен подписки"
+          placeholder="https://cdn.example.com"
+          value={hiddifyDomain}
+          onChange={(event) => setHiddifyDomain(event.target.value)}
+          style={{ marginBottom: 12 }}
+        />
+        <p style={{ color: 'var(--ant-color-text-secondary)' }}>
+          Укажите домен, который направляет запросы к службе подписки. Адрес будет сохранён для
+          ссылок пользователей.
         </p>
         <input
           type="file"

@@ -45,6 +45,46 @@ func TestHiddifyClientsPreserveIndependentUserURLs(t *testing.T) {
 	}
 }
 
+func TestHiddifySubscriptionURLUsesBackupPathAndPublicDomain(t *testing.T) {
+	s := &SettingService{}
+	for _, path := range []string{"SharedPath123", "Different_Path-456"} {
+		alias := HiddifyLegacySubscriptionAlias{Path: path, Domains: []string{"old.example.com"}}
+		got, err := s.HiddifySubscriptionURI(alias, "cdn.example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "https://cdn.example.com/" + path + "/"; got != want {
+			t.Fatalf("subscription base = %q, want %q", got, want)
+		}
+	}
+	for _, input := range []string{"https://cdn.example.com/wrong-path", "file://cdn.example.com", "https://user:pass@cdn.example.com"} {
+		if _, err := s.HiddifySubscriptionURI(HiddifyLegacySubscriptionAlias{Path: "SharedPath123"}, input); err == nil {
+			t.Fatalf("accepted invalid public origin %q", input)
+		}
+	}
+}
+
+func TestSaveHiddifySubscriptionURLPersistsAliasAndDisplayedURL(t *testing.T) {
+	setupConflictDB(t)
+	s := &SettingService{}
+	alias := HiddifyLegacySubscriptionAlias{Path: "BackupPath123", Domains: []string{"old.example.com"}}
+	uri, err := s.HiddifySubscriptionURI(alias, "https://cdn.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveHiddifySubscriptionURL(alias, uri); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.GetSubURI()
+	if err != nil || stored != "https://cdn.example.com/BackupPath123/" {
+		t.Fatalf("displayed subscription base = %q, %v", stored, err)
+	}
+	aliases, err := s.GetHiddifyLegacySubscriptionAliases()
+	if err != nil || len(aliases) != 1 || aliases[0].Path != alias.Path {
+		t.Fatalf("legacy routes = %#v, %v", aliases, err)
+	}
+}
+
 func TestParseHiddifyBackupReadsLegacySubscriptionPathFromBackup(t *testing.T) {
 	const backupTemplate = `{
 		"users":[{"uuid":"768e8bdd-bee3-4442-9006-b26464148aaa","name":"Vadlo","enable":true,"is_active":true,"usage_limit_GB":100,"current_usage_GB":10,"package_days":30}],
