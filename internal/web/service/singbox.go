@@ -363,6 +363,14 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 			unsupported = append(unsupported, fmt.Sprintf("%s: %v", inbound.Tag, err))
 			continue
 		}
+		if inbound.Protocol == model.ShadowTLS {
+			inner, err := singbox.TranslateShadowTLSInnerInbound(raw)
+			if err != nil {
+				unsupported = append(unsupported, fmt.Sprintf("%s: %v", inbound.Tag, err))
+				continue
+			}
+			cfg.Inbounds = append(cfg.Inbounds, inner)
+		}
 		cfg.Inbounds = append(cfg.Inbounds, translated)
 	}
 	if len(unsupported) > 0 {

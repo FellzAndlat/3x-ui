@@ -1149,71 +1149,9 @@ func (s *SubService) genNaiveLink(inbound *model.Inbound, email string) string {
 }
 
 func (s *SubService) genShadowTlsLink(inbound *model.Inbound, email string) string {
-	if inbound.Protocol != model.ShadowTLS {
-		return ""
-	}
-	client, ok := s.clientForLink(inbound, email)
-	if !ok || client.Password == "" {
-		return ""
-	}
-
-	settings := s.linkSettings(inbound)
-	handshake, _ := settings["handshake"].(map[string]any)
-	handshakeServer, _ := handshake["server"].(string)
-	handshakeServer = strings.TrimSpace(handshakeServer)
-	if handshakeServer == "" {
-		handshakeServer, _ = handshake["address"].(string)
-		handshakeServer = strings.TrimSpace(handshakeServer)
-	}
-	if handshakeServer == "" && settings["wildcardSni"] != "all" {
-		handshakeServer = "cloudflare.com"
-	}
-
-	version := 3
-	if rawVersion, ok := settings["version"].(float64); ok && int(rawVersion) > 0 {
-		version = int(rawVersion)
-	}
-
-	links := make([]string, 0)
-	for _, ep := range s.shareEndpointsForInbound(inbound) {
-		if strings.EqualFold(strings.TrimSpace(ep.ForceTls), "none") {
-			continue
-		}
-		address := strings.TrimSpace(ep.Address)
-		if address == "" {
-			address = s.resolveInboundAddress(inbound)
-		}
-		port := ep.Port
-		if port <= 0 {
-			port = inbound.Port
-		}
-		if address == "" || port <= 0 {
-			continue
-		}
-		params := map[string]string{"version": strconv.Itoa(version)}
-		if handshakeServer != "" {
-			params["sni"] = handshakeServer
-		}
-		if ep.ep != nil {
-			if sni, ok := externalProxySNI(ep.ep); ok {
-				params["sni"] = sni
-			}
-			if isHostEndpoint(ep.ep) {
-				s.renderHostRemark(inbound, client, ep.ep, "")
-			}
-		}
-		if params["sni"] == "" {
-			continue
-		}
-		var rawEndpoint map[string]any
-		if ep.ep != nil {
-			rawEndpoint = ep.ep
-		}
-		remark := s.endpointRemark(inbound, email, rawEndpoint, "")
-		link := fmt.Sprintf("shadowtls://%s@%s", encodeUserinfo(client.Password), joinHostPort(address, port))
-		links = append(links, buildLinkWithParams(link, params, remark))
-	}
-	return strings.Join(links, "\n")
+	// There is no standalone share URI for a ShadowTLS transport plus its
+	// inner destination protocol. The sing-box subscription emits both layers.
+	return ""
 }
 
 // naiveShareEndpoints returns the concrete dial endpoints that belong to a Naive

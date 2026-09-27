@@ -687,7 +687,7 @@ func TestTranslateXrayShadowTLSInbound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["type"] != "shadowtls" || got["version"] != 3 || got["listen_port"] != 443 {
+	if got["type"] != "shadowtls" || got["version"] != 3 || got["listen_port"] != 443 || got["detour"] != "__shadowtls_socks_shadowtls-443" {
 		t.Fatalf("unexpected ShadowTLS config: %#v", got)
 	}
 	handshake, ok := got["handshake"].(map[string]any)
@@ -700,6 +700,15 @@ func TestTranslateXrayShadowTLSInbound(t *testing.T) {
 	users, ok := got["users"].([]map[string]any)
 	if !ok || len(users) != 1 || users[0]["name"] != "alice" || users[0]["password"] != "secret" {
 		t.Fatalf("unexpected ShadowTLS users: %#v", got["users"])
+	}
+	inner, err := TranslateShadowTLSInnerInbound(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	innerUsers, ok := inner["users"].([]map[string]any)
+	if inner["type"] != "socks" || inner["tag"] != got["detour"] || inner["listen"] != "127.0.0.1" ||
+		inner["listen_port"] != 0 || !ok || len(innerUsers) != 1 || innerUsers[0]["username"] != "alice" || innerUsers[0]["password"] != "secret" {
+		t.Fatalf("unexpected inner SOCKS inbound: %#v", inner)
 	}
 }
 

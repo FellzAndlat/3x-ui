@@ -73,6 +73,56 @@ func TestBuildSeparatedSingBoxSubscription_AlwaysReturnArrayForSingleProxy(t *te
 	}
 }
 
+func TestBuildShadowTLSSubscriptionsKeepTransportAndVisibleSOCKS(t *testing.T) {
+	makeProxy := func(tag string) map[string]any {
+		return map[string]any{
+			"type": "socks", "tag": tag, "username": tag, "password": "secret",
+			"server": "127.0.0.1", "server_port": 1, "detour": "§hide§ shadowtls-transport",
+			"_panel_shadowtls_transport": map[string]any{
+				"type": "shadowtls", "tag": "§hide§ shadowtls-transport",
+				"server": "edge.example.com", "server_port": 443, "version": 3, "password": "secret",
+			},
+		}
+	}
+	separated, err := buildSeparatedSingBoxSubscription(nil, []map[string]any{makeProxy("alice")}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profile map[string]any
+	if err := json.Unmarshal([]byte(separated), &profile); err != nil {
+		t.Fatal(err)
+	}
+	outs := profile["outbounds"].([]any)
+	if len(outs) != 4 || outs[0].(map[string]any)["type"] != "socks" || outs[1].(map[string]any)["type"] != "shadowtls" {
+		t.Fatalf("invalid standalone ShadowTLS profile: %s", separated)
+	}
+	if _, leaked := outs[0].(map[string]any)["_panel_shadowtls_transport"]; leaked {
+		t.Fatalf("internal metadata leaked into profile: %s", separated)
+	}
+
+	hiddify, err := buildHiddifySingBoxSubscription([]map[string]any{makeProxy("alice"), makeProxy("bob")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(hiddify), &profile); err != nil {
+		t.Fatalf("Hiddify importer requires a single object: %v: %s", err, hiddify)
+	}
+	outs = profile["outbounds"].([]any)
+	if len(outs) != 4 {
+		t.Fatalf("Hiddify outbound count: %s", hiddify)
+	}
+	for i := 0; i < 4; i += 2 {
+		transport := outs[i].(map[string]any)
+		proxy := outs[i+1].(map[string]any)
+		if transport["type"] != "shadowtls" || proxy["type"] != "socks" || proxy["detour"] != transport["tag"] {
+			t.Fatalf("broken Hiddify transport binding: %s", hiddify)
+		}
+	}
+	if outs[0].(map[string]any)["tag"] == outs[2].(map[string]any)["tag"] {
+		t.Fatalf("ShadowTLS transport tags are not unique: %s", hiddify)
+	}
+}
+
 
 func TestBuildSeparatedSingBoxSubscriptionFailsClosedOnRoutingTranslation(t *testing.T) {
 	template := map[string]any{
@@ -189,11 +239,15 @@ func TestGenNativeShadowTLSUsesHandshakeServer(t *testing.T) {
 	if got == nil {
 		t.Fatal("genNativeTLSLike returned nil")
 	}
-	if got["type"] != "shadowtls" || got["server"] != "shadowtls.example.com" ||
-		got["server_port"] != 443 || got["version"] != 3 || got["password"] != "secret" {
-		t.Fatalf("unexpected ShadowTLS outbound: %#v", got)
+	if got["type"] != "socks" || got["username"] != "user" || got["password"] != "secret" {
+		t.Fatalf("unexpected inner SOCKS outbound: %#v", got)
 	}
-	tls, ok := got["tls"].(map[string]any)
+	transport, ok := got["_panel_shadowtls_transport"].(map[string]any)
+	if !ok || transport["type"] != "shadowtls" || transport["server"] != "shadowtls.example.com" ||
+		transport["server_port"] != 443 || transport["version"] != 3 || transport["password"] != "secret" {
+		t.Fatalf("unexpected ShadowTLS transport: %#v", transport)
+	}
+	tls, ok := transport["tls"].(map[string]any)
 	if !ok || tls["server_name"] != "cloudflare.com" {
 		t.Fatalf("unexpected ShadowTLS TLS: %#v", got["tls"])
 	}
@@ -207,11 +261,15 @@ func TestGenNativeShadowTLSExternalEndpoint(t *testing.T) {
 	endpoint := ShareEndpoint{Address: "edge.example.com", Port: 8443, ep: map[string]any{
 		"sni": "front.example.com", "allowInsecure": true, "alpn": []any{"h2"},
 	}}
-	got := svc.genNativeTLSLikeEndpoint(subReq, inbound, model.Client{Password: "secret"}, endpoint)
-	if got == nil || got["server"] != "edge.example.com" || got["server_port"] != 8443 {
+	got := svc.genNativeTLSLikeEndpoint(subReq, inbound, model.Client{Email: "user", Password: "secret"}, endpoint)
+	if got == nil {
+		t.Fatal("genNativeTLSLikeEndpoint returned nil")
+	}
+	transport, _ := got["_panel_shadowtls_transport"].(map[string]any)
+	if transport["server"] != "edge.example.com" || transport["server_port"] != 8443 {
 		t.Fatalf("unexpected ShadowTLS endpoint: %#v", got)
 	}
-	tls := got["tls"].(map[string]any)
+	tls := transport["tls"].(map[string]any)
 	if tls["server_name"] != "front.example.com" {
 		t.Fatalf("ShadowTLS endpoint SNI = %#v", tls)
 	}

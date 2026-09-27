@@ -638,6 +638,10 @@ func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 		if wildcard != "" {
 			out["wildcard_sni"] = wildcard
 		}
+		// ShadowTLS authenticates and unwraps a TCP stream; it does not carry a
+		// destination. Send that stream to an inner SOCKS inbound so clients can
+		// request their actual target through the same authenticated tunnel.
+		out["detour"] = shadowTLSInnerTag(rawString(raw, "tag"))
 	}
 	out["type"] = singProtocol
 	if listen := rawString(raw, "listen"); listen != "" {
@@ -655,6 +659,38 @@ func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 		}
 	}
 	return out, nil
+}
+
+func shadowTLSInnerTag(tag string) string {
+	return "__shadowtls_socks_" + tag
+}
+
+// TranslateShadowTLSInnerInbound builds the destination-carrying protocol for
+// a ShadowTLS inbound. The listener is loopback-only and requires the same
+// per-client credentials as the outer transport.
+func TranslateShadowTLSInnerInbound(raw map[string]any) (map[string]any, error) {
+	settings := rawObject(raw, "settings")
+	clients, _ := settings["clients"].([]any)
+	users := make([]map[string]any, 0, len(clients))
+	for _, item := range clients {
+		client, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name := rawString(client, "email")
+		password := rawString(client, "password")
+		if name == "" || password == "" || len(name) > 255 || len(password) > 255 {
+			return nil, fmt.Errorf("ShadowTLS inner SOCKS user requires a name and password of at most 255 bytes")
+		}
+		users = append(users, map[string]any{"username": name, "password": password})
+	}
+	if len(users) == 0 {
+		return nil, fmt.Errorf("ShadowTLS inbound %q has no users", rawString(raw, "tag"))
+	}
+	return map[string]any{
+		"type": "socks", "tag": shadowTLSInnerTag(rawString(raw, "tag")),
+		"listen": "127.0.0.1", "listen_port": 0, "users": users,
+	}, nil
 }
 
 func translateUsers(out map[string]any, protocol string, settings map[string]any) error {

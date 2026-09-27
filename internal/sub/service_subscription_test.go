@@ -195,19 +195,16 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	if !strings.Contains(joined, "anytls://anytls-pass@anytls.example.com:8443/") {
 		t.Fatalf("raw subscription is missing AnyTLS: %v", links)
 	}
-	if !strings.Contains(joined, "shadowtls://shadow-pass@shadowtls.example.com:9443") {
-		t.Fatalf("raw subscription is missing ShadowTLS: %v", links)
-	}
-	if !strings.Contains(joined, "sni=cloudflare.com") {
-		t.Fatalf("ShadowTLS subscription link is missing handshake SNI: %v", links)
+	if strings.Contains(joined, "shadowtls://") {
+		t.Fatalf("raw ShadowTLS URL cannot carry the destination protocol: %v", links)
 	}
 	jsonSub, _, err := NewSubJsonService("", "", "", "", NewSubService("")).GetSingBoxJson(subID, "sub.example.com", false)
 	if err != nil || !strings.Contains(jsonSub, `"type": "shadowtls"`) || !strings.Contains(jsonSub, `"server_name": "cloudflare.com"`) {
 		t.Fatalf("sing-box subscription is missing ShadowTLS default handshake: %v\n%s", err, jsonSub)
 	}
 	controller := &SUBController{subService: NewSubService("")}
-	if !controller.hiddifyShadowTLSSubscription(subID, "Hiddify/2.0") || controller.hiddifyShadowTLSSubscription(subID, "GenericClient/1.0") {
-		t.Fatal("Hiddify compatibility must apply only to Hiddify subscriptions")
+	if !controller.hiddifyShadowTLSSubscription(subID, "Hiddify/2.0") || !controller.hiddifyShadowTLSSubscription(subID, "GenericClient/1.0") {
+		t.Fatal("compatibility setting must provide native JSON for all clients")
 	}
 	gin.SetMode(gin.TestMode)
 	router := newSubscriptionTestRouter(subscriptionTestRouterConfig{})
@@ -215,8 +212,15 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	request.Header.Set("User-Agent", "Hiddify/2.0")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type": "shadowtls"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type": "shadowtls"`) || !strings.Contains(response.Body.String(), `"type": "socks"`) {
 		t.Fatalf("Hiddify subscription must contain native ShadowTLS: HTTP %d: %s", response.Code, response.Body.String())
+	}
+	var hiddifyProfile map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &hiddifyProfile); err != nil {
+		t.Fatalf("Hiddify needs one JSON document: %v", err)
+	}
+	if len(hiddifyProfile["outbounds"].([]any)) < 3 {
+		t.Fatalf("Hiddify is missing its visible proxy or transport: %s", response.Body.String())
 	}
 }
 func TestGetSubsSkipsEmptyRenderedLinksButKeepsTraffic(t *testing.T) {

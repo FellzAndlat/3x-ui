@@ -263,6 +263,16 @@ func (s *SubJsonService) GetJson(subId string, host string, alwaysReturnArray bo
 // The existing /json/ format remains Xray-compatible; callers opt into this format
 // explicitly with ?format=sing-box so existing subscriptions are not changed.
 func (s *SubJsonService) GetSingBoxJson(subId string, host string, alwaysReturnArray bool) (string, string, error) {
+	return s.getSingBoxJson(subId, host, alwaysReturnArray, false)
+}
+
+// Hiddify expects a single JSON document with an outbounds array, including
+// the hidden ShadowTLS transport used by the visible inner proxy.
+func (s *SubJsonService) GetHiddifySingBoxJson(subId string, host string) (string, string, error) {
+	return s.getSingBoxJson(subId, host, false, true)
+}
+
+func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnArray, hiddify bool) (string, string, error) {
 	// Native subscriptions intentionally do not call GetJson(). We still reuse
 	// the panel's mature per-client endpoint generation helpers internally, but
 	// collect and translate the model-backed entries before an Xray document is
@@ -517,6 +527,9 @@ func (s *SubJsonService) GetSingBoxJson(subId string, host string, alwaysReturnA
 						continue
 					}
 					tag := client.Email
+					if inbound.Protocol == model.ShadowTLS {
+						tag = "ShadowTLS · " + tag
+					}
 					if tag == "" {
 						tag = fmt.Sprintf("proxy-%d", len(proxies)+1)
 					}
@@ -692,7 +705,12 @@ func (s *SubJsonService) GetSingBoxJson(subId string, host string, alwaysReturnA
 		proxyConfigs = append(proxyConfigs, proxy.out)
 	}
 
-	encoded, err := buildSeparatedSingBoxSubscription(s.bakedTemplate(), proxyConfigs, alwaysReturnArray)
+	var encoded string
+	if hiddify {
+		encoded, err = buildHiddifySingBoxSubscription(proxyConfigs)
+	} else {
+		encoded, err = buildSeparatedSingBoxSubscription(s.bakedTemplate(), proxyConfigs, alwaysReturnArray)
+	}
 	if err != nil {
 		return "", header, err
 	}
@@ -1428,7 +1446,8 @@ func (s *SubJsonService) genNativeTLSLike(subReq *SubService, inbound *model.Inb
 }
 
 func (s *SubJsonService) genNativeTLSLikeEndpoint(subReq *SubService, inbound *model.Inbound, client model.Client, endpoint ShareEndpoint) map[string]any {
-	if (inbound.Protocol != model.AnyTLS && inbound.Protocol != model.ShadowTLS) || client.Password == "" {
+	if (inbound.Protocol != model.AnyTLS && inbound.Protocol != model.ShadowTLS) || client.Password == "" ||
+		(inbound.Protocol == model.ShadowTLS && client.Email == "") {
 		return nil
 	}
 
@@ -1491,13 +1510,23 @@ func (s *SubJsonService) genNativeTLSLikeEndpoint(subReq *SubService, inbound *m
 	}
 	tls := map[string]any{"enabled": true, "server_name": handshakeServer}
 	applyNativeTLSHostOptions(tls, endpoint.ep)
-	return map[string]any{
+	transportTag := "§hide§ shadowtls-transport"
+	transport := map[string]any{
 		"type":        "shadowtls",
+		"tag":         transportTag,
 		"server":      server,
 		"server_port": port,
 		"version":     3,
 		"password":    client.Password,
 		"tls":         tls,
+	}
+	// ShadowTLS carries bytes but has no destination protocol. SOCKS supplies
+	// the target address and authenticates the same user inside the tunnel.
+	return map[string]any{
+		"type": "socks", "server": "127.0.0.1", "server_port": 1,
+		"username": client.Email, "password": client.Password,
+		"detour": transportTag,
+		"_panel_shadowtls_transport": transport,
 	}
 }
 
