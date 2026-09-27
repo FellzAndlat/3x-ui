@@ -94,13 +94,76 @@ func normalizeHiddifyLegacySubscriptionAlias(alias HiddifyLegacySubscriptionAlia
 	return alias, nil
 }
 
+// looksLikeRecoverableHiddifyLegacySubPath keeps the subURI recovery path
+// deliberately narrow. Hiddify proxy_path_client values are normally long,
+// random-looking secrets; ordinary custom paths such as /sub/ or /clients/
+// must never become host-independent legacy aliases by accident.
+func looksLikeRecoverableHiddifyLegacySubPath(value string) bool {
+	if len(value) < 16 {
+		return false
+	}
+	hasLetter := false
+	hasDigit := false
+	for _, r := range value {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			hasLetter = true
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		}
+	}
+	return hasLetter && hasDigit
+}
+
+// hiddifyLegacySubscriptionAliasFromSubURI recovers the imported secret path
+// from the public subscription URL. Older/upgraded installations can retain a
+// correct Hiddify-style subURI while the separate alias setting is absent or
+// stale; in that state the UI generates a valid-looking URL but Telemt Nginx
+// has no matching location and serves its decoy page instead.
+func (s *SettingService) hiddifyLegacySubscriptionAliasFromSubURI() (HiddifyLegacySubscriptionAlias, bool) {
+	current, err := s.GetSubURI()
+	if err != nil || strings.TrimSpace(current) == "" {
+		return HiddifyLegacySubscriptionAlias{}, false
+	}
+	parsed, err := url.Parse(strings.TrimSpace(current))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+		return HiddifyLegacySubscriptionAlias{}, false
+	}
+
+	path := strings.Trim(parsed.Path, "/")
+	if path == "" || strings.Contains(path, "/") || !looksLikeRecoverableHiddifyLegacySubPath(path) {
+		return HiddifyLegacySubscriptionAlias{}, false
+	}
+	path, err = normalizeHiddifyLegacySubPath(path)
+	if err != nil || path == "" {
+		return HiddifyLegacySubscriptionAlias{}, false
+	}
+
+	// Never reinterpret the panel's configured regular subscription path as a
+	// Hiddify compatibility alias, even if an operator chose a long path.
+	if subPath, subErr := s.GetSubPath(); subErr == nil && path == strings.Trim(strings.TrimSpace(subPath), "/") {
+		return HiddifyLegacySubscriptionAlias{}, false
+	}
+	// /subs/ was used by older regular subscription configurations and is not a
+	// Hiddify proxy_path_client secret.
+	if strings.EqualFold(path, "subs") {
+		return HiddifyLegacySubscriptionAlias{}, false
+	}
+
+	domain, err := normalizeHiddifyLegacyDomain(parsed.Hostname())
+	if err != nil || domain == "" {
+		return HiddifyLegacySubscriptionAlias{}, false
+	}
+	return HiddifyLegacySubscriptionAlias{Path: path, Domains: []string{domain}}, true
+}
+
 func (s *SettingService) GetHiddifyLegacySubscriptionAliases() ([]HiddifyLegacySubscriptionAlias, error) {
 	raw, err := s.getString(hiddifyLegacySubscriptionAliasesSetting)
 	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(raw) == "" {
-		return nil, nil
+		raw = "[]"
 	}
 
 	var stored []HiddifyLegacySubscriptionAlias
@@ -108,8 +171,8 @@ func (s *SettingService) GetHiddifyLegacySubscriptionAliases() ([]HiddifyLegacyS
 		return nil, fmt.Errorf("decode legacy Hiddify subscription aliases: %w", err)
 	}
 
-	out := make([]HiddifyLegacySubscriptionAlias, 0, len(stored))
-	seenPaths := make(map[string]int, len(stored))
+	out := make([]HiddifyLegacySubscriptionAlias, 0, len(stored)+1)
+	seenPaths := make(map[string]int, len(stored)+1)
 	for _, item := range stored {
 		alias, err := normalizeHiddifyLegacySubscriptionAlias(item)
 		if err != nil || alias.Path == "" {
@@ -121,6 +184,17 @@ func (s *SettingService) GetHiddifyLegacySubscriptionAliases() ([]HiddifyLegacyS
 		}
 		seenPaths[alias.Path] = len(out)
 		out = append(out, alias)
+	}
+
+	// Self-heal the route used by the URL that the panel is actually publishing.
+	// Do not persist it here: Get* methods remain read-only, while the normal
+	// Hiddify import path still stores aliases explicitly via Add/Save below.
+	if recovered, ok := s.hiddifyLegacySubscriptionAliasFromSubURI(); ok {
+		if index, exists := seenPaths[recovered.Path]; exists {
+			out[index].Domains = mergeHiddifyDomains(out[index].Domains, recovered.Domains)
+		} else {
+			out = append(out, recovered)
+		}
 	}
 	return out, nil
 }
