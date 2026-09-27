@@ -675,7 +675,7 @@ export const sections: readonly Section[] = [
       {
         method: 'GET',
         path: '/panel/api/server/getConfigJson',
-        summary: 'Return the assembled Xray config that\u2019s currently running on this host.',
+        summary: 'Return the assembled Xray config that’s currently running on this host.',
         response:
           '{\n  "success": true,\n  "obj": {\n    "log": { "loglevel": "warning" },\n    "inbounds": [...],\n    "outbounds": [...],\n    "routing": { "rules": [...] }\n  }\n}',
       },
@@ -819,7 +819,7 @@ export const sections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/server/logs/:count',
-        summary: 'Return the last N lines of the panel\u2019s own log.',
+        summary: 'Return the last N lines of the panel’s own log.',
         params: [
           { name: 'count', in: 'path', type: 'number', desc: 'Number of trailing log lines.' },
           {
@@ -956,6 +956,13 @@ export const sections: readonly Section[] = [
             desc: 'Hiddify JSON backup, up to 8 MiB.',
           },
         ],
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/server/hiddify/export',
+        summary: 'Download panel clients as a Hiddify-compatible JSON backup.',
+        description:
+          'Exports clients with UUID-compatible identities, traffic limits, expiration, Telegram ID, WireGuard keys, and the saved legacy proxy_path_client alias. Clients without a UUID-compatible identity are skipped.',
       },
       {
         method: 'POST',
@@ -1490,7 +1497,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/clients/groups/bulkRemove',
         summary:
-          "Clear the group label on many clients in one call. Inverse of /groups/bulkAdd. Clients themselves are kept — only the group label is cleared from clients.group_name and from each owning inbound's settings JSON. Groups become empty if all their members are removed.",
+          "Clear the group label on many clients in one call. Inverse of bulkAdd. Clients themselves are kept — only the group label is cleared from clients.group_name and from each owning inbound's settings JSON. Groups become empty if all their members are removed.",
         body: '{\n  "emails": ["alice", "bob"]\n}',
         response: '{\n  "success": true,\n  "obj": {\n    "affected": 2\n  }\n}',
       },
@@ -1734,8 +1741,7 @@ export const sections: readonly Section[] = [
         params: [
           { name: 'email', in: 'path', type: 'string', desc: 'Client email (unique identifier).' },
         ],
-        response:
-          '{\n  "success": true,\n  "obj": [\n    "vless://uuid@host:443?...#user1"\n  ]\n}',
+        response: '{\n  "success": true,\n  "obj": [\n    "vless://uuid@host:443?...#user1"\n  ]\n}',
       },
     ],
   },
@@ -1811,7 +1817,7 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/nodes/update/:id',
         summary:
-          'Replace a node\u2019s connection details. apiToken is write-only: omit it or send an empty string to keep the stored token; set clearApiToken=true to clear it.',
+          'Replace a node’s connection details. apiToken is write-only: omit it or send an empty string to keep the stored token; set clearApiToken=true to clear it.',
         params: [{ name: 'id', in: 'path', type: 'number', desc: 'Node ID.' }],
         body: '{\n  "name": "de-fra-1",\n  "remark": "",\n  "scheme": "https",\n  "address": "node1.example.com",\n  "port": 2053,\n  "basePath": "/",\n  "apiToken": "",\n  "clearApiToken": false,\n  "enable": true,\n  "allowPrivateAddress": false\n}',
       },
@@ -2060,8 +2066,7 @@ export const sections: readonly Section[] = [
         path: '/panel/api/setting/testSmtp',
         summary:
           'Test SMTP connection with stage-by-stage reporting (connect, auth, send). Returns structured result with stage and message.',
-        response:
-          '{\n  "success": true,\n  "stage": "send",\n  "msg": "Test email sent successfully"\n}',
+        response: '{\n  "success": true,\n  "stage": "send",\n  "msg": "Test email sent successfully"\n}',
       },
       {
         method: 'POST',
