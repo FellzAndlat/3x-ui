@@ -306,6 +306,22 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 				c.Next()
 			})
 		}
+
+		// Legacy Hiddify pages must keep their JS/CSS requests below the imported
+		// proxy_path_client prefix. Telemt Nginx intentionally exposes only that
+		// prefix, so sending the SPA bundle to the normal /sub/assets path would
+		// fall through to the WEB Proxy decoy and leave the browser page blank.
+		engine.Use(func(c *gin.Context) {
+			aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
+			if err == nil {
+				if assetPath, ok := legacyHiddifyAssetPath(c.Request.URL.Path, aliases); ok {
+					c.FileFromFS(assetPath, assetsFS)
+					c.Abort()
+					return
+				}
+			}
+			c.Next()
+		})
 	}
 
 	g := engine.Group("/")
@@ -363,11 +379,15 @@ func (s *Server) subscriptionDomainValidator(primary string) gin.HandlerFunc {
 		}
 
 		// Legacy Hiddify URLs are intentionally host-independent after migration.
-		// The secret path and the user's UUID remain mandatory, so this bypass does
-		// not open regular 3x-ui subscription routes on arbitrary Host headers.
+		// Their static assets are served below the same secret alias so browser
+		// pages work on the migrated public domain as well.
 		aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
 		if err == nil {
 			if _, ok := legacyHiddifySubID(c.Request.URL.Path, aliases); ok {
+				c.Next()
+				return
+			}
+			if _, ok := legacyHiddifyAssetPath(c.Request.URL.Path, aliases); ok {
 				c.Next()
 				return
 			}
@@ -404,8 +424,42 @@ func (s *Server) legacyHiddifySubscription(c *gin.Context) {
 		return
 	}
 
+	// Keep default SPA assets below /<proxy_path_client>/ so the surrounding
+	// reverse proxy continues routing them to the subscription listener.
+	c.Set("base_path", legacyHiddifyBasePath(c.Request.URL.Path, subID))
 	c.AddParam("subid", subID)
 	s.sub.subs(c)
+}
+
+func legacyHiddifyBasePath(requestPath, subID string) string {
+	path := strings.TrimRight(requestPath, "/")
+	if subID == "" || !strings.HasSuffix(path, "/"+subID) {
+		return "/"
+	}
+	base := strings.TrimSuffix(path, subID)
+	if !strings.HasPrefix(base, "/") || !strings.HasSuffix(base, "/") {
+		return "/"
+	}
+	return base
+}
+
+func legacyHiddifyAssetPath(requestPath string, aliases []service.HiddifyLegacySubscriptionAlias) (string, bool) {
+	for _, alias := range aliases {
+		path := strings.Trim(strings.TrimSpace(alias.Path), "/")
+		if path == "" {
+			continue
+		}
+		prefix := "/" + path + "/assets/"
+		if !strings.HasPrefix(requestPath, prefix) {
+			continue
+		}
+		assetPath := strings.TrimPrefix(requestPath, prefix)
+		if assetPath == "" || !fs.ValidPath(assetPath) {
+			continue
+		}
+		return assetPath, true
+	}
+	return "", false
 }
 
 func legacyHiddifySubID(requestPath string, aliases []service.HiddifyLegacySubscriptionAlias) (string, bool) {
@@ -434,7 +488,8 @@ func legacyHiddifySubID(requestPath string, aliases []service.HiddifyLegacySubsc
 
 // ServeLegacySubscription lets the panel's public domain serve migrated URLs
 // when its reverse proxy points to the panel listener rather than the separate
-// subscription listener. Only an imported secret path plus a UUID is forwarded.
+// subscription listener. Imported alias assets are forwarded as well so the
+// browser page stays functional outside the dedicated subscription listener.
 func (s *Server) ServeLegacySubscription(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return false
@@ -444,7 +499,9 @@ func (s *Server) ServeLegacySubscription(w http.ResponseWriter, r *http.Request)
 		return false
 	}
 	if _, ok := legacyHiddifySubID(r.URL.Path, aliases); !ok {
-		return false
+		if _, assetOK := legacyHiddifyAssetPath(r.URL.Path, aliases); !assetOK {
+			return false
+		}
 	}
 	s.routerMu.RLock()
 	var handler http.Handler
