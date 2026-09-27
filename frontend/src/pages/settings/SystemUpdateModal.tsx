@@ -606,6 +606,8 @@ export default function SystemUpdateModal({
 
   const rebootRequired =
     Boolean(systemUpdate?.kernel.rebootRequired) || Boolean(systemUpdateResult?.rebootRequired);
+  const allPackagesMode = systemUpdate?.allPackages ?? includeAllPackages;
+  const isArch = systemUpdate?.packageManager === 'pacman';
   const componentUpdatesAvailable = dependencies.some(dependencyNeedsAction);
   const unstableComponentUpdateAvailable = dependencies.some(
     (dependency) => dependency.prerelease && dependency.updateAvailable,
@@ -664,7 +666,7 @@ export default function SystemUpdateModal({
             )}
             <Popconfirm
               title={t(
-                includeAllPackages
+                allPackagesMode
                   ? 'pages.settings.swap.updateAllConfirm'
                   : 'pages.settings.swap.updateConfirm',
               )}
@@ -695,7 +697,7 @@ export default function SystemUpdateModal({
                 }
               >
                 {t(
-                  includeAllPackages
+                  allPackagesMode
                     ? 'pages.settings.swap.updateAllNow'
                     : 'pages.settings.swap.updateNow',
                 )}
@@ -710,8 +712,8 @@ export default function SystemUpdateModal({
           <div className="system-update-content">
             <Space wrap>
               <Switch
-                checked={includeAllPackages}
-                disabled={systemUpdateBusy || dependencyBusy !== null}
+                checked={allPackagesMode}
+                disabled={isArch || systemUpdateBusy || dependencyBusy !== null}
                 onChange={(checked) => {
                   setIncludeAllPackages(checked);
                   setPackagePage(1);
@@ -721,6 +723,9 @@ export default function SystemUpdateModal({
               />
               <Typography.Text>{t('pages.settings.swap.allPackagesOption')}</Typography.Text>
             </Space>
+            {isArch && (
+              <Alert type="info" showIcon title={t('pages.settings.swap.archFullUpgradeNote')} />
+            )}
             <Descriptions
               size="small"
               bordered
@@ -748,7 +753,9 @@ export default function SystemUpdateModal({
             {!systemUpdate.runningAsRoot && (
               <Alert type="error" showIcon title={t('pages.settings.swap.notRoot')} />
             )}
-            <Alert type="info" showIcon title={t('pages.settings.swap.systemUpdateNote')} />
+            {!isArch && (
+              <Alert type="info" showIcon title={t('pages.settings.swap.systemUpdateNote')} />
+            )}
             {systemUpdate.missingPackages && (
               <Alert type="warning" showIcon title={t('pages.settings.swap.missingPackages')} />
             )}

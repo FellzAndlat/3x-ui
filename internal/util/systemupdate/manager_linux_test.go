@@ -31,15 +31,6 @@ func TestRequiredPackagesIncludeNetworkProtocolDependencies(t *testing.T) {
 	}
 }
 
-func TestSystemUpdateProtocolDependencyDocumentation(t *testing.T) {
-	const note = "Зависимости новых протоколов: WireGuard, AmneziaWG и VK-Turn используют iproute2/iproute и iptables для сетевого стека и маршрутизации; MTProto/Telemt, TUIC, Naive, Mieru и Psiphon используют curl, tar, ca-certificates, openssl и socat для загрузки/запуска и TLS/туннельного окружения."
-	for _, want := range []string{"WireGuard", "AmneziaWG", "VK-Turn", "MTProto/Telemt", "TUIC", "Naive", "Mieru", "Psiphon", "iproute2/iproute", "iptables", "curl", "tar", "ca-certificates", "openssl", "socat"} {
-		if !strings.Contains(note, want) {
-			t.Fatalf("protocol dependency note missing %q: %s", want, note)
-		}
-	}
-}
-
 func TestRequiredPackagesCoverProtocolRuntimeDependencies(t *testing.T) {
 	cases := map[string][]string{
 		"ubuntu":        {"iproute2", "iptables", "socat", "curl", "tar", "ca-certificates", "openssl"},
@@ -263,6 +254,15 @@ func TestAllPackagesScopeShowsOnlyInstalledUpgrades(t *testing.T) {
 	}
 	if got := strings.Join(packagesToUpgrade(packages, false), ","); got != "curl,linux-image-test" {
 		t.Fatalf("panel packages upgrade = %s", got)
+	}
+}
+
+func TestArchAlwaysUsesFullPackageScope(t *testing.T) {
+	if !effectivePackageScope("pacman", false) || !effectivePackageScope("pacman", true) {
+		t.Fatal("pacman must always use a full upgrade scope")
+	}
+	if effectivePackageScope("apt-get", false) {
+		t.Fatal("other package managers must keep the requested scope")
 	}
 }
 
