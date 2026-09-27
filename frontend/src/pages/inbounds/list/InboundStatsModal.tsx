@@ -64,7 +64,8 @@ export default function InboundStatsModal({
         <div className="card-stats">
           <div className="stat-row">
             <span className="stat-label">{t('pages.inbounds.protocol')}</span>
-            <Tag color="purple">{record.protocol}</Tag>
+            <Tag color="purple">{record.protocol === 'shadowtls' ? 'shadowsocks' : record.protocol}</Tag>
+            {record.protocol === 'shadowtls' && <Tag color="green">ShadowTLS</Tag>}
             {(record.isWireguard || record.isHysteria) && <Tag color="green">UDP</Tag>}
             {record.isSS &&
               (() => {

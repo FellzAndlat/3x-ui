@@ -2,13 +2,14 @@ import { useTranslation } from 'react-i18next';
 import { Input, InputNumber, Select, Space, Switch, Typography } from 'antd';
 import { FormField } from '@/components/form/rhf';
 
-export default function ShadowTlsFields() {
+export default function ShadowTlsFields({ prefix = '' }: { prefix?: string }) {
   const { t } = useTranslation();
+  const field = (name: string) => ['settings', ...(prefix ? [prefix] : []), ...name.split('.')];
 
   return (
     <>
       <FormField
-        name={['settings', 'handshake', 'server']}
+        name={field('handshake.server')}
         label={t('pages.inbounds.form.shadowTlsHandshakeServer')}
         tooltip={t('pages.inbounds.form.shadowTlsHandshakeServerHint')}
       >
@@ -16,7 +17,7 @@ export default function ShadowTlsFields() {
       </FormField>
 
       <FormField
-        name={['settings', 'handshake', 'serverPort']}
+        name={field('handshake.serverPort')}
         label={t('pages.inbounds.form.shadowTlsHandshakePort')}
         tooltip={t('pages.inbounds.form.shadowTlsHandshakePortHint')}
       >
@@ -24,7 +25,7 @@ export default function ShadowTlsFields() {
       </FormField>
 
       <FormField
-        name={['settings', 'strictMode']}
+        name={field('strictMode')}
         label={t('pages.inbounds.form.shadowTlsStrictMode')}
         tooltip={t('pages.inbounds.form.shadowTlsStrictModeHint')}
         valueProp="checked"
@@ -33,7 +34,7 @@ export default function ShadowTlsFields() {
       </FormField>
 
       <FormField
-        name={['settings', 'wildcardSni']}
+        name={field('wildcardSni')}
         label={t('pages.inbounds.form.shadowTlsWildcardSni')}
         tooltip={t('pages.inbounds.form.shadowTlsWildcardSniHint')}
       >

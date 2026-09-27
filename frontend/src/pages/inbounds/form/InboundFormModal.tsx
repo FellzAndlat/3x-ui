@@ -104,7 +104,9 @@ const labelWithHint = (label: string, hint: string) => (
   </span>
 );
 
-const PROTOCOL_OPTIONS = Object.values(Protocols).map((p) => ({ value: p, label: p }));
+const PROTOCOL_OPTIONS = Object.values(Protocols)
+  .filter((p) => p !== Protocols.SHADOWTLS)
+  .map((p) => ({ value: p, label: p }));
 const SHARE_ADDR_STRATEGIES = ['node', 'listen', 'custom'] as const;
 const SHARE_ADDR_HOSTNAME_RE =
   /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
@@ -156,6 +158,7 @@ function firstRhfValidationIssue(
 }
 
 function tabForValidationPath(path: PropertyKey[]): string {
+  if (path[0] === 'settings' && path[1] === 'shadowTls') return 'stream';
   if (path[0] === 'settings') return 'protocol';
   if (path[0] === 'sniffing') return 'sniffing';
   if (path[0] === 'streamSettings') {
@@ -293,6 +296,8 @@ export default function InboundFormModal({
   const nodeShareOptionAvailable = selectableNodes.length > 0 && isNodeEligible;
   const vlessEncryption = useWatch({ control, name: 'settings.encryption' }) ?? '';
   const ssMethod = useWatch({ control, name: 'settings.method' });
+  const shadowTlsSelected = useWatch({ control, name: 'settings.shadowTls.enabled' });
+  const shadowTlsEnabled = protocol === Protocols.SHADOWSOCKS && shadowTlsSelected === true;
   const isSSWith2022 = isSS2022({
     protocol,
     settings: typeof ssMethod === 'string' ? { method: ssMethod } : {},
@@ -345,8 +350,9 @@ export default function InboundFormModal({
       Protocols.ANYTLS,
       Protocols.SHADOWTLS,
     ]);
-    if (!autoPortProtocols.has(protocol) || autoPortSeedRef.current === protocol) return;
-    autoPortSeedRef.current = protocol;
+    const portSeed = shadowTlsEnabled ? 'shadowtls' : protocol;
+    if (!autoPortProtocols.has(portSeed) || autoPortSeedRef.current === portSeed) return;
+    autoPortSeedRef.current = portSeed;
 
     if (wListen) return;
 
@@ -361,7 +367,7 @@ export default function InboundFormModal({
     if (!usedPorts.has(preferredPort)) {
       setV('port', preferredPort);
     }
-  }, [dbInbounds, mode, protocol, setV, wListen]);
+  }, [dbInbounds, mode, protocol, shadowTlsEnabled, setV, wListen]);
 
   const wNodeId = useWatch({ control, name: 'nodeId' }) ?? null;
   const shareAddrStrategy = useWatch({ control, name: 'shareAddrStrategy' }) ?? 'node';
@@ -876,6 +882,14 @@ export default function InboundFormModal({
 
   const protocolTab = (
     <>
+      {shadowTlsEnabled && (
+        <Alert
+          type="info"
+          showIcon
+          message="Shadowsocks 2022 (AES-128-GCM)"
+          description={t('pages.inbounds.form.shadowTlsHint')}
+        />
+      )}
       {protocol === Protocols.WIREGUARD && (
         <WireguardFields wgPubKey={wgPubKey} regenInboundWg={regenInboundWg} />
       )}
@@ -893,7 +907,6 @@ export default function InboundFormModal({
       {protocol === Protocols.TRUSTTUNNEL && <TrustTunnelFields />}
       {protocol === Protocols.NAIVE && <NaiveFields />}
       {protocol === Protocols.ANYTLS && <AnyTlsFields />}
-      {protocol === Protocols.SHADOWTLS && <ShadowTlsFields />}
       {protocol === Protocols.MIERU && <MieruFields />}
       {protocol === Protocols.SUDOKU && <SudokuFields />}
 
@@ -908,7 +921,7 @@ export default function InboundFormModal({
 
       {protocol === Protocols.VK_TURN_PROXY && <VkTurnProxyFields />}
 
-      {protocol === Protocols.SHADOWSOCKS && <ShadowsocksFields isSSWith2022={isSSWith2022} />}
+      {protocol === Protocols.SHADOWSOCKS && !shadowTlsEnabled && <ShadowsocksFields isSSWith2022={isSSWith2022} />}
 
       {protocol === Protocols.VLESS && (
         <VlessFields
@@ -942,6 +955,25 @@ export default function InboundFormModal({
    * FinalMask mkcp-legacy UDP mask when moving to mKCP (removed otherwise).
    */
   const onNetworkChange = (next: string) => {
+    if (next === 'shadowtls') {
+      const current = (getV('settings.shadowTls') as Record<string, unknown> | undefined) ?? {};
+      setV('settings.shadowTls', {
+        version: 3,
+        handshake: { server: 'cloudflare.com', serverPort: 443 },
+        strictMode: false,
+        wildcardSni: 'off',
+        ...current,
+        enabled: true,
+      });
+      setV('settings.method', '2022-blake3-aes-128-gcm');
+      setV('settings.network', 'tcp');
+      setV('streamSettings', { network: 'tcp', security: 'none', tcpSettings: {} });
+      return;
+    }
+    if (shadowTlsEnabled) {
+      setV('settings.shadowTls.enabled', false);
+      setV('settings.password', RandomUtil.randomShadowsocksPassword('2022-blake3-aes-128-gcm'));
+    }
     const ALL = [
       'tcpSettings',
       'kcpSettings',
@@ -987,10 +1019,14 @@ export default function InboundFormModal({
         <Form.Item label={t('transmission')}>
           <Select
             style={{ width: '75%' }}
-            value={network}
+            value={shadowTlsEnabled ? 'shadowtls' : network}
             onChange={onNetworkChange}
+            disabled={mode === 'edit' && dbInbound?.protocol === Protocols.SHADOWTLS}
             options={[
               { value: 'tcp', label: 'RAW' },
+              ...(protocol === Protocols.SHADOWSOCKS
+                ? [{ value: 'shadowtls', label: 'ShadowTLS' }]
+                : []),
               { value: 'kcp', label: 'mKCP' },
               { value: 'ws', label: 'WebSocket' },
               { value: 'grpc', label: 'gRPC' },
@@ -1006,7 +1042,9 @@ export default function InboundFormModal({
           dropdown is hidden above. */}
       {protocol === Protocols.HYSTERIA && <HysteriaFields />}
 
-      {hasSelectableTransport && (
+      {shadowTlsEnabled && <ShadowTlsFields prefix="shadowTls" />}
+
+      {hasSelectableTransport && !shadowTlsEnabled && (
         <>
           {network === 'tcp' && <RawForm />}
 
@@ -1026,11 +1064,11 @@ export default function InboundFormModal({
           field is still parsed/rendered for backward compatibility but is no
           longer editable here. */}
 
-      <SockoptForm toggleSockopt={toggleSockopt} network={network} />
+      {!shadowTlsEnabled && <SockoptForm toggleSockopt={toggleSockopt} network={network} />}
 
       {/* Transport masks don't apply to tunnel (a transparent forwarder), so
           its stream tab is just sockopt + TProxy. */}
-      {protocol !== Protocols.TUNNEL && (
+      {protocol !== Protocols.TUNNEL && !shadowTlsEnabled && (
         <Controller
           control={control}
           name="streamSettings.finalmask"
@@ -1048,7 +1086,7 @@ export default function InboundFormModal({
     </>
   );
 
-  const tlsOk = canEnableTls({ protocol, streamSettings: { network, security } });
+  const tlsOk = !shadowTlsEnabled && canEnableTls({ protocol, streamSettings: { network, security } });
   const realityOk = canEnableReality({ protocol, streamSettings: { network, security } });
   const tlsOnly = protocol === Protocols.HYSTERIA;
 
@@ -1264,7 +1302,7 @@ export default function InboundFormModal({
                         children: streamTab,
                         forceRender: true,
                       },
-                      ...(protocol !== Protocols.WIREGUARD && protocol !== Protocols.TUNNEL
+                      ...(protocol !== Protocols.WIREGUARD && protocol !== Protocols.TUNNEL && !shadowTlsEnabled
                         ? [
                             {
                               key: 'security',

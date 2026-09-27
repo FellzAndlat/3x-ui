@@ -168,15 +168,37 @@ function stripTlsCertUseFile(stream: Record<string, unknown>): void {
 }
 
 export function rawInboundToFormValues(row: RawInboundRow): InboundFormValues {
-  const protocol = (row.protocol || 'vless') as InboundSettings['protocol'];
-  const settings = (
+  const isShadowTls = row.protocol === 'shadowtls';
+  const protocol = (isShadowTls ? 'shadowsocks' : row.protocol || 'vless') as InboundSettings['protocol'];
+  const rawSettings = (
     row.protocol === 'sudoku'
       ? migrateSudokuSettings(coerceJsonObject(row.settings))
       : coerceJsonObject(row.settings)
-  ) as InboundSettings['settings'];
+  );
+  const settings = (isShadowTls
+    ? {
+        method: '2022-blake3-aes-128-gcm',
+        password: '',
+        network: 'tcp',
+        clients: rawSettings.clients ?? [],
+        ivCheck: false,
+        shadowTls: {
+          enabled: true,
+          version: rawSettings.version ?? 3,
+          handshake: rawSettings.handshake ?? { server: 'cloudflare.com', serverPort: 443 },
+          handshakeForServerName: rawSettings.handshakeForServerName,
+          strictMode: rawSettings.strictMode ?? false,
+          wildcardSni: rawSettings.wildcardSni ?? 'off',
+          innerKey: rawSettings.innerKey,
+        },
+      }
+    : rawSettings) as InboundSettings['settings'];
   const rawStream = coerceJsonObject(row.streamSettings);
   const streamSettings =
     Object.keys(rawStream).length > 0 ? (rawStream as StreamSettings) : undefined;
+  if (isShadowTls && streamSettings) {
+    (streamSettings as unknown as Record<string, unknown>).network = 'tcp';
+  }
   if (streamSettings) {
     healStreamNetworkKey(streamSettings as unknown as Record<string, unknown>);
     synthesizeTlsCertUseFile(streamSettings as unknown as Record<string, unknown>);
@@ -373,10 +395,27 @@ export function dropLegacyOptionalEmpties(
 
 export function formValuesToWirePayload(values: InboundFormValues): WireInboundPayload {
   const settingsPruned = (pruneEmpty(values.settings ?? {}) ?? {}) as Record<string, unknown>;
-  if (Array.isArray(settingsPruned.clients)) {
-    settingsPruned.clients = normalizeClients(values.protocol, settingsPruned.clients);
+  const shadowTls = values.protocol === 'shadowsocks'
+    ? settingsPruned.shadowTls as Record<string, unknown> | undefined
+    : undefined;
+  const shadowTlsEnabled = shadowTls?.enabled === true;
+  if (shadowTlsEnabled && shadowTls) {
+    settingsPruned.version = 3;
+    settingsPruned.handshake = shadowTls.handshake;
+    settingsPruned.handshakeForServerName = shadowTls.handshakeForServerName;
+    settingsPruned.strictMode = shadowTls.strictMode;
+    settingsPruned.wildcardSni = shadowTls.wildcardSni;
+    settingsPruned.innerKey = shadowTls.innerKey;
+    delete settingsPruned.method;
+    delete settingsPruned.password;
+    delete settingsPruned.network;
+    delete settingsPruned.ivCheck;
   }
-  let streamPruned = values.streamSettings
+  delete settingsPruned.shadowTls;
+  if (Array.isArray(settingsPruned.clients)) {
+    settingsPruned.clients = normalizeClients(shadowTlsEnabled ? 'shadowtls' : values.protocol, settingsPruned.clients);
+  }
+  let streamPruned = !shadowTlsEnabled && values.streamSettings
     ? ((pruneEmpty(values.streamSettings) ?? {}) as Record<string, unknown>)
     : undefined;
   if (streamPruned) {
@@ -396,12 +435,12 @@ export function formValuesToWirePayload(values: InboundFormValues): WireInboundP
     lastTrafficResetTime: values.lastTrafficResetTime,
     listen: values.listen,
     port: values.port,
-    protocol: values.protocol,
+    protocol: shadowTlsEnabled ? 'shadowtls' : values.protocol,
     settings: JSON.stringify(settingsPruned),
     streamSettings: streamPruned ? JSON.stringify(streamPruned) : '',
     // mtproto is mtg-served, not Xray, so sniffing never applies — emit empty
     // rather than the default { enabled: false } so the row carries no sniffing.
-    sniffing: canEnableSniffing({ protocol: values.protocol })
+    sniffing: !shadowTlsEnabled && canEnableSniffing({ protocol: values.protocol })
       ? JSON.stringify(normalizeSniffing(values.sniffing))
       : '',
     tag: values.tag,

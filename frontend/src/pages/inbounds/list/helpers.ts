@@ -103,6 +103,7 @@ export function inboundNetworkLabels(record: {
       return ['TCP', 'UDP'];
     case 'anytls':
     case 'shadowtls':
+      return ['ShadowTLS', 'TCP'];
     case 'mtproto':
     case 'http':
     case 'sudoku':

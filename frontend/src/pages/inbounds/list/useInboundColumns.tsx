@@ -221,7 +221,7 @@ export function useInboundColumns({
         render: (_, record) => {
           const tags: ReactElement[] = [
             <Tag key="p" color="purple">
-              {record.protocol}
+              {record.protocol === 'shadowtls' ? 'shadowsocks' : record.protocol}
             </Tag>,
           ];
 
