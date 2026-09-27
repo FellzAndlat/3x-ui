@@ -2022,7 +2022,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		oldInbound.Tag = resolvedTag
 		inbound.Tag = oldInbound.Tag
 
-		localSidecarTransition := oldProtocol == model.MTProto || oldInbound.Protocol == model.MTProto || oldProtocol == model.TUIC || oldInbound.Protocol == model.TUIC || oldProtocol == model.Pingtunnel || oldInbound.Protocol == model.Pingtunnel || oldProtocol == model.TrustTunnel || oldInbound.Protocol == model.TrustTunnel
+		localSidecarTransition := oldProtocol == model.MTProto || oldInbound.Protocol == model.MTProto || oldProtocol == model.TUIC || oldInbound.Protocol == model.TUIC || oldProtocol == model.Mieru || oldInbound.Protocol == model.Mieru || oldProtocol == model.Pingtunnel || oldInbound.Protocol == model.Pingtunnel || oldProtocol == model.TrustTunnel || oldInbound.Protocol == model.TrustTunnel
 		naiveSingBoxRuntime := false
 		if oldProtocol == model.NaiveProxy || oldInbound.Protocol == model.NaiveProxy ||
 			oldProtocol == model.AnyTLS || oldInbound.Protocol == model.AnyTLS ||
@@ -2053,7 +2053,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 						logger.Debug("Updated Naive inbound applied on", rt.Name(), ":", oldInbound.Tag)
 					}
 				}
-			} else if oldProtocol == model.MTProto || oldInbound.Protocol == model.MTProto || oldProtocol == model.TUIC || oldInbound.Protocol == model.TUIC || oldProtocol == model.Pingtunnel || oldInbound.Protocol == model.Pingtunnel || oldProtocol == model.TrustTunnel || oldInbound.Protocol == model.TrustTunnel {
+			} else if localSidecarTransition {
 				oldSnapshot := *oldInbound
 				oldSnapshot.Tag = tag
 				oldSnapshot.Protocol = oldProtocol
@@ -2067,7 +2067,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 						pushable = false
 					}
 				}
-				newProtocolIsSidecar := oldInbound.Protocol == model.MTProto || oldInbound.Protocol == model.TUIC || oldInbound.Protocol == model.Pingtunnel || oldInbound.Protocol == model.TrustTunnel
+				newProtocolIsSidecar := oldInbound.Protocol == model.MTProto || oldInbound.Protocol == model.TUIC || oldInbound.Protocol == model.Mieru || oldInbound.Protocol == model.Pingtunnel || oldInbound.Protocol == model.TrustTunnel
 				if pushable {
 					postCommitApply = func() {
 						if err2 := rt.UpdateInbound(context.Background(), &oldSnapshot, payload); err2 == nil {
@@ -2107,7 +2107,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 					}
 				}
 			}
-		} else {
+		} else if oldInbound.NodeID != nil {
 			nodeID := *oldInbound.NodeID
 			if err := (&NodeService{}).EnsureInboundTagAllowedTx(tx, nodeID, oldInbound.Tag); err != nil {
 				return err
