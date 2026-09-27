@@ -169,30 +169,33 @@ function stripTlsCertUseFile(stream: Record<string, unknown>): void {
 
 export function rawInboundToFormValues(row: RawInboundRow): InboundFormValues {
   const isShadowTls = row.protocol === 'shadowtls';
-  const protocol = (isShadowTls ? 'shadowsocks' : row.protocol || 'vless') as InboundSettings['protocol'];
-  const rawSettings = (
+  const protocol = (
+    isShadowTls ? 'shadowsocks' : row.protocol || 'vless'
+  ) as InboundSettings['protocol'];
+  const rawSettings =
     row.protocol === 'sudoku'
       ? migrateSudokuSettings(coerceJsonObject(row.settings))
-      : coerceJsonObject(row.settings)
-  );
-  const settings = (isShadowTls
-    ? {
-        method: '2022-blake3-aes-128-gcm',
-        password: '',
-        network: 'tcp',
-        clients: rawSettings.clients ?? [],
-        ivCheck: false,
-        shadowTls: {
-          enabled: true,
-          version: rawSettings.version ?? 3,
-          handshake: rawSettings.handshake ?? { server: 'cloudflare.com', serverPort: 443 },
-          handshakeForServerName: rawSettings.handshakeForServerName,
-          strictMode: rawSettings.strictMode ?? false,
-          wildcardSni: rawSettings.wildcardSni ?? 'off',
-          innerKey: rawSettings.innerKey,
-        },
-      }
-    : rawSettings) as InboundSettings['settings'];
+      : coerceJsonObject(row.settings);
+  const settings = (
+    isShadowTls
+      ? {
+          method: '2022-blake3-aes-128-gcm',
+          password: '',
+          network: 'tcp',
+          clients: rawSettings.clients ?? [],
+          ivCheck: false,
+          shadowTls: {
+            enabled: true,
+            version: rawSettings.version ?? 3,
+            handshake: rawSettings.handshake ?? { server: 'cloudflare.com', serverPort: 443 },
+            handshakeForServerName: rawSettings.handshakeForServerName,
+            strictMode: rawSettings.strictMode ?? false,
+            wildcardSni: rawSettings.wildcardSni ?? 'off',
+            innerKey: rawSettings.innerKey,
+          },
+        }
+      : rawSettings
+  ) as InboundSettings['settings'];
   const rawStream = coerceJsonObject(row.streamSettings);
   const streamSettings =
     Object.keys(rawStream).length > 0 ? (rawStream as StreamSettings) : undefined;
@@ -412,11 +415,15 @@ export function formValuesToWirePayload(values: InboundFormValues): WireInboundP
   }
   if (values.protocol === 'shadowsocks' || !shadowTlsEnabled) delete settingsPruned.shadowTls;
   if (Array.isArray(settingsPruned.clients)) {
-    settingsPruned.clients = normalizeClients(legacyShadowsocksWrapper ? 'shadowtls' : values.protocol, settingsPruned.clients);
+    settingsPruned.clients = normalizeClients(
+      legacyShadowsocksWrapper ? 'shadowtls' : values.protocol,
+      settingsPruned.clients,
+    );
   }
-  let streamPruned = !shadowTlsEnabled && values.streamSettings
-    ? ((pruneEmpty(values.streamSettings) ?? {}) as Record<string, unknown>)
-    : undefined;
+  let streamPruned =
+    !shadowTlsEnabled && values.streamSettings
+      ? ((pruneEmpty(values.streamSettings) ?? {}) as Record<string, unknown>)
+      : undefined;
   if (streamPruned) {
     streamPruned = normalizeStreamSettingsForWire(streamPruned, { side: 'inbound' });
     stripTlsCertUseFile(streamPruned);
@@ -439,9 +446,10 @@ export function formValuesToWirePayload(values: InboundFormValues): WireInboundP
     streamSettings: streamPruned ? JSON.stringify(streamPruned) : '',
     // mtproto is mtg-served, not Xray, so sniffing never applies — emit empty
     // rather than the default { enabled: false } so the row carries no sniffing.
-    sniffing: !shadowTlsEnabled && canEnableSniffing({ protocol: values.protocol })
-      ? JSON.stringify(normalizeSniffing(values.sniffing))
-      : '',
+    sniffing:
+      !shadowTlsEnabled && canEnableSniffing({ protocol: values.protocol })
+        ? JSON.stringify(normalizeSniffing(values.sniffing))
+        : '',
     tag: values.tag,
     shareAddrStrategy: values.shareAddrStrategy,
     shareAddr: values.shareAddr,

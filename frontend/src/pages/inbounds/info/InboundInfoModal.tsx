@@ -622,8 +622,12 @@ export default function InboundInfoModal({
         <div className="info-row">
           <dt>{t('pages.inbounds.protocol')}</dt>
           <dd>
-            <Tag color="purple">{dbInbound.protocol === 'shadowtls' ? 'shadowsocks' : dbInbound.protocol}</Tag>
-            {(dbInbound.protocol === 'shadowtls' || hasShadowTLSTransport(dbInbound.settings)) && <Tag color="green">ShadowTLS</Tag>}
+            <Tag color="purple">
+              {dbInbound.protocol === 'shadowtls' ? 'shadowsocks' : dbInbound.protocol}
+            </Tag>
+            {(dbInbound.protocol === 'shadowtls' || hasShadowTLSTransport(dbInbound.settings)) && (
+              <Tag color="green">ShadowTLS</Tag>
+            )}
           </dd>
         </div>
         <div className="info-row">

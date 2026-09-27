@@ -2,7 +2,13 @@ import { useTranslation } from 'react-i18next';
 import { Input, InputNumber, Select, Space, Switch, Typography } from 'antd';
 import { FormField } from '@/components/form/rhf';
 
-export default function ShadowTlsFields({ prefix = '', showPassword = false }: { prefix?: string; showPassword?: boolean }) {
+export default function ShadowTlsFields({
+  prefix = '',
+  showPassword = false,
+}: {
+  prefix?: string;
+  showPassword?: boolean;
+}) {
   const { t } = useTranslation();
   const field = (name: string) => ['settings', ...(prefix ? [prefix] : []), ...name.split('.')];
 
