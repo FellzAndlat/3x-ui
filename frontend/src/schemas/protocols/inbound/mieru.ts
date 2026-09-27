@@ -67,7 +67,7 @@ export const MieruInboundSettingsSchema = z.preprocess(
     // so existing inbounds continue to work unchanged.
     tcpPorts: MieruPortListSchema,
     udpPorts: MieruPortListSchema,
-    // Client-side defaults used only when generating mierus:// links.
+    // Client-side defaults used when generating mieru:// and mierus:// links.
     multiplexing: z
       .enum(['MULTIPLEXING_OFF', 'MULTIPLEXING_LOW', 'MULTIPLEXING_MIDDLE', 'MULTIPLEXING_HIGH'])
       .default('MULTIPLEXING_LOW'),

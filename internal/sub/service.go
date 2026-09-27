@@ -1483,7 +1483,7 @@ func (s *SubService) genMieruLink(inbound *model.Inbound, email string) string {
 	}
 
 	endpoints := s.shareEndpointsForInbound(inbound)
-	links := make([]string, 0, len(endpoints))
+	links := make([]string, 0, len(endpoints)*2)
 	for _, endpoint := range endpoints {
 		values := url.Values{}
 		values.Set("profile", "default")
@@ -1495,7 +1495,12 @@ func (s *SubService) genMieruLink(inbound *model.Inbound, email string) string {
 		// so its port replaces the server-side binding port(s). Keep the
 		// configured transport protocol set but avoid advertising private
 		// port ranges through a public front.
+		publicEntries := entries
 		if endpoint.ep != nil {
+			publicEntries = make([]struct {
+				port     string
+				protocol string
+			}, 0, len(entries))
 			seenProtocols := make(map[string]struct{})
 			for _, entry := range entries {
 				if _, exists := seenProtocols[entry.protocol]; exists {
@@ -1504,6 +1509,10 @@ func (s *SubService) genMieruLink(inbound *model.Inbound, email string) string {
 				seenProtocols[entry.protocol] = struct{}{}
 				values.Add("port", strconv.Itoa(endpoint.Port))
 				values.Add("protocol", entry.protocol)
+				publicEntries = append(publicEntries, struct {
+					port     string
+					protocol string
+				}{port: strconv.Itoa(endpoint.Port), protocol: entry.protocol})
 			}
 		} else {
 			for _, entry := range entries {
@@ -1512,9 +1521,12 @@ func (s *SubService) genMieruLink(inbound *model.Inbound, email string) string {
 			}
 		}
 
+		// In the native mierus:// format the authority is only the server
+		// address; every listener port belongs in the paired port/protocol
+		// query values (including an externally forwarded port).
 		host := formatShareHost(endpoint.Address)
-		if endpoint.ep != nil {
-			host = joinHostPort(endpoint.Address, endpoint.Port)
+		if full, err := mieruFullConfigLink(endpoint.Address, client.Email, client.Password, publicEntries, mtu, multiplexing, handshakeMode); err == nil {
+			links = append(links, full)
 		}
 		link := fmt.Sprintf("mierus://%s:%s@%s?%s",
 			encodeUserinfo(client.Email),

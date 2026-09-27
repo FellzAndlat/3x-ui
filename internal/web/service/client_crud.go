@@ -418,6 +418,9 @@ func (s *ClientService) fillProtocolDefaults(c *model.Client, ib *model.Inbound)
 			c.Password = strings.ReplaceAll(uuid.NewString(), "-", "")
 		}
 	}
+	if ib.Protocol == model.Mieru && (len(c.Email) > 64 || len(c.Password) > 64) {
+		return fmt.Errorf("Mieru user name and password must be at most 64 bytes")
+	}
 	return nil
 }
 

@@ -367,6 +367,9 @@ func (s *ClientService) AddInboundClient(inboundSvc *InboundService, data *model
 	if err != nil {
 		return false, err
 	}
+	if err := validateMieruInbound(oldInbound, clients); err != nil {
+		return false, err
+	}
 
 	existingClients, err := inboundSvc.GetClients(oldInbound)
 	if err != nil {
@@ -688,6 +691,9 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 
 	oldInbound, err := inboundSvc.GetInbound(data.Id)
 	if err != nil {
+		return false, err
+	}
+	if err := validateMieruInbound(oldInbound, clients); err != nil {
 		return false, err
 	}
 

@@ -821,11 +821,23 @@ export default function InboundFormModal({
       <FormField
         name="port"
         label={t('pages.inbounds.port')}
-        rules={{ validate: rhfZodValidate(InboundFormBaseSchema.shape.port) }}
+        rules={{
+          validate: rhfZodValidate(
+            protocol === Protocols.MIERU && !hasMieruPortBindings
+              ? InboundFormBaseSchema.shape.port.min(1025)
+              : InboundFormBaseSchema.shape.port,
+          ),
+        }}
       >
         <InputNumber
           disabled={protocol === Protocols.PINGTUNNEL || hasMieruPortBindings}
-          min={protocol === Protocols.PINGTUNNEL || isUdsListen ? 0 : 1}
+          min={
+            protocol === Protocols.PINGTUNNEL || isUdsListen
+              ? 0
+              : protocol === Protocols.MIERU
+                ? 1025
+                : 1
+          }
           max={65535}
         />
       </FormField>

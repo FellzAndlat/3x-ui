@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/enfein/mieru/v3/pkg/appctl"
 )
 
 // shareLinkInbound builds a VLESS inbound with one client and the given stream
@@ -177,34 +178,50 @@ func TestDeriveSpiderXMatchesFrontendVectors(t *testing.T) {
 	}
 }
 
-
 func TestGenMieruLinkExternalProxyFanOut(t *testing.T) {
 	inbound := &model.Inbound{
-		Protocol: model.Mieru,
-		Listen: "0.0.0.0",
-		Port: 20000,
-		Remark: "mieru",
-		Settings: `{"tcpPorts":["20001"],"udpPorts":["20002"],"multiplexing":"MULTIPLEXING_LOW","handshakeMode":"HANDSHAKE_STANDARD","clients":[{"email":"user","password":"secret"}]}`,
+		Protocol:       model.Mieru,
+		Listen:         "0.0.0.0",
+		Port:           20000,
+		Remark:         "mieru",
+		Settings:       `{"tcpPorts":["20001"],"udpPorts":["20002"],"multiplexing":"MULTIPLEXING_LOW","handshakeMode":"HANDSHAKE_STANDARD","clients":[{"email":"user","password":"secret"}]}`,
 		StreamSettings: `{"externalProxy":[{"dest":"edge.example.com","port":443,"remark":"EDGE"}]}`,
 	}
-	client := model.Client{Email:"user",Password:"secret"}
-	s := &SubService{address:"mieru.example.com",clientsByInbound:map[int]map[string]model.Client{0:{client.Email:client}},fullyPrimedInbounds:map[int]bool{0:true},settingsByInbound:map[int]map[string]any{}}
+	client := model.Client{Email: "user", Password: "secret"}
+	s := &SubService{address: "mieru.example.com", clientsByInbound: map[int]map[string]model.Client{0: {client.Email: client}}, fullyPrimedInbounds: map[int]bool{0: true}, settingsByInbound: map[int]map[string]any{}}
 	link := s.genMieruLink(inbound, "user")
-	if !strings.Contains(link, "mierus://user:secret@edge.example.com:443") { t.Fatalf("external endpoint missing: %s", link) }
-	if !strings.Contains(link, "port=443") || !strings.Contains(link, "protocol=TCP") || !strings.Contains(link, "protocol=UDP") { t.Fatalf("external endpoint must reuse both protocols on the public port: %s", link) }
-	if !strings.Contains(link, "#mieru-EDGE-user") { t.Fatalf("endpoint remark missing: %s", link) }
+	parts := strings.Split(link, "\n")
+	if len(parts) != 2 {
+		t.Fatalf("expected full and simple links, got %d", len(parts))
+	}
+	full, err := appctl.URLToClientConfig(parts[0])
+	if err != nil {
+		t.Fatalf("decode full Mieru link: %v", err)
+	}
+	server := full.GetProfiles()[0].GetServers()[0]
+	if server.GetDomainName() != "edge.example.com" || len(server.GetPortBindings()) != 2 || server.GetPortBindings()[0].GetPort() != 443 || server.GetPortBindings()[1].GetPort() != 443 {
+		t.Fatalf("full Mieru link must advertise the external forwarding port")
+	}
+	if !strings.Contains(link, "mierus://user:secret@edge.example.com?") {
+		t.Fatalf("external endpoint missing: %s", link)
+	}
+	if !strings.Contains(link, "port=443") || !strings.Contains(link, "protocol=TCP") || !strings.Contains(link, "protocol=UDP") {
+		t.Fatalf("external endpoint must reuse both protocols on the public port: %s", link)
+	}
+	if !strings.Contains(link, "#mieru-EDGE-user") {
+		t.Fatalf("endpoint remark missing: %s", link)
+	}
 }
-
 
 func TestGenMieruLinkFormatsIPv6Host(t *testing.T) {
 	inbound := &model.Inbound{
 		Protocol: model.Mieru,
-		Listen: "::",
-		Port: 20000,
+		Listen:   "::",
+		Port:     20000,
 		Settings: `{"tcpPorts":["20000"],"clients":[{"email":"user","password":"secret"}]}`,
 	}
-	client := model.Client{Email:"user",Password:"secret"}
-	s := &SubService{address:"2001:db8::7",clientsByInbound:map[int]map[string]model.Client{0:{client.Email:client}},fullyPrimedInbounds:map[int]bool{0:true},settingsByInbound:map[int]map[string]any{}}
+	client := model.Client{Email: "user", Password: "secret"}
+	s := &SubService{address: "2001:db8::7", clientsByInbound: map[int]map[string]model.Client{0: {client.Email: client}}, fullyPrimedInbounds: map[int]bool{0: true}, settingsByInbound: map[int]map[string]any{}}
 	got := s.genMieruLink(inbound, "user")
 	if !strings.Contains(got, "@[2001:db8::7]?") {
 		t.Fatalf("Mieru IPv6 authority is not bracketed: %s", got)

@@ -1173,6 +1173,9 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	if err != nil {
 		return inbound, false, err
 	}
+	if err := validateMieruInbound(inbound, clients); err != nil {
+		return inbound, false, err
+	}
 	existEmail, err := s.clientService.checkEmailsExistForClients(s, clients)
 	if err != nil {
 		return inbound, false, err
@@ -1809,6 +1812,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 
 	clients, err := s.GetClients(inbound)
 	if err != nil {
+		return inbound, false, err
+	}
+	if err := validateMieruInbound(inbound, clients); err != nil {
 		return inbound, false, err
 	}
 	if inbound.Protocol == model.Hysteria {

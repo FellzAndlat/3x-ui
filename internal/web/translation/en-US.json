@@ -751,7 +751,7 @@
         "sudokuPureDownlinkHint": "When disabled, the downlink uses a more compact encoding. Client and server must use the same mode.",
         "sudokuMultiplex": "Multiplexing",
         "sudokuMultiplexHint": "Auto reuses the HTTP connection; On combines multiple targets in one session. Included in the client link.",
-        "mieruAutoHint": "Mieru listens on the TCP/UDP ports below. When either list has entries, the common Port field is ignored; clear both lists to use it. Allow the configured ports through the firewall. Ports must be 1025–65535; MTU must be 1280–1400.",
+        "mieruAutoHint": "Mieru listens on the TCP/UDP ports below. When either list has entries, the common Port field is ignored; clear both lists to use it. At least one enabled user is needed to start the server. Allow the configured ports through the firewall and synchronize client and server clocks. Ports must be 1025–65535; MTU must be 1280–1400.",
         "mieruTcpPorts": "TCP ports",
         "mieruUdpPorts": "UDP ports",
         "mieruPortRangesHint": "Enter individual ports or ranges, for example 2012-2022. Allowed range: 1025–65535.",

@@ -163,6 +163,33 @@ func PortBindingsFromInbound(ib *model.Inbound) []PortBinding {
 	return portBindingsFromSettings(raw, ib.Port)
 }
 
+// ValidatePortBindings rejects settings that would leave mita with no
+// listener. Existing rows may be read leniently, but new saves must not
+// silently create an enabled inbound that cannot start.
+func ValidatePortBindings(ib *model.Inbound) error {
+	if ib == nil || ib.Protocol != model.Mieru {
+		return nil
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(ib.Settings), &raw); err != nil {
+		return fmt.Errorf("invalid Mieru settings: %w", err)
+	}
+	for _, entry := range []struct {
+		field, protocol string
+	}{{"tcpPorts", "TCP"}, {"udpPorts", "UDP"}} {
+		values, _ := raw[entry.field].([]any)
+		for _, value := range values {
+			if _, ok := parsePortBinding(portEntryString(value), entry.protocol); !ok {
+				return fmt.Errorf("invalid Mieru %s port %q: use 1025-65535", entry.protocol, portEntryString(value))
+			}
+		}
+	}
+	if len(portBindingsFromSettings(raw, ib.Port)) == 0 {
+		return fmt.Errorf("Mieru needs a TCP or UDP listener on a port from 1025 to 65535")
+	}
+	return nil
+}
+
 func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 	if ib == nil || ib.Protocol != model.Mieru {
 		return Instance{}, false

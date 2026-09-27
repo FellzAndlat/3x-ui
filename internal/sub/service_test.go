@@ -8,11 +8,12 @@ import (
 	"testing"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/enfein/mieru/v3/pkg/appctl"
 )
 
 func TestClashTransportCapabilities(t *testing.T) {
 	kcp := &model.Inbound{
-		Protocol: model.VLESS,
+		Protocol:       model.VLESS,
 		StreamSettings: `{"network":"kcp","kcpSettings":{"mtu":1350}}`,
 	}
 	if !containsUnsupportedClashProtocol([]*model.Inbound{kcp}) {
@@ -20,7 +21,7 @@ func TestClashTransportCapabilities(t *testing.T) {
 	}
 
 	tcpHTTPHeader := &model.Inbound{
-		Protocol: model.VLESS,
+		Protocol:       model.VLESS,
 		StreamSettings: `{"network":"tcp","tcpSettings":{"header":{"type":"http"}}}`,
 	}
 	if !containsUnsupportedClashProtocol([]*model.Inbound{tcpHTTPHeader}) {
@@ -28,15 +29,15 @@ func TestClashTransportCapabilities(t *testing.T) {
 	}
 
 	ws := &model.Inbound{
-		Protocol: model.VLESS,
+		Protocol:       model.VLESS,
 		StreamSettings: `{"network":"ws","wsSettings":{"path":"/ws"}}`,
 	}
 	grpc := &model.Inbound{
-		Protocol: model.VLESS,
+		Protocol:       model.VLESS,
 		StreamSettings: `{"network":"grpc","grpcSettings":{"serviceName":"svc"}}`,
 	}
 	xhttp := &model.Inbound{
-		Protocol: model.VLESS,
+		Protocol:       model.VLESS,
 		StreamSettings: `{"network":"xhttp","xhttpSettings":{"path":"/xhttp","mode":"auto"}}`,
 	}
 	for name, inbound := range map[string]*model.Inbound{
@@ -48,7 +49,7 @@ func TestClashTransportCapabilities(t *testing.T) {
 	}
 
 	hysteria := &model.Inbound{
-		Protocol: model.Hysteria,
+		Protocol:       model.Hysteria,
 		StreamSettings: `{"network":"kcp"}`,
 	}
 	if containsUnsupportedClashProtocol([]*model.Inbound{hysteria}) {
@@ -1272,12 +1273,12 @@ func TestGenNaiveSubscriptionLinkUsesStandardScheme(t *testing.T) {
 		},
 	}
 	in := &model.Inbound{
-		Id:       1,
-		Listen:   "203.0.113.10",
-		Port:     443,
-		Protocol: model.NaiveProxy,
-		Remark:   "naive",
-		Settings: `{"network":"tcp","tls":{"serverName":"naive.example.com"}}`,
+		Id:             1,
+		Listen:         "203.0.113.10",
+		Port:           443,
+		Protocol:       model.NaiveProxy,
+		Remark:         "naive",
+		Settings:       `{"network":"tcp","tls":{"serverName":"naive.example.com"}}`,
 		StreamSettings: `{"externalProxy":[{"dest":"203.0.113.10","port":443,"forceTls":"same","hostHeader":"site.example.com"}]}`,
 	}
 	got := s.genNaiveSubscriptionLink(in, "user@example.com")
@@ -1309,11 +1310,11 @@ func TestGenNaiveSubscriptionLinkFallsBackToInboundSNI(t *testing.T) {
 		},
 	}
 	in := &model.Inbound{
-		Id:       4,
-		Listen:   "203.0.113.10",
-		Port:     443,
-		Protocol: model.NaiveProxy,
-		Settings: `{"network":"tcp","shareLinkFormat":"hiddify","tls":{"serverName":"naive.example.com"}}`,
+		Id:             4,
+		Listen:         "203.0.113.10",
+		Port:           443,
+		Protocol:       model.NaiveProxy,
+		Settings:       `{"network":"tcp","shareLinkFormat":"hiddify","tls":{"serverName":"naive.example.com"}}`,
 		StreamSettings: `{"externalProxy":[{"dest":"203.0.113.10","port":443,"forceTls":"same","tlsSettings":{}}]}`,
 	}
 	got := s.genNaiveSubscriptionLink(in, "user@example.com")
@@ -1332,10 +1333,10 @@ func TestGenNaiveSubscriptionLinkAutoSNIFromAdvertisedHost(t *testing.T) {
 		},
 	}
 	in := &model.Inbound{
-		Id:       5,
-		Port:     443,
-		Protocol: model.NaiveProxy,
-		Settings: `{"network":"tcp","shareLinkFormat":"hiddify","tls":{}}`,
+		Id:             5,
+		Port:           443,
+		Protocol:       model.NaiveProxy,
+		Settings:       `{"network":"tcp","shareLinkFormat":"hiddify","tls":{}}`,
 		StreamSettings: `{"externalProxy":[{"dest":"naive.example.com","port":443,"forceTls":"same"}]}`,
 	}
 	got := s.genNaiveSubscriptionLink(in, "user@example.com")
@@ -1419,8 +1420,21 @@ func TestGenMieruLinkUsesSimpleScheme(t *testing.T) {
 		Protocol: model.Mieru,
 		Settings: `{"tcpPorts":["2101"],"udpPorts":["2202"],"multiplexing":"MULTIPLEXING_LOW","handshakeMode":"HANDSHAKE_STANDARD","mtu":1400}`,
 	}
-	got := s.genMieruLink(in, "user@example.com")
-	u, err := url.Parse(got)
+	links := strings.Split(s.genMieruLink(in, "user@example.com"), "\n")
+	if len(links) != 2 {
+		t.Fatalf("expected full and simple Mieru links, got %d", len(links))
+	}
+	config, err := appctl.URLToClientConfig(links[0])
+	if err != nil {
+		t.Fatalf("decode full Mieru config: %v", err)
+	}
+	if err := appctl.ValidateFullClientConfig(config); err != nil {
+		t.Fatalf("full Mieru config cannot be imported on a fresh client: %v", err)
+	}
+	if config.GetSocks5Port() != 1080 || config.GetRpcPort() != 8964 || config.GetProfiles()[0].GetUser().GetName() != "user@example.com" {
+		t.Fatalf("full Mieru config lacks client defaults or identity")
+	}
+	u, err := url.Parse(links[1])
 	if err != nil {
 		t.Fatalf("parse Mieru link: %v", err)
 	}

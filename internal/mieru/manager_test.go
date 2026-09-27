@@ -41,6 +41,27 @@ func TestInstanceFromInboundRejectsWithoutUsers(t *testing.T) {
 	}
 }
 
+func TestValidatePortBindings(t *testing.T) {
+	for _, tc := range []struct {
+		name, settings string
+		port           int
+		valid          bool
+	}{
+		{"valid primary", `{}`, 2200, true},
+		{"privileged primary", `{}`, 443, false},
+		{"valid explicit", `{"tcpPorts":["2100-2102"],"udpPorts":["2200"]}`, 443, true},
+		{"invalid explicit", `{"tcpPorts":["443","2100"]}`, 2200, false},
+		{"empty explicit with invalid primary", `{"tcpPorts":[]}`, 443, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ib := &model.Inbound{Protocol: model.Mieru, Port: tc.port, Settings: tc.settings}
+			if err := ValidatePortBindings(ib); (err == nil) != tc.valid {
+				t.Fatalf("ValidatePortBindings error = %v, want valid %v", err, tc.valid)
+			}
+		})
+	}
+}
+
 func TestRenderConfigUsesServerSettingsOnly(t *testing.T) {
 	inst := Instance{
 		PortBindings: []PortBinding{{Port: 8443, Protocol: "TCP"}},
