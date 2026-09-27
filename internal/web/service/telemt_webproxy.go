@@ -569,7 +569,7 @@ func renderTelemtWebSubscriptionLocations(aliases []HiddifyLegacySubscriptionAli
 		if err != nil || path == "" {
 			continue
 		}
-		fmt.Fprintf(&locations, "    location ^~ /%s/ {\n        proxy_pass %s;\n        proxy_set_header Host $host;\n        proxy_set_header X-Forwarded-For $remote_addr;\n        proxy_connect_timeout 5s;\n        proxy_read_timeout 65s;\n    }\n\n", path, upstream)
+		fmt.Fprintf(&locations, "    location ^~ /%s/ {\n        proxy_pass %s;\n        proxy_http_version 1.1;\n        proxy_set_header Host $host;\n        proxy_set_header X-Forwarded-For $remote_addr;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_connect_timeout 5s;\n        proxy_read_timeout 65s;\n        proxy_send_timeout 65s;\n        proxy_request_buffering off;\n        proxy_buffering off;\n        proxy_max_temp_file_size 0;\n        proxy_next_upstream off;\n    }\n\n", path, upstream)
 	}
 	return locations.String()
 }
