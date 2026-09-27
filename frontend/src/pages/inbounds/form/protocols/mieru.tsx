@@ -24,6 +24,9 @@ const shareLinkFormatOptions = [
   { value: 'native', label: 'Native Mieru (mieru://)' },
 ] as const;
 
+const defaultTcpPorts = ['2012-2022'] as const;
+const defaultUdpPorts = ['2023-2033'] as const;
+
 export default function MieruFields() {
   const { t } = useTranslation();
   const { control, setValue } = useFormContext();
@@ -47,9 +50,10 @@ export default function MieruFields() {
 
     setValue('settings.shareLinkFormat', 'hiddify', { shouldDirty: false });
     if (!hasConfiguredPorts && !hasClients) {
-      // Upstream Mieru's server example uses multiple TCP bindings and
-      // recommends multiple ports. They remain ordinary editable tag values.
-      setValue('settings.tcpPorts', ['2012-2022', '2027'], { shouldDirty: false });
+      // Seed editable defaults for a new Mieru inbound. Both transport types
+      // remain ordinary tag fields: users may keep, replace, or remove them.
+      setValue('settings.tcpPorts', [...defaultTcpPorts], { shouldDirty: false });
+      setValue('settings.udpPorts', [...defaultUdpPorts], { shouldDirty: false });
     }
   }, [hasClients, hasConfiguredPorts, multiplexing, setValue, shareLinkFormat]);
 
