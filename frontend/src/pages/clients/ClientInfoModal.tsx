@@ -160,9 +160,8 @@ export default function ClientInfoModal({
 
   const standardLinks = links.filter((link) => !isSudokuLink(link));
   const sudokuLinks = links.filter(isSudokuLink);
-  const hasSudokuInbound = client?.inboundIds?.some(
-    (id) => inboundsById[id]?.protocol === 'sudoku',
-  ) ?? false;
+  const hasSudokuInbound =
+    client?.inboundIds?.some((id) => inboundsById[id]?.protocol === 'sudoku') ?? false;
 
   const traffic = client?.traffic || null;
   const totalBytes = client?.totalGB || 0;
