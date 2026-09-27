@@ -131,6 +131,11 @@ func (a *ServerController) importHiddify(c *gin.Context) {
 		jsonMsg(c, "Hiddify import failed", err)
 		return
 	}
+	legacyAlias, err := backup.HiddifyLegacySubscriptionAlias()
+	if err != nil {
+		jsonMsg(c, "Hiddify import failed", err)
+		return
+	}
 	result, _, err := a.clientService.ImportClients(nil, items)
 	if err != nil {
 		jsonMsg(c, "Hiddify import failed", err)
@@ -138,6 +143,12 @@ func (a *ServerController) importHiddify(c *gin.Context) {
 	}
 	if result.Created > 0 {
 		notifyClientsChanged()
+	}
+	if legacyAlias.Path != "" {
+		if err := a.settingService.AddHiddifyLegacySubscriptionAlias(legacyAlias); err != nil {
+			jsonMsg(c, "Hiddify users imported, but saving their legacy subscription URL failed", err)
+			return
+		}
 	}
 	jsonObj(c, gin.H{"created": result.Created, "skipped": result.Skipped}, nil)
 }

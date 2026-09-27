@@ -1490,6 +1490,9 @@ func (s *SubService) genMieruLink(inbound *model.Inbound, email string) string {
 		values.Set("mtu", strconv.Itoa(mtu))
 		values.Set("multiplexing", multiplexing)
 		values.Set("handshake-mode", handshakeMode)
+		// Hiddify/ray2sing reads handshakemode without the separator, while
+		// native Mieru expects handshake-mode. Include both in the simple link.
+		values.Set("handshakemode", handshakeMode)
 
 		// A Host/externalProxy endpoint describes the public Mieru listener,
 		// so its port replaces the server-side binding port(s). Keep the

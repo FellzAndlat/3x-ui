@@ -25,31 +25,6 @@ type hiddifyConfig struct {
 	Value any    `json:"value"`
 }
 
-type hiddifyConfigs []hiddifyConfig
-
-// UnmarshalJSON accepts both Hiddify's common [{key,value}] settings export and
-// backups that serialize hconfigs as a plain object. The actual legacy path is
-// also discovered from the complete backup below, so nested backup variants are
-// supported without inventing a default path.
-func (c *hiddifyConfigs) UnmarshalJSON(data []byte) error {
-	var list []hiddifyConfig
-	if err := json.Unmarshal(data, &list); err == nil {
-		*c = list
-		return nil
-	}
-
-	var object map[string]any
-	if err := json.Unmarshal(data, &object); err != nil {
-		return fmt.Errorf("invalid Hiddify hconfigs: %w", err)
-	}
-	list = make([]hiddifyConfig, 0, len(object))
-	for key, value := range object {
-		list = append(list, hiddifyConfig{Key: key, Value: value})
-	}
-	*c = list
-	return nil
-}
-
 // HiddifyBackup is the legacy JSON export produced by Hiddify Panel. Only the
 // users section is required for migration. Other sections are optional because
 // Hiddify backups/restores may contain selected groups only.
@@ -77,9 +52,39 @@ type HiddifyBackup struct {
 		CDN       string `json:"cdn"`
 	} `json:"proxies"`
 	Domains  []hiddifyDomain `json:"domains"`
-	HConfigs hiddifyConfigs  `json:"hconfigs"`
+	HConfigs []hiddifyConfig `json:"hconfigs"`
 
 	legacyProxyPath string
+}
+
+// UnmarshalJSON accepts both Hiddify's common [{key,value}] settings export and
+// backups that serialize hconfigs as a plain object. The legacy URL path is
+// discovered separately from the complete backup.
+func (b *HiddifyBackup) UnmarshalJSON(data []byte) error {
+	type plain HiddifyBackup
+	var wrapped struct {
+		*plain
+		HConfigs json.RawMessage `json:"hconfigs"`
+	}
+	wrapped.plain = (*plain)(b)
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return err
+	}
+	if len(wrapped.HConfigs) == 0 || string(wrapped.HConfigs) == "null" {
+		return nil
+	}
+	if err := json.Unmarshal(wrapped.HConfigs, &b.HConfigs); err == nil {
+		return nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal(wrapped.HConfigs, &object); err != nil {
+		return fmt.Errorf("invalid Hiddify hconfigs: %w", err)
+	}
+	b.HConfigs = make([]hiddifyConfig, 0, len(object))
+	for key, value := range object {
+		b.HConfigs = append(b.HConfigs, hiddifyConfig{Key: key, Value: value})
+	}
+	return nil
 }
 
 type HiddifyPreview struct {
@@ -279,11 +284,6 @@ func (b *HiddifyBackup) HiddifyLegacySubscriptionAlias() (HiddifyLegacySubscript
 // Used traffic is subtracted from the allowance because Hiddify's counter is
 // per user, while the new traffic records start at zero.
 func (b *HiddifyBackup) HiddifyClients() ([]ClientCreatePayload, error) {
-	legacyAlias, err := b.HiddifyLegacySubscriptionAlias()
-	if err != nil {
-		return nil, err
-	}
-
 	items := make([]ClientCreatePayload, 0, len(b.Users))
 	for _, user := range b.Users {
 		remaining := user.UsageLimitGB - user.CurrentUsageGB
@@ -328,11 +328,6 @@ func (b *HiddifyBackup) HiddifyClients() ([]ClientCreatePayload, error) {
 				TgID:   user.TelegramID,
 			},
 		})
-	}
-	if legacyAlias.Path != "" {
-		if err := (&SettingService{}).AddHiddifyLegacySubscriptionAlias(legacyAlias); err != nil {
-			return nil, fmt.Errorf("save legacy Hiddify subscription URL: %w", err)
-		}
 	}
 	return items, nil
 }

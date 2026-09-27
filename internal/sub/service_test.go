@@ -1447,6 +1447,12 @@ func TestGenMieruLinkUsesSimpleScheme(t *testing.T) {
 	if got := u.Query().Get("port"); got != "2101" {
 		t.Fatalf("first port = %q, want 2101", got)
 	}
+	if got := u.Query().Get("handshakemode"); got != "HANDSHAKE_STANDARD" {
+		t.Fatalf("Hiddify handshake mode = %q, want HANDSHAKE_STANDARD", got)
+	}
+	if got := u.Query().Get("handshake-mode"); got != "HANDSHAKE_STANDARD" {
+		t.Fatalf("native Mieru handshake mode = %q, want HANDSHAKE_STANDARD", got)
+	}
 }
 
 func TestGenHysteriaLinkOmitsFinalMaskQueryParam(t *testing.T) {

@@ -5,6 +5,46 @@ import (
 	"testing"
 )
 
+func TestHiddifyClientsPreserveIndependentUserURLs(t *testing.T) {
+	const backup = `{
+		"users":[
+			{"uuid":"768e8bdd-bee3-4442-9006-b26464148aaa","name":"Alice","enable":true,"is_active":true},
+			{"uuid":"bb9f1752-1aba-4638-8ca5-0ee5e3948a88","name":"Bob","enable":true,"is_active":true}
+		],
+		"domains":[{"domain":"old.example.com"}],
+		"hconfigs":[{"key":"proxy_path_client","value":"SharedPath123"}]
+	}`
+	parsed, preview, err := ParseHiddifyBackup(strings.NewReader(backup))
+	if err != nil {
+		t.Fatalf("parse Hiddify backup: %v", err)
+	}
+	if preview.Users != 2 {
+		t.Fatalf("preview users = %d, want 2", preview.Users)
+	}
+	// Mapping users must work before a database exists. Saving the shared URL
+	// belongs to the import step after the clients have been persisted.
+	clients, err := parsed.HiddifyClients()
+	if err != nil {
+		t.Fatalf("map Hiddify users: %v", err)
+	}
+	if len(clients) != 2 {
+		t.Fatalf("mapped users = %d, want 2", len(clients))
+	}
+	for i, id := range []string{"768e8bdd-bee3-4442-9006-b26464148aaa", "bb9f1752-1aba-4638-8ca5-0ee5e3948a88"} {
+		client := clients[i]
+		if client.Client.ID != id || client.Client.SubID != id || client.Client.Password != id || client.Client.Auth != id {
+			t.Fatalf("user %d lost their UUID identity", i)
+		}
+		if len(client.InboundIds) != 0 || strings.Contains(client.Client.Email, "old.example.com") {
+			t.Fatalf("user %d was tied to an old domain or inbound", i)
+		}
+	}
+	alias, err := parsed.HiddifyLegacySubscriptionAlias()
+	if err != nil || alias.Path != "SharedPath123" {
+		t.Fatalf("shared URL path = %#v, %v", alias, err)
+	}
+}
+
 func TestParseHiddifyBackupReadsLegacySubscriptionPathFromBackup(t *testing.T) {
 	const backupTemplate = `{
 		"users":[{"uuid":"768e8bdd-bee3-4442-9006-b26464148aaa","name":"Vadlo","enable":true,"is_active":true,"usage_limit_GB":100,"current_usage_GB":10,"package_days":30}],
@@ -73,6 +113,12 @@ func TestParseHiddifyBackupReadsProxyPathFromAlternativeLayouts(t *testing.T) {
 			}
 			if alias.Path != tt.want {
 				t.Fatalf("legacy path = %q, want %q", alias.Path, tt.want)
+			}
+			if tt.name == "hconfigs object" {
+				value, found, err := parsed.hiddifyConfigString("proxy_path_client")
+				if err != nil || !found || value != tt.want {
+					t.Fatalf("object settings were not decoded: value %q, found %v, error %v", value, found, err)
+				}
 			}
 		})
 	}

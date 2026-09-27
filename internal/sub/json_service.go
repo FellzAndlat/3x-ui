@@ -314,7 +314,16 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 		return clients
 	}
 
-	wireguardOnly := len(externalLinks) == 0
+	// Detached users are represented by inactive metadata entries so their
+	// subscriptions remain addressable. Those entries are not proxy links and
+	// must not turn a WireGuard-only subscription into a mixed profile.
+	wireguardOnly := true
+	for _, entry := range externalLinks {
+		if entry.Active {
+			wireguardOnly = false
+			break
+		}
+	}
 	var wireguardConfigs []json.RawMessage
 	for _, inbound := range inbounds {
 		clients := clientsFor(inbound)

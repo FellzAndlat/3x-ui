@@ -283,7 +283,8 @@ func TestGetClientExternalLinksBySubId(t *testing.T) {
 		t.Fatalf("missing subId = %#v, want nil", out)
 	}
 
-	// A client with NO external-link rows → nil (the rows-empty guard :58).
+	// A client with no external-link rows retains inactive metadata so the
+	// imported subscription URL remains addressable before an inbound is added.
 	bare := &model.ClientRecord{Email: "bare@x", SubID: "sub-bare", UUID: "u", Enable: true}
 	if err := db.Create(bare).Error; err != nil {
 		t.Fatalf("seed bare client: %v", err)
@@ -292,8 +293,8 @@ func TestGetClientExternalLinksBySubId(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bare subId err = %v", err)
 	}
-	if out != nil {
-		t.Fatalf("client with no links = %#v, want nil", out)
+	if len(out) != 1 || out[0].Email != "bare@x" || !out[0].Enable || out[0].Active || out[0].Value != "" {
+		t.Fatalf("client with no links = %#v, want inactive metadata", out)
 	}
 
 	// A client with two link rows: ordering by sort_index and email/enable
