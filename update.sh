@@ -80,7 +80,7 @@ trap 'exit 130' INT
 [[ $EUID -ne 0 ]] && _fail "FATAL ERROR: Please run this script with root privilege."
 
 if _command_exists curl; then
-    curl_bin=$(which curl)
+    curl_bin="$(command -v curl)"
 else
     _fail "ERROR: Command 'curl' not found."
 fi
