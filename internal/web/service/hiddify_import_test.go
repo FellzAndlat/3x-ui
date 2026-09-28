@@ -48,6 +48,28 @@ func TestHiddifyClientsPreserveIndependentUserURLs(t *testing.T) {
 	}
 }
 
+func TestHiddifyImportSkipsUnusedDefaultButKeepsLastUser(t *testing.T) {
+	const backup = `{"users":[
+		{"uuid":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","name":"default","enable":true,"is_active":true,"start_date":null,"last_online":"0001-01-01 00:00:00","current_usage_GB":0},
+		{"uuid":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","name":"default","enable":true,"is_active":true,"start_date":"2026-01-01","last_online":"2026-09-01 12:00:00","current_usage_GB":12},
+		{"uuid":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","name":"Vadlo","enable":true,"is_active":true,"start_date":"2026-07-20","last_online":"2026-09-13 01:12:17","current_usage_GB":5}
+	]}`
+	parsed, preview, err := ParseHiddifyBackup(strings.NewReader(backup))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Users != 2 || !strings.Contains(strings.Join(preview.Warnings, " "), "пропущено: 1") {
+		t.Fatalf("preview = %+v, want two users and a skipped placeholder warning", preview)
+	}
+	clients, err := parsed.HiddifyClients()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clients) != 2 || clients[0].Client.SubID != "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" || clients[1].Client.SubID != "cccccccc-cccc-4ccc-8ccc-cccccccccccc" {
+		t.Fatalf("import lost a real default account or the last user: %+v", clients)
+	}
+}
+
 func TestHiddifySubscriptionURLUsesBackupPathAndPublicDomain(t *testing.T) {
 	s := &SettingService{}
 	for _, path := range []string{"SharedPath123", "Different_Path-456"} {

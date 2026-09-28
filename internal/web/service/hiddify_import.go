@@ -25,25 +25,40 @@ type hiddifyConfig struct {
 	Value any    `json:"value"`
 }
 
+type hiddifyUser struct {
+	UUID           string  `json:"uuid"`
+	Name           string  `json:"name"`
+	Comment        string  `json:"comment"`
+	Enable         bool    `json:"enable"`
+	IsActive       bool    `json:"is_active"`
+	LastOnline     string  `json:"last_online"`
+	UsageLimitGB   float64 `json:"usage_limit_GB"`
+	CurrentUsageGB float64 `json:"current_usage_GB"`
+	PackageDays    int     `json:"package_days"`
+	StartDate      *string `json:"start_date"`
+	TelegramID     int64   `json:"telegram_id"`
+	WGPrivateKey   string  `json:"wg_pk"`
+	WGPublicKey    string  `json:"wg_pub"`
+	WGPreSharedKey string  `json:"wg_psk"`
+}
+
+// Hiddify creates an unused default account during initial setup. Do not
+// mistake another user named "default" for it: only the untouched account
+// without a start date, traffic, comment, or online history is a placeholder.
+func isHiddifySetupPlaceholder(user hiddifyUser) bool {
+	lastOnline := strings.TrimSpace(user.LastOnline)
+	return strings.EqualFold(strings.TrimSpace(user.Name), "default") &&
+		strings.TrimSpace(user.Comment) == "" &&
+		(user.StartDate == nil || strings.TrimSpace(*user.StartDate) == "") &&
+		user.CurrentUsageGB == 0 &&
+		(lastOnline == "" || strings.HasPrefix(lastOnline, "0001-01-01"))
+}
+
 // HiddifyBackup is the legacy JSON export produced by Hiddify Panel. Only the
 // users section is required for migration. Other sections are optional because
 // Hiddify backups/restores may contain selected groups only.
 type HiddifyBackup struct {
-	Users []struct {
-		UUID           string  `json:"uuid"`
-		Name           string  `json:"name"`
-		Comment        string  `json:"comment"`
-		Enable         bool    `json:"enable"`
-		IsActive       bool    `json:"is_active"`
-		UsageLimitGB   float64 `json:"usage_limit_GB"`
-		CurrentUsageGB float64 `json:"current_usage_GB"`
-		PackageDays    int     `json:"package_days"`
-		StartDate      *string `json:"start_date"`
-		TelegramID     int64   `json:"telegram_id"`
-		WGPrivateKey   string  `json:"wg_pk"`
-		WGPublicKey    string  `json:"wg_pub"`
-		WGPreSharedKey string  `json:"wg_psk"`
-	} `json:"users"`
+	Users   []hiddifyUser `json:"users"`
 	Proxies []struct {
 		Enable    bool   `json:"enable"`
 		Proto     string `json:"proto"`
@@ -147,11 +162,21 @@ func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error
 		return nil, preview, err
 	}
 
-	preview.Users = len(b.Users)
+	for _, user := range b.Users {
+		if !isHiddifySetupPlaceholder(user) {
+			preview.Users++
+		}
+	}
+	if preview.Users == 0 {
+		return nil, preview, fmt.Errorf("the Hiddify backup contains only unused setup accounts")
+	}
 	preview.Warnings = []string{
 		"Пользователи будут без подключений. После создания входящих подключений прикрепите к ним пользователей — тогда в подписках появятся профили.",
 		"Для пользователей без даты первого подключения срок действия начнётся в день импорта.",
 		"Ключи SSH (Ed25519) из Hiddify не переносятся: в модели пользователей панели нет полей для них.",
+	}
+	if skipped := len(b.Users) - preview.Users; skipped > 0 {
+		preview.Warnings = append(preview.Warnings, fmt.Sprintf("Неиспользуемых начальных учётных записей default пропущено: %d.", skipped))
 	}
 	if legacyAlias.Path != "" {
 		preview.Warnings = append([]string{
@@ -286,6 +311,9 @@ func (b *HiddifyBackup) HiddifyLegacySubscriptionAlias() (HiddifyLegacySubscript
 func (b *HiddifyBackup) HiddifyClients() ([]ClientCreatePayload, error) {
 	items := make([]ClientCreatePayload, 0, len(b.Users))
 	for _, user := range b.Users {
+		if isHiddifySetupPlaceholder(user) {
+			continue
+		}
 		remaining := user.UsageLimitGB - user.CurrentUsageGB
 		if remaining < 0 {
 			remaining = 0
