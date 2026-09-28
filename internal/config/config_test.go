@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -78,4 +79,21 @@ func TestGetPortOverride(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetBinFolderPath(t *testing.T) {
+	t.Run("default beside executable", func(t *testing.T) {
+		t.Setenv("XUI_BIN_FOLDER", "")
+		want := filepath.Join(getBaseDir(), "bin")
+		if got := GetBinFolderPath(); got != want {
+			t.Fatalf("GetBinFolderPath() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("environment override", func(t *testing.T) {
+		t.Setenv("XUI_BIN_FOLDER", "custom-bin")
+		if got := GetBinFolderPath(); got != "custom-bin" {
+			t.Fatalf("GetBinFolderPath() = %q, want %q", got, "custom-bin")
+		}
+	})
 }

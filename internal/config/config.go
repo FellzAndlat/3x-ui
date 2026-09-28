@@ -71,11 +71,7 @@ func IsDevBuild() bool {
 	return GetBuildCommit() != ""
 }
 
-// GetPanelVersion returns the version a panel advertises to a managing master
-// node and displays in the UI: the plain version for stable builds, or
-// "dev+<short commit>" for dev builds. The dev form mirrors the master's
-// getPanelUpdateInfo latestVersion so a node on the current dev commit compares
-// as up to date instead of always showing "update available".
+// GetPanelVersion returns the version a panel advertises/displays (adds a "dev+<sha>" label on dev builds).
 func GetPanelVersion() string {
 	if !IsDevBuild() {
 		return GetBaseVersion()
@@ -126,11 +122,11 @@ func GetPortOverride() (port int, configured bool, err error) {
 	return port, true, nil
 }
 
-// GetBinFolderPath returns the path to the binary folder, defaulting to "bin" if not set via XUI_BIN_FOLDER.
+// GetBinFolderPath returns the binary folder, defaulting to a bin directory beside the x-ui executable.
 func GetBinFolderPath() string {
 	binFolderPath := os.Getenv("XUI_BIN_FOLDER")
 	if binFolderPath == "" {
-		binFolderPath = "bin"
+		binFolderPath = filepath.Join(getBaseDir(), "bin")
 	}
 	return binFolderPath
 }
