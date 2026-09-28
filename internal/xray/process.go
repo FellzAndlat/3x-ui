@@ -71,6 +71,11 @@ func GetIPLimitBannedPrevLogPath() string {
 func getLogPath(key string) (string, error) {
 	config, err := os.ReadFile(GetConfigPath())
 	if err != nil {
+		// config.json is generated when Xray starts. It may legitimately be
+		// absent after an install/update and before the first successful start.
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
 		logger.Warningf("Failed to read configuration file: %s", err)
 		return "", err
 	}
@@ -117,7 +122,7 @@ func NewProcess(xrayConfig *Config) *Process {
 	return p
 }
 
-// NewTestProcess creates a new Xray process that uses a specific config file path.
+// NewTestProcess creates a new xray process that uses a specific config file path.
 // Used for test runs (e.g. outbound test) so the main config.json is not overwritten.
 // The config file at configPath is removed when the process is stopped.
 func NewTestProcess(xrayConfig *Config, configPath string) *Process {
@@ -681,6 +686,9 @@ func xrayProcessEnv() []string {
 // os.Rename already uses replace-existing semantics.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) (err error) {
 	dir := filepath.Dir(path)
+	if err = os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
 	if err != nil {
 		return err
