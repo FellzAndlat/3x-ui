@@ -526,17 +526,19 @@ func writeTelemtWebNginxConfig(state TelemtWebProxyState) error {
 }
 
 // The Telemt WEB vhost normally sends every URL to its decoy backend. Imported
-// Hiddify subscription paths must reach the subscription listener instead.
+// Hiddify subscription paths are resolved by the panel router's NoRoute handler,
+// so proxy them to the panel instead of the subscription listener. This keeps
+// exported Hiddify URLs independent of the configured subscription port.
 func telemtWebSubscriptionLocations(s *SettingService) (string, error) {
 	aliases, err := s.GetHiddifyLegacySubscriptionAliases()
 	if err != nil || len(aliases) == 0 {
 		return "", err
 	}
-	port, err := s.GetSubPort()
+	port, err := s.GetPort()
 	if err != nil {
 		return "", err
 	}
-	listen, err := s.GetSubListen()
+	listen, err := s.GetListen()
 	if err != nil {
 		return "", err
 	}
@@ -545,13 +547,13 @@ func telemtWebSubscriptionLocations(s *SettingService) (string, error) {
 	} else if listen == "::" {
 		listen = "::1"
 	} else if net.ParseIP(listen) == nil {
-		return "", fmt.Errorf("invalid subscription listen address %q for Telemt WEB proxy", listen)
+		return "", fmt.Errorf("invalid panel listen address %q for Telemt WEB proxy", listen)
 	}
-	cert, err := s.GetSubCertFile()
+	cert, err := s.GetCertFile()
 	if err != nil {
 		return "", err
 	}
-	key, err := s.GetSubKeyFile()
+	key, err := s.GetKeyFile()
 	if err != nil {
 		return "", err
 	}
