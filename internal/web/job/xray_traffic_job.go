@@ -2,6 +2,7 @@ package job
 
 import (
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
@@ -15,10 +16,16 @@ import (
 
 // XrayTrafficJob collects and processes traffic statistics from Xray, updating the database and optionally informing external APIs.
 type XrayTrafficJob struct {
+	runMu          sync.Mutex
 	settingService  service.SettingService
 	xrayService     service.XrayService
 	inboundService  service.InboundService
 	outboundService outbound.OutboundService
+	pendingInbound  []*xray.Traffic
+	pendingClients  []*xray.ClientTraffic
+	pendingOutbound []*xray.Traffic
+	retryInbound    bool
+	retryOutbound   bool
 }
 
 // clientStatsSnapshotMaxClients caps how many client_traffics rows the job
@@ -72,8 +79,36 @@ func NewXrayTrafficJob() *XrayTrafficJob {
 // real-time updates over WebSocket using compact delta payloads — no REST
 // fallback, scales to 10k–20k+ clients per inbound.
 func (j *XrayTrafficJob) Run() {
+	// Cron can start another tick while a slow database write is in progress.
+	// A second collector must not advance the Xray baseline out of order.
+	if !j.runMu.TryLock() {
+		return
+	}
+	defer j.runMu.Unlock()
 	if !j.xrayService.IsXrayRunning() {
 		return
+	}
+	if j.retryInbound {
+		needRestart, _, err := j.inboundService.AddTraffic(j.pendingInbound, j.pendingClients)
+		if err != nil {
+			logger.Warning("retry inbound traffic failed:", err)
+			return
+		}
+		j.retryInbound = false
+		j.pendingInbound = nil
+		j.pendingClients = nil
+		if needRestart {
+			j.xrayService.SetToNeedRestart()
+		}
+	}
+	if j.retryOutbound {
+		err, _ := j.outboundService.AddTraffic(j.pendingOutbound, nil)
+		if err != nil {
+			logger.Warning("retry outbound traffic failed:", err)
+			return
+		}
+		j.retryOutbound = false
+		j.pendingOutbound = nil
 	}
 	traffics, clientTraffics, err := j.xrayService.GetXrayTraffic()
 	if err != nil {
@@ -82,10 +117,18 @@ func (j *XrayTrafficJob) Run() {
 	needRestart0, clientsDisabled, err := j.inboundService.AddTraffic(traffics, clientTraffics)
 	if err != nil {
 		logger.Warning("add inbound traffic failed:", err)
+		j.pendingInbound, j.pendingClients = traffics, clientTraffics
+		j.retryInbound = true
+		j.pendingOutbound = traffics
+		j.retryOutbound = true
+		return
 	}
 	err, needRestart1 := j.outboundService.AddTraffic(traffics, clientTraffics)
 	if err != nil {
 		logger.Warning("add outbound traffic failed:", err)
+		j.pendingOutbound = traffics
+		j.retryOutbound = true
+		return
 	}
 	if clientsDisabled {
 		restartOnDisable, settingErr := j.settingService.GetRestartXrayOnClientDisable()
