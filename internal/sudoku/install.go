@@ -109,20 +109,36 @@ func InstallLatest(ctx context.Context, binDir string) (string, error) {
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return "", err
 	}
-	staged := filepath.Join(tmp, filepath.Base(GetBinaryPath(binDir)))
+
+	// Stage the executable in the destination directory. /tmp is commonly a
+	// separate tmpfs on Linux (including Arch), and os.Rename cannot move files
+	// across filesystems (EXDEV / "invalid cross-device link"). Keeping the
+	// staged file next to the destination also preserves the atomic final rename.
+	target := GetBinaryPath(binDir)
+	stageFile, err := os.CreateTemp(binDir, ".sudoku-tunnel-*")
+	if err != nil {
+		return "", err
+	}
+	staged := stageFile.Name()
+	if err := stageFile.Close(); err != nil {
+		_ = os.Remove(staged)
+		return "", err
+	}
+	defer os.Remove(staged)
+
 	if err := copyFile(extracted, staged); err != nil {
 		return "", err
 	}
 	if err := os.Chmod(staged, 0o755); err != nil {
 		return "", err
 	}
-	if err := os.Rename(staged, GetBinaryPath(binDir)); err != nil {
+	if err := os.Rename(staged, target); err != nil {
 		return "", err
 	}
 	if err := writeInstalledVersion(binDir, rel.TagName); err != nil {
 		return "", err
 	}
-	return GetBinaryPath(binDir), nil
+	return target, nil
 }
 
 func installedVersionPath(binDir string) string {
