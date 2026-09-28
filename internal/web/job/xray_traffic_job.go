@@ -1,7 +1,9 @@
 package job
 
 import (
+	"context"
 	"encoding/json"
+	"sync/atomic"
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
@@ -15,10 +17,11 @@ import (
 
 // XrayTrafficJob collects and processes traffic statistics from Xray, updating the database and optionally informing external APIs.
 type XrayTrafficJob struct {
-	settingService  service.SettingService
-	xrayService     service.XrayService
-	inboundService  service.InboundService
-	outboundService outbound.OutboundService
+	settingService    service.SettingService
+	xrayService       service.XrayService
+	inboundService    service.InboundService
+	outboundService   outbound.OutboundService
+	onlineAPIFailures atomic.Int32
 }
 
 // clientStatsSnapshotMaxClients caps how many client_traffics rows the job
@@ -68,11 +71,51 @@ func NewXrayTrafficJob() *XrayTrafficJob {
 	return new(XrayTrafficJob)
 }
 
+func (j *XrayTrafficJob) runSingBoxPresence() {
+	core, err := j.settingService.GetCoreType()
+	if err != nil || core != service.CoreTypeSingBox {
+		return
+	}
+	service.EnsureOnlinePresenceTracker()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	online, err := (&service.SingBoxService{}).OnlineClientIPs(ctx)
+	cancel()
+	if err != nil {
+		logger.Debug("get online users from sing-box api failed:", err)
+		return
+	}
+	emails := make([]string, 0, len(online))
+	for email := range online {
+		if email != "" {
+			emails = append(emails, email)
+		}
+	}
+	if len(emails) > 0 {
+		if err := j.inboundService.BumpClientsLastOnline(emails); err != nil {
+			logger.Warning("bump last online for sing-box clients failed:", err)
+		}
+	}
+	j.inboundService.RefreshLocalOnlineClients(emails, nil)
+	if !websocket.HasClients() {
+		return
+	}
+	onlineClients := j.inboundService.GetOnlineClients()
+	if onlineClients == nil {
+		onlineClients = []string{}
+	}
+	websocket.BroadcastTraffic(map[string]any{
+		"onlineClients":  onlineClients,
+		"onlineByGuid":   j.inboundService.GetOnlineClientsByGuid(),
+		"activeInbounds": j.inboundService.GetActiveInboundsByGuid(),
+	})
+}
+
 // Run collects traffic statistics from Xray, updates the database, and pushes
 // real-time updates over WebSocket using compact delta payloads — no REST
 // fallback, scales to 10k–20k+ clients per inbound.
 func (j *XrayTrafficJob) Run() {
 	if !j.xrayService.IsXrayRunning() {
+		j.runSingBoxPresence()
 		return
 	}
 
@@ -133,18 +176,30 @@ func (j *XrayTrafficJob) Run() {
 	// in the delta. Older cores fall back to deltas alone.
 	if onlineUsers, apiMode, ouErr := j.xrayService.GetOnlineUsers(); ouErr != nil {
 		logger.Debug("get online users from xray api failed:", ouErr)
-	} else if apiMode {
-		idleOnline := make([]string, 0, len(onlineUsers))
-		for _, u := range onlineUsers {
-			if !deltaActive[u.Email] {
-				activeEmails = append(activeEmails, u.Email)
-				idleOnline = append(idleOnline, u.Email)
+		if j.onlineAPIFailures.Add(1) <= 2 {
+			if process := service.XrayProcess(); process != nil {
+				for _, email := range process.GetLocalOnlineClients() {
+					if !deltaActive[email] {
+						activeEmails = append(activeEmails, email)
+					}
+				}
 			}
 		}
-		// The traffic path only bumps last_online on a non-zero delta; keep the
-		// column fresh for clients kept online purely by a live connection.
-		if err := j.inboundService.BumpClientsLastOnline(idleOnline); err != nil {
-			logger.Warning("bump last online for connected clients failed:", err)
+	} else {
+		j.onlineAPIFailures.Store(0)
+		if apiMode {
+			idleOnline := make([]string, 0, len(onlineUsers))
+			for _, u := range onlineUsers {
+				if !deltaActive[u.Email] {
+					activeEmails = append(activeEmails, u.Email)
+					idleOnline = append(idleOnline, u.Email)
+				}
+			}
+			// The traffic path only bumps last_online on a non-zero delta; keep the
+			// column fresh for clients kept online purely by a live connection.
+			if err := j.inboundService.BumpClientsLastOnline(idleOnline); err != nil {
+				logger.Warning("bump last online for connected clients failed:", err)
+			}
 		}
 	}
 	// Pair the email signal with the inbound tags that moved bytes this poll.
