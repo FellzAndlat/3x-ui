@@ -18,6 +18,15 @@ func NewTuicJob() *TuicJob {
 }
 
 func (j *TuicJob) Run() {
+	core, err := (&service.SettingService{}).GetCoreType()
+	if err != nil {
+		logger.Warning("tuic job: get selected core failed:", err)
+		return
+	}
+	if core == service.CoreTypeSingBox {
+		tuic.GetManager().StopAll()
+		return
+	}
 	desired, err := j.inboundService.DesiredTuicInstances()
 	if err != nil {
 		logger.Warning("tuic job: get desired instances failed:", err)

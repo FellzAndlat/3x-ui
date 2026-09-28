@@ -18,6 +18,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/singbox"
+	"github.com/SawaMEN/3x-ui/v3/internal/tuic"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/tail"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 )
@@ -50,7 +51,7 @@ type SingBoxService struct{}
 
 func singBoxInboundRequiresUsers(protocol model.Protocol) bool {
 	switch protocol {
-	case model.VLESS, model.VMESS, model.Trojan, model.NaiveProxy, model.Hysteria, model.ShadowTLS, model.AnyTLS:
+	case model.VLESS, model.VMESS, model.Trojan, model.NaiveProxy, model.Hysteria, model.ShadowTLS, model.AnyTLS, model.TUIC:
 		return true
 	default:
 		return false
@@ -61,7 +62,7 @@ func singBoxInboundRequiresUsers(protocol model.Protocol) bool {
 // Never emit them as sing-box inbounds or reserve sing-box client lookups for them.
 func isLocalSidecarInbound(protocol model.Protocol) bool {
 	switch protocol {
-	case model.MTProto, model.AmneziaWG, model.TUIC, model.Mieru,
+	case model.MTProto, model.AmneziaWG, model.Mieru,
 		model.Pingtunnel, model.TrustTunnel, model.Sudoku, model.VKTurnProxy:
 		return true
 	default:
@@ -72,6 +73,48 @@ func isLocalSidecarInbound(protocol model.Protocol) bool {
 func mustJSON(value map[string]any) []byte {
 	data, _ := json.Marshal(value)
 	return data
+}
+
+// singBoxTUICInbound uses the same credentials and TLS certificate as the
+// external TUIC server. The native listener exposes authenticated user names
+// to the sing-box traffic API, so client quotas receive real byte deltas.
+func singBoxTUICInbound(ib *model.Inbound, clients []any) (map[string]any, error) {
+	inst, ok := tuic.InstanceFromInbound(ib)
+	if !ok {
+		return nil, fmt.Errorf("invalid TUIC inbound %q settings", ib.Tag)
+	}
+	if strings.TrimSpace(inst.Certificate) == "" || strings.TrimSpace(inst.PrivateKey) == "" {
+		return nil, fmt.Errorf("TUIC inbound %q requires a TLS certificate and private key", ib.Tag)
+	}
+	users := make([]map[string]any, 0, len(clients))
+	for _, item := range clients {
+		client, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := client["email"].(string)
+		uuid, _ := client["uuid"].(string)
+		password, _ := client["password"].(string)
+		if name == "" || uuid == "" || password == "" {
+			return nil, fmt.Errorf("TUIC inbound %q has an active client without email, UUID or password", ib.Tag)
+		}
+		users = append(users, map[string]any{"name": name, "uuid": uuid, "password": password})
+	}
+	listen := strings.TrimSpace(inst.Listen)
+	if listen == "" {
+		listen = "0.0.0.0"
+	}
+	if inst.Port < 1 || inst.Port > 65535 {
+		return nil, fmt.Errorf("TUIC inbound %q has an invalid port", ib.Tag)
+	}
+	return map[string]any{
+		"type": "tuic", "tag": ib.Tag, "listen": listen, "listen_port": inst.Port,
+		"users": users, "congestion_control": inst.CongestionControl,
+		"auth_timeout": fmt.Sprintf("%ds", inst.AuthenticationTimeout),
+		"zero_rtt_handshake": inst.ZeroRTTHandshake,
+		"tls": map[string]any{"enabled": true, "certificate_path": inst.Certificate,
+			"key_path": inst.PrivateKey, "alpn": inst.ALPN},
+	}, nil
 }
 
 func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
@@ -299,6 +342,15 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 		}
 		if singBoxInboundRequiresUsers(inbound.Protocol) && len(clients) == 0 {
 			logger.Warningf("Skipping sing-box inbound %q (%s): no active users", inbound.Tag, inbound.Protocol)
+			continue
+		}
+		if inbound.Protocol == model.TUIC {
+			translated, err := singBoxTUICInbound(inbound, clients)
+			if err != nil {
+				unsupported = append(unsupported, fmt.Sprintf("%s: %v", inbound.Tag, err))
+				continue
+			}
+			cfg.Inbounds = append(cfg.Inbounds, translated)
 			continue
 		}
 
@@ -619,6 +671,7 @@ func (s *SingBoxService) Restart(ctx context.Context) error {
 		singBoxProcess.SetError(err)
 		return err
 	}
+	tuic.GetManager().StopAll()
 	if err := singBoxProcess.Restart(ctx); err != nil {
 		return err
 	}
@@ -634,6 +687,7 @@ func (s *SingBoxService) Start(ctx context.Context) error {
 		singBoxProcess.SetError(err)
 		return err
 	}
+	tuic.GetManager().StopAll()
 	if err := singBoxProcess.Start(ctx); err != nil {
 		return err
 	}

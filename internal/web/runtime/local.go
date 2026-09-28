@@ -105,6 +105,9 @@ func (l *Local) AddInbound(ctx context.Context, ib *model.Inbound) error {
 		return err
 	}
 	if ib.Protocol == model.TUIC {
+		if l.isSingBox() {
+			return l.applyCoreChange(ctx)
+		}
 		inst, ok := tuic.InstanceFromInbound(ib)
 		if !ok {
 			return nil
@@ -143,6 +146,9 @@ func (l *Local) DelInbound(ctx context.Context, ib *model.Inbound) error {
 	}
 	if ib.Protocol == model.TUIC {
 		tuic.GetManager().Remove(ib.Id)
+		if l.isSingBox() {
+			return l.applyCoreChange(ctx)
+		}
 		return nil
 	}
 	if l.isSingBox() {
@@ -161,7 +167,10 @@ func (l *Local) UpdateInbound(ctx context.Context, oldIb, newIb *model.Inbound) 
 		}
 		return nil
 	}
-	if l.isSingBox() && oldIb.Protocol != model.MTProto && oldIb.Protocol != model.AmneziaWG && oldIb.Protocol != model.TUIC && oldIb.Protocol != model.Mieru && newIb.Protocol != model.MTProto && newIb.Protocol != model.AmneziaWG && newIb.Protocol != model.TUIC && newIb.Protocol != model.Mieru {
+	if l.isSingBox() && oldIb.Protocol != model.MTProto && oldIb.Protocol != model.AmneziaWG && oldIb.Protocol != model.Mieru && newIb.Protocol != model.MTProto && newIb.Protocol != model.AmneziaWG && newIb.Protocol != model.Mieru {
+		if oldIb.Protocol == model.TUIC {
+			tuic.GetManager().Remove(oldIb.Id)
+		}
 		return l.applyCoreChange(ctx)
 	}
 	if oldIb.Protocol == model.Mieru || newIb.Protocol == model.Mieru {
