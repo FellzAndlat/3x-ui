@@ -150,7 +150,7 @@ func (a *ServerController) importHiddify(c *gin.Context) {
 		notifyClientsChanged()
 	}
 	if legacyAlias.Path != "" {
-		if err := a.settingService.SaveHiddifySubscriptionURL(legacyAlias, legacyURI); err != nil {
+		if err := a.settingService.SaveHiddifySubscriptionURL(legacyAlias, legacyURI, items); err != nil {
 			jsonMsg(c, "Hiddify users imported, but saving their legacy subscription URL failed", err)
 			return
 		}

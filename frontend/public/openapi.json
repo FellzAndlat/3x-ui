@@ -1721,6 +1721,9 @@
           "group": {
             "type": "string"
           },
+          "hiddifySubURI": {
+            "type": "string"
+          },
           "id": {
             "type": "integer"
           },
@@ -7968,6 +7971,37 @@
         }
       }
     },
+    "/panel/api/server/hiddify/export": {
+      "get": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Download panel clients as a Hiddify-compatible JSON backup.",
+        "operationId": "get_panel_api_server_hiddify_export",
+        "description": "Exports clients with UUID-compatible identities, traffic limits, expiration, Telegram ID, WireGuard keys, and the saved legacy proxy_path_client alias. Clients without a UUID-compatible identity are skipped.",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/server/getNewEchCert": {
       "post": {
         "tags": [
@@ -9845,7 +9879,7 @@
         "tags": [
           "Clients"
         ],
-        "summary": "Clear the group label on many clients in one call. Inverse of /groups/bulkAdd. Clients themselves are kept — only the group label is cleared from clients.group_name and from each owning inbound's settings JSON. Groups become empty if all their members are removed.",
+        "summary": "Clear the group label on many clients in one call. Inverse of bulkAdd. Clients themselves are kept — only the group label is cleared from clients.group_name and from each owning inbound's settings JSON. Groups become empty if all their members are removed.",
         "operationId": "post_panel_api_clients_groups_bulkRemove",
         "requestBody": {
           "required": true,

@@ -114,8 +114,15 @@ func (s *HappService) currentSource(clientID int, host string) (string, *model.C
 	}
 	subEnable, enabled := values["subEnable"].(bool)
 	subURI, hasURI := values["subURI"].(string)
+	if client.HiddifySubURI != "" {
+		subURI = client.HiddifySubURI
+		hasURI = true
+	}
 	if !enabled || !subEnable || !hasURI || subURI == "" || client.SubID == "" {
 		return "", client, "source_unavailable"
+	}
+	if client.HiddifySubURI != "" {
+		return strings.TrimSuffix(subURI, "/") + "/" + client.SubID + "/", client, ""
 	}
 	return subURI + client.SubID, client, ""
 }

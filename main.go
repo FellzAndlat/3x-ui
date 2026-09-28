@@ -112,10 +112,10 @@ func runWebServer() {
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
-	if uri, err := (&service.SettingService{}).RepairHiddifySubscriptionURL(); err != nil {
-		logger.Warning("Could not repair imported Hiddify subscription URL: ", err)
-	} else if uri != "" {
-		logger.Info("Updated imported Hiddify subscription URL")
+	if count, err := (&service.SettingService{}).MigrateHiddifySubscriptionURLs(); err != nil {
+		logger.Warning("Could not migrate imported Hiddify subscription URLs: ", err)
+	} else if count > 0 {
+		logger.Info("Migrated imported Hiddify subscription URLs to individual clients")
 	}
 
 	server := web.NewServer()

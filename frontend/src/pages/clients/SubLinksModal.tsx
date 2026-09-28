@@ -5,6 +5,7 @@ import type { TableColumnType } from 'antd';
 import { CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 
 import type { ClientRecord } from '@/hooks/useClients';
+import { clientSubscriptionLink } from '@/lib/subscription-link';
 
 interface SubSettings {
   enable: boolean;
@@ -53,7 +54,7 @@ export default function SubLinksModal({
         key: email,
         email,
         subId: c.subId,
-        link: subSettings!.subURI + c.subId,
+        link: clientSubscriptionLink(subSettings, c.subId, c.hiddifySubURI),
         jsonLink: jsonEnabled ? subSettings!.subJsonURI + c.subId : '',
       });
     }

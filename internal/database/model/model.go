@@ -931,6 +931,7 @@ type ClientRecord struct {
 	Id             int    `json:"id" gorm:"primaryKey;autoIncrement"`
 	Email          string `json:"email" gorm:"uniqueIndex;not null"`
 	SubID          string `json:"subId" gorm:"index;column:sub_id"`
+	HiddifySubURI  string `json:"hiddifySubURI,omitempty" gorm:"column:hiddify_sub_uri;default:''"`
 	UUID           string `json:"uuid" gorm:"column:uuid"`
 	Password       string `json:"password"`
 	Auth           string `json:"auth"`

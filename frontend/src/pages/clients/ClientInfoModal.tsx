@@ -32,6 +32,7 @@ import {
 } from './amneziawgConfig';
 import { isSudokuLink, loadClientLinks } from './clientLinks';
 import './ClientInfoModal.css';
+import { clientSubscriptionLink } from '@/lib/subscription-link';
 
 const INBOUND_PROTOCOL_COLORS: Record<string, string> = {
   vless: 'blue',
@@ -173,7 +174,7 @@ export default function ClientInfoModal({
   }, [totalBytes, used]);
 
   const subId = client?.subId;
-  const subLink = subId && subSettings?.subURI ? subSettings.subURI + subId : '';
+  const subLink = clientSubscriptionLink(subSettings, subId, client?.hiddifySubURI);
   const subJsonLink =
     subId && subSettings?.subJsonEnable && subSettings?.subJsonURI
       ? subSettings.subJsonURI + subId

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clientSubscriptionLink } from '@/lib/subscription-link';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
@@ -192,15 +193,15 @@ export default function CommandPalette() {
 
   const copySubscription = useCallback(
     async (client: ClientRecord) => {
-      if (!client.subId || !allSetting.subURI) {
+      const link = clientSubscriptionLink(allSetting, client.subId, client.hiddifySubURI);
+      if (!link) {
         message.warning(t('pages.clients.noSubId'));
         return;
       }
-      const link = `${allSetting.subURI}${client.subId}`;
       const ok = await ClipboardManager.copyText(link);
       if (ok) message.success(t('copied'));
     },
-    [allSetting.subURI, t],
+    [allSetting, t],
   );
 
   const restartXray = useCallback(async () => {
@@ -268,17 +269,16 @@ export default function CommandPalette() {
             close();
             navigate(`/clients?search=${encodeURIComponent(c.email)}`);
           },
-          secondaryAction:
-            c.subId && allSetting.subURI
-              ? {
-                  label: t('commandPalette.copySubscription'),
-                  icon: <CopyOutlined />,
-                  execute: (e) => {
-                    e.stopPropagation();
-                    copySubscription(c);
-                  },
-                }
-              : undefined,
+          secondaryAction: clientSubscriptionLink(allSetting, c.subId, c.hiddifySubURI)
+            ? {
+                label: t('commandPalette.copySubscription'),
+                icon: <CopyOutlined />,
+                execute: (e) => {
+                  e.stopPropagation();
+                  copySubscription(c);
+                },
+              }
+            : undefined,
         });
       });
     }
@@ -637,7 +637,7 @@ export default function CommandPalette() {
     inbounds,
     isDark,
     isUltra,
-    allSetting.subURI,
+    allSetting,
     t,
     close,
     navigate,

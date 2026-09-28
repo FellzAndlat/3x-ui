@@ -8,6 +8,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database"
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const hiddifyLegacySubscriptionAliasesSetting = "hiddifyLegacySubscriptionAliases"
@@ -238,6 +243,10 @@ func (s *SettingService) HiddifySubscriptionURI(alias HiddifyLegacySubscriptionA
 		}
 		if parsed, err := url.Parse(current); err == nil && parsed.Scheme != "" && parsed.Host != "" {
 			publicOrigin = parsed.Scheme + "://" + parsed.Host
+		} else if panelDomain, err := s.GetWebDomain(); err != nil {
+			return "", err
+		} else if panelDomain != "" {
+			publicOrigin = "https://" + panelDomain
 		} else if len(alias.Domains) > 0 {
 			publicOrigin = "https://" + alias.Domains[0]
 		} else {
@@ -262,93 +271,142 @@ func (s *SettingService) HiddifySubscriptionURI(alias HiddifyLegacySubscriptionA
 			return "", fmt.Errorf("invalid subscription port")
 		}
 	}
-	// A public HTTPS URL cannot use the panel's plain HTTP subscription
-	// listener. This commonly happens when the old /subs/ URL is copied as
-	// the migration origin instead of the panel's HTTPS origin.
-	if parsed.Scheme == "https" && parsed.Port() != "" {
-		subPort, err := s.GetSubPort()
-		if err != nil {
-			return "", err
-		}
-		cert, err := s.GetSubCertFile()
-		if err != nil {
-			return "", err
-		}
-		key, err := s.GetSubKeyFile()
-		if err != nil {
-			return "", err
-		}
-		if parsed.Port() == strconv.Itoa(subPort) && (cert == "" || key == "") {
-			return "", fmt.Errorf("HTTPS on subscription port %d requires a subscription TLS certificate; use the public panel HTTPS domain without this port", subPort)
-		}
+	// Migrated links always use the HTTPS vhost on the standard port. The
+	// subscription listener's own port remains the default for other users.
+	host := parsed.Hostname()
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
 	}
-	return parsed.Scheme + "://" + parsed.Host + "/" + alias.Path + "/", nil
+	return "https://" + host + "/" + alias.Path + "/", nil
 }
 
-// RepairHiddifySubscriptionURL updates addresses saved before the backup path
-// was used for displayed subscription URLs. An explicit custom path and a
-// multi-backup installation are left alone because their intent is ambiguous.
-func (s *SettingService) RepairHiddifySubscriptionURL() (string, error) {
+// MigrateHiddifySubscriptionURLs undoes older imports that stored the Hiddify
+// path in the global subURI. Only records matching the old importer identity
+// receive the legacy URL; everyone else returns to the normal listener URL.
+func (s *SettingService) MigrateHiddifySubscriptionURLs() (int, error) {
 	aliases, err := s.GetHiddifyLegacySubscriptionAliases()
-	if err != nil || len(aliases) != 1 {
-		return "", err
+	if err != nil || len(aliases) == 0 {
+		return 0, err
 	}
 	current, err := s.GetSubURI()
 	if err != nil || current == "" {
-		return "", err
+		return 0, err
 	}
 	parsed, err := url.Parse(current)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return "", nil
+		return 0, nil
 	}
-	subPath, err := s.GetSubPath()
-	if err != nil {
-		return "", err
+	var matched bool
+	for _, alias := range aliases {
+		if strings.Trim(parsed.Path, "/") == alias.Path {
+			matched = true
+			break
+		}
 	}
-	path := strings.Trim(parsed.Path, "/")
-	if path != strings.Trim(subPath, "/") && path != "subs" {
-		return "", nil
+	if !matched {
+		return 0, nil
 	}
-	// The old URL often points HTTPS at the separate HTTP listener. The
-	// migrated path is also served by the panel on its public HTTPS origin.
-	if parsed.Scheme == "https" && parsed.Port() != "" {
-		subPort, err := s.GetSubPort()
-		if err != nil {
-			return "", err
+	// The alias may have been recovered only from the old global URI. Keep it
+	// persisted before the global URI is cleared.
+	if err := s.saveHiddifyLegacySubscriptionAliases(aliases); err != nil {
+		return 0, err
+	}
+	host := parsed.Hostname()
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	legacyURI := "https://" + host + parsed.Path
+	if !strings.HasSuffix(legacyURI, "/") {
+		legacyURI += "/"
+	}
+	count := 0
+	err = database.GetDB().Transaction(func(tx *gorm.DB) error {
+		var records []model.ClientRecord
+		if err := tx.Where("email LIKE ?", "hiddify_%").Find(&records).Error; err != nil {
+			return err
 		}
-		cert, err := s.GetSubCertFile()
-		if err != nil {
-			return "", err
-		}
-		key, err := s.GetSubKeyFile()
-		if err != nil {
-			return "", err
-		}
-		if parsed.Port() == strconv.Itoa(subPort) && (cert == "" || key == "") {
-			parsed.Host = parsed.Hostname()
-			if strings.Contains(parsed.Host, ":") {
-				parsed.Host = "[" + parsed.Host + "]"
+		found := false
+		for _, rec := range records {
+			if !isImportedHiddifyClient(rec) {
+				continue
 			}
+			found = true
+			if rec.HiddifySubURI != "" {
+				continue
+			}
+			if err := tx.Model(&rec).Update("hiddify_sub_uri", legacyURI).Error; err != nil {
+				return err
+			}
+			count++
 		}
-	}
-	updated := parsed.Scheme + "://" + parsed.Host + "/" + aliases[0].Path + "/"
-	if updated == current {
-		return "", nil
-	}
-	if err := s.setString("subURI", updated); err != nil {
-		return "", err
-	}
-	return updated, nil
+		if !found {
+			return nil
+		}
+		return tx.Model(&model.Setting{}).Where("key = ?", "subURI").Update("value", "").Error
+	})
+	return count, err
 }
 
-func (s *SettingService) SaveHiddifySubscriptionURL(alias HiddifyLegacySubscriptionAlias, uri string) error {
+func isImportedHiddifyClient(rec model.ClientRecord) bool {
+	if rec.SubID != rec.UUID {
+		return false
+	}
+	id, err := uuid.Parse(rec.UUID)
+	return err == nil && strings.HasPrefix(rec.Email, "hiddify_") && strings.HasSuffix(strings.ToLower(rec.Email), "_"+id.String()[:8])
+}
+
+func (s *SettingService) SaveHiddifySubscriptionURL(alias HiddifyLegacySubscriptionAlias, uri string, items []ClientCreatePayload) error {
 	if err := s.AddHiddifyLegacySubscriptionAlias(alias); err != nil {
 		return err
 	}
 	if uri == "" {
 		return nil
 	}
-	return s.setString("subURI", uri)
+	return database.GetDB().Transaction(func(tx *gorm.DB) error {
+		for _, item := range items {
+			client := item.Client
+			var rec model.ClientRecord
+			if err := tx.Where("email = ? AND sub_id = ? AND uuid = ?", client.Email, client.SubID, client.ID).First(&rec).Error; err != nil {
+				if database.IsNotFound(err) {
+					continue // The import skipped this user.
+				}
+				return err
+			}
+			if !isImportedHiddifyClient(rec) {
+				continue
+			}
+			if err := tx.Model(&rec).Update("hiddify_sub_uri", uri).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *SettingService) GetHiddifySubscriptionURIs() (map[string]string, error) {
+	var records []model.ClientRecord
+	if err := database.GetDB().Model(&model.ClientRecord{}).Select("sub_id", "hiddify_sub_uri").Where("hiddify_sub_uri <> ?", "").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	urls := make(map[string]string, len(records))
+	for _, rec := range records {
+		if rec.SubID != "" {
+			urls[rec.SubID] = rec.HiddifySubURI
+		}
+	}
+	return urls, nil
+}
+
+func (s *SettingService) IsHiddifySubscriptionPath(subID, requestPath string) bool {
+	var rec model.ClientRecord
+	if err := database.GetDB().Select("hiddify_sub_uri").Where("sub_id = ? AND hiddify_sub_uri <> ?", subID, "").First(&rec).Error; err != nil {
+		return false
+	}
+	uri, err := url.Parse(rec.HiddifySubURI)
+	if err != nil {
+		return false
+	}
+	return strings.HasPrefix(requestPath, strings.TrimSuffix(uri.Path, "/")+"/")
 }
 
 func (s *SettingService) saveHiddifyLegacySubscriptionAliases(aliases []HiddifyLegacySubscriptionAlias) error {

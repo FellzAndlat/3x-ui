@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/SawaMEN/3x-ui/v3/internal/database"
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
 	"github.com/gin-gonic/gin"
 )
@@ -44,6 +46,9 @@ func TestLegacyHiddifyRouteAcceptsNewSubscriptionDomain(t *testing.T) {
 	if err := (&service.SettingService{}).AddHiddifyLegacySubscriptionAlias(service.HiddifyLegacySubscriptionAlias{Path: "BackupPath123", Domains: []string{"old.example.com"}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := database.GetDB().Create(&model.ClientRecord{Email: "hiddify_user_b1337b29", SubID: id, HiddifySubURI: "https://cdn.example.com/BackupPath123/"}).Error; err != nil {
+		t.Fatal(err)
+	}
 	s := NewServer()
 	router := gin.New()
 	router.Use(s.subscriptionDomainValidator("old.example.com"))
@@ -55,6 +60,7 @@ func TestLegacyHiddifyRouteAcceptsNewSubscriptionDomain(t *testing.T) {
 	}{
 		{"/BackupPath123/" + id, http.StatusNoContent},
 		{"/BackupPath123/" + id + "/", http.StatusNoContent},
+		{"/BackupPath123/768e8bdd-bee3-4442-9006-b26464148aaa/", http.StatusForbidden},
 		{"/wrong/" + id, http.StatusForbidden},
 	} {
 		req := httptest.NewRequest(http.MethodGet, "http://cdn.example.com"+tc.path, nil)
@@ -70,6 +76,9 @@ func TestPanelForwardsOnlyImportedHiddifySubscriptionPath(t *testing.T) {
 	initSubDB(t)
 	const id = "b1337b29-8d60-4491-a468-c2bf120cb878"
 	if err := (&service.SettingService{}).AddHiddifyLegacySubscriptionAlias(service.HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.GetDB().Create(&model.ClientRecord{Email: "hiddify_user_b1337b29", SubID: id, HiddifySubURI: "https://cdn.example.com/BackupPath123/"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	s := NewServer()

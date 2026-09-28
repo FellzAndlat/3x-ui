@@ -449,6 +449,7 @@ export const EXAMPLES: Record<string, unknown> = {
     "flow": "",
     "forwardedPorts": "",
     "group": "",
+    "hiddifySubURI": "",
     "id": 0,
     "keepAlive": 0,
     "limitHwid": 0,

@@ -6,6 +6,7 @@ import { CopyOutlined, SyncOutlined, DeleteOutlined, DownloadOutlined } from '@a
 import { HttpUtil, IntlUtil, SizeFormatter, ColorUtils, Wireguard } from '@/utils';
 import { activateOnKey } from '@/utils/a11y';
 import { Protocols } from '@/schemas/primitives';
+import { clientSubscriptionLink } from '@/lib/subscription-link';
 import { InfinityIcon } from '@/components/ui';
 import { useDatepicker } from '@/hooks/useDatepicker';
 import {
@@ -210,7 +211,7 @@ export default function InboundInfoModal({
     }
 
     if (clientSet?.subId) {
-      setSubLink((subSettings?.subURI || '') + clientSet.subId);
+      setSubLink(clientSubscriptionLink(subSettings, clientSet.subId));
       setSubJsonLink(
         subSettings?.subJsonEnable ? (subSettings?.subJsonURI || '') + clientSet.subId : '',
       );

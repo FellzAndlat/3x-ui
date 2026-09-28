@@ -26,6 +26,7 @@ export const ClientRecordSchema = z
     id: z.number().optional(),
     email: z.string(),
     subId: z.string().optional(),
+    hiddifySubURI: z.string().optional(),
     uuid: z.string().optional(),
     password: z.string().optional(),
     auth: z.string().optional(),

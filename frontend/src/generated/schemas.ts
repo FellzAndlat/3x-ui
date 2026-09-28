@@ -1695,6 +1695,9 @@ export const SCHEMAS: Record<string, unknown> = {
       "group": {
         "type": "string"
       },
+      "hiddifySubURI": {
+        "type": "string"
+      },
       "id": {
         "type": "integer"
       },

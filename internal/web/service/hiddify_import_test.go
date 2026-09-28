@@ -3,6 +3,9 @@ package service
 import (
 	"strings"
 	"testing"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database"
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 )
 
 func TestHiddifyClientsPreserveIndependentUserURLs(t *testing.T) {
@@ -57,6 +60,12 @@ func TestHiddifySubscriptionURLUsesBackupPathAndPublicDomain(t *testing.T) {
 			t.Fatalf("subscription base = %q, want %q", got, want)
 		}
 	}
+	if got, err := s.HiddifySubscriptionURI(HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}, "http://cdn.example.com:2096"); err != nil || got != "https://cdn.example.com/BackupPath123/" {
+		t.Fatalf("imported URL must use HTTPS on 443: %q, %v", got, err)
+	}
+	if got, err := s.HiddifySubscriptionURI(HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}, "https://cdn.example.com:2096"); err != nil || got != "https://cdn.example.com/BackupPath123/" {
+		t.Fatalf("old HTTPS URL must drop the listener port: %q, %v", got, err)
+	}
 	for _, input := range []string{"https://cdn.example.com/wrong-path", "file://cdn.example.com", "https://user:pass@cdn.example.com"} {
 		if _, err := s.HiddifySubscriptionURI(HiddifyLegacySubscriptionAlias{Path: "SharedPath123"}, input); err == nil {
 			t.Fatalf("accepted invalid public origin %q", input)
@@ -64,20 +73,33 @@ func TestHiddifySubscriptionURLUsesBackupPathAndPublicDomain(t *testing.T) {
 	}
 }
 
-func TestSaveHiddifySubscriptionURLPersistsAliasAndDisplayedURL(t *testing.T) {
+func TestSaveHiddifySubscriptionURLAffectsImportedUsersOnly(t *testing.T) {
 	setupConflictDB(t)
 	s := &SettingService{}
 	alias := HiddifyLegacySubscriptionAlias{Path: "BackupPath123", Domains: []string{"old.example.com"}}
+	const importedID = "768e8bdd-bee3-4442-9006-b26464148aaa"
+	imported := model.ClientRecord{Email: "hiddify_Alice_768e8bdd", UUID: importedID, SubID: importedID, Group: "Hiddify"}
+	regular := model.ClientRecord{Email: "ordinary@example.com", SubID: "ordinary", UUID: "ordinary"}
+	if err := database.GetDB().Create(&imported).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.GetDB().Create(&regular).Error; err != nil {
+		t.Fatal(err)
+	}
 	uri, err := s.HiddifySubscriptionURI(alias, "https://cdn.example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SaveHiddifySubscriptionURL(alias, uri); err != nil {
+	if err := s.SaveHiddifySubscriptionURL(alias, uri, []ClientCreatePayload{{Client: model.Client{Email: imported.Email, ID: importedID, SubID: importedID}}}); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := s.GetSubURI()
-	if err != nil || stored != "https://cdn.example.com/BackupPath123/" {
-		t.Fatalf("displayed subscription base = %q, %v", stored, err)
+	if err != nil || stored != "" {
+		t.Fatalf("global subscription base changed to %q: %v", stored, err)
+	}
+	urls, err := s.GetHiddifySubscriptionURIs()
+	if err != nil || urls[importedID] != "https://cdn.example.com/BackupPath123/" || urls[regular.SubID] != "" {
+		t.Fatalf("per-user subscription URLs = %#v, %v", urls, err)
 	}
 	aliases, err := s.GetHiddifyLegacySubscriptionAliases()
 	if err != nil || len(aliases) != 1 || aliases[0].Path != alias.Path {
@@ -85,9 +107,18 @@ func TestSaveHiddifySubscriptionURLPersistsAliasAndDisplayedURL(t *testing.T) {
 	}
 }
 
-func TestRepairHiddifySubscriptionURLFromOldSubPath(t *testing.T) {
+func TestMigrateHiddifySubscriptionURLsRestoresGlobalURL(t *testing.T) {
 	setupConflictDB(t)
 	s := &SettingService{}
+	const importedID = "768e8bdd-bee3-4442-9006-b26464148aaa"
+	for _, rec := range []model.ClientRecord{
+		{Email: "hiddify_Alice_768e8bdd", UUID: importedID, SubID: importedID, Group: "Hiddify"},
+		{Email: "ordinary@example.com", UUID: "ordinary", SubID: "ordinary"},
+	} {
+		if err := database.GetDB().Create(&rec).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := s.AddHiddifyLegacySubscriptionAlias(HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}); err != nil {
 		t.Fatal(err)
 	}
@@ -98,23 +129,27 @@ func TestRepairHiddifySubscriptionURLFromOldSubPath(t *testing.T) {
 	if err := s.setString("subPort", "2096"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.setString("subURI", "https://cdn.example.com:2096/subs/"); err != nil {
+	if err := s.setString("subURI", "https://cdn.example.com:2096/BackupPath123/"); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := s.RepairHiddifySubscriptionURL()
-	if err != nil || updated != "https://cdn.example.com/BackupPath123/" {
-		t.Fatalf("repaired URL = %q, %v", updated, err)
+	count, err := s.MigrateHiddifySubscriptionURLs()
+	if err != nil || count != 1 {
+		t.Fatalf("migrated users = %d, %v", count, err)
 	}
 	stored, err := s.GetSubURI()
-	if err != nil || stored != updated {
-		t.Fatalf("stored URL = %q, %v", stored, err)
+	if err != nil || stored != "" {
+		t.Fatalf("global URL = %q, %v", stored, err)
 	}
-	if updated, err := s.RepairHiddifySubscriptionURL(); err != nil || updated != "" {
-		t.Fatalf("second repair = %q, %v", updated, err)
+	urls, err := s.GetHiddifySubscriptionURIs()
+	if err != nil || urls[importedID] != "https://cdn.example.com/BackupPath123/" || urls["ordinary"] != "" {
+		t.Fatalf("per-user URLs = %#v, %v", urls, err)
+	}
+	if count, err := s.MigrateHiddifySubscriptionURLs(); err != nil || count != 0 {
+		t.Fatalf("second migration = %d, %v", count, err)
 	}
 }
 
-func TestRepairHiddifySubscriptionURLPreservesCustomPath(t *testing.T) {
+func TestMigrateHiddifySubscriptionURLPreservesCustomPath(t *testing.T) {
 	setupConflictDB(t)
 	s := &SettingService{}
 	if err := s.AddHiddifyLegacySubscriptionAlias(HiddifyLegacySubscriptionAlias{Path: "BackupPath123"}); err != nil {
@@ -123,9 +158,9 @@ func TestRepairHiddifySubscriptionURLPreservesCustomPath(t *testing.T) {
 	if err := s.setString("subURI", "https://cdn.example.com/custom/"); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := s.RepairHiddifySubscriptionURL()
-	if err != nil || updated != "" {
-		t.Fatalf("custom URL changed: %q, %v", updated, err)
+	count, err := s.MigrateHiddifySubscriptionURLs()
+	if err != nil || count != 0 {
+		t.Fatalf("custom URL migrated: %d, %v", count, err)
 	}
 }
 

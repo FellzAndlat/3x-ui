@@ -23,6 +23,7 @@ import {
 } from './amneziawgConfig';
 import { buildTuicClientConfig, findTuicInbound, isTuicClient } from './tuicConfig';
 import { isSudokuLink, loadClientLinks } from './clientLinks';
+import { clientSubscriptionLink } from '@/lib/subscription-link';
 
 interface SubSettings {
   enable: boolean;
@@ -208,8 +209,9 @@ const DEFAULT_SUB: SubSettings = {
 export default function ClientQrModal(props: ClientQrModalProps) {
   const subSettings = props.subSettings ?? DEFAULT_SUB;
   const subId = props.client?.subId ?? '';
-  const subLink =
-    subId && subSettings.enable && subSettings.subURI ? subSettings.subURI + subId : '';
+  const subLink = subSettings.enable
+    ? clientSubscriptionLink(subSettings, subId, props.client?.hiddifySubURI)
+    : '';
   const happLinkEnabled = subSettings.happLinkEnable === true;
   // A gate or source change remounts this scope to clear Happ state and retire any in-flight response.
   const scopeKey = `${props.client?.id ?? ''}\0${subId}\0${subLink}\0${happLinkEnabled ? 1 : 0}`;
@@ -232,7 +234,9 @@ function ClientQrModalContent({
 
   const subId = client?.subId;
   const subEnabled = !!subSettings?.enable;
-  const subLink = subId && subEnabled && subSettings?.subURI ? subSettings.subURI + subId : '';
+  const subLink = subEnabled
+    ? clientSubscriptionLink(subSettings, subId, client?.hiddifySubURI)
+    : '';
   const subJsonLink =
     subId && subEnabled && subSettings?.subJsonEnable && subSettings?.subJsonURI
       ? subSettings.subJsonURI + subId

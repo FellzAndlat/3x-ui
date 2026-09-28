@@ -408,6 +408,7 @@ export interface ClientRecord {
   flow: string;
   forwardedPorts: string;
   group: string;
+  hiddifySubURI?: string;
   id: number;
   keepAlive: number;
   limitHwid: number;

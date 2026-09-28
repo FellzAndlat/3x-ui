@@ -31,7 +31,7 @@ import {
   type BulkSetEnableResult,
   type BulkDetachResult,
 } from '@/schemas/client';
-import { DefaultsPayloadSchema } from '@/schemas/defaults';
+import { DefaultsPayloadSchema, type DefaultsPayload } from '@/schemas/defaults';
 import { TRAFFIC_POLL_INTERVAL_S } from '@/lib/traffic/poll-interval';
 
 // One row sent to POST /clients/:email/externalLinks.
@@ -52,6 +52,7 @@ interface SubSettings {
   enable: boolean;
   happLinkEnable: boolean;
   subURI: string;
+  hiddifySubURIs?: Record<string, string>;
   subJsonURI: string;
   subJsonEnable: boolean;
   subClashURI: string;
@@ -153,7 +154,7 @@ async function fetchInboundOptions(): Promise<InboundOption[]> {
   return Array.isArray(validated.obj) ? validated.obj : [];
 }
 
-async function fetchDefaults(): Promise<Record<string, unknown>> {
+async function fetchDefaults(): Promise<DefaultsPayload> {
   const msg = await HttpUtil.post('/panel/api/setting/defaultSettings', undefined, {
     silent: true,
   });
@@ -269,6 +270,7 @@ export function useClients(options: UseClientsOptions = {}) {
       enable: !!defaults.subEnable,
       happLinkEnable: defaults.happLinkEnable === true,
       subURI: (defaults.subURI as string) || '',
+      hiddifySubURIs: defaults.hiddifySubURIs,
       subJsonURI: (defaults.subJsonURI as string) || '',
       subJsonEnable: !!defaults.subJsonEnable,
       subClashURI: (defaults.subClashURI as string) || '',
@@ -279,6 +281,7 @@ export function useClients(options: UseClientsOptions = {}) {
       defaults.subEnable,
       defaults.happLinkEnable,
       defaults.subURI,
+      defaults.hiddifySubURIs,
       defaults.subJsonURI,
       defaults.subJsonEnable,
       defaults.subClashURI,

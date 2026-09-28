@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
   Button,
@@ -28,6 +29,7 @@ import {
 import type { AllSetting } from '@/models/setting';
 import { isOutboundProtocol } from '@/schemas/primitives';
 import { HttpUtil, LanguageManager } from '@/utils';
+import { keys } from '@/api/queryKeys';
 import { onNumber } from '@/utils/onNumber';
 import { DefaultSettingTag, SettingListItem } from '@/components/ui';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -59,6 +61,7 @@ export default function GeneralTab({
   const { isMobile } = useMediaQuery();
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const hashToTab: Record<string, string> = {
     '#general': '1',
     '#core': 'core',
@@ -141,9 +144,10 @@ export default function GeneralTab({
         const skipped = (result.obj?.skipped ?? []) as { email: string; reason: string }[];
         const created = result.obj?.created ?? 0;
         setHiddifyResult({ created, skipped });
+        void queryClient.invalidateQueries({ queryKey: keys.settings.defaults() });
+        void queryClient.invalidateQueries({ queryKey: keys.clients.root() });
         if (result.obj?.subscriptionURI) {
-          updateSetting({ subURI: result.obj.subscriptionURI });
-          message.success(`URL подписки сохранён: ${result.obj.subscriptionURI}`);
+          message.success(`URL для импортированных пользователей: ${result.obj.subscriptionURI}`);
         }
         if (skipped.length === 0) {
           message.success(`Импортировано пользователей: ${created}.`);

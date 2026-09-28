@@ -20,6 +20,7 @@ export interface SubSettings {
   enable: boolean;
   subTitle: string;
   subURI: string;
+  hiddifySubURIs?: Record<string, string>;
   subJsonURI: string;
   subJsonEnable: boolean;
   // Configured public host (Sub Domain, else Web Domain) used as the share/QR
@@ -201,6 +202,7 @@ export function useInbounds() {
       enable: !!defaults.subEnable,
       subTitle: defaults.subTitle || '',
       subURI: defaults.subURI || '',
+      hiddifySubURIs: defaults.hiddifySubURIs,
       subJsonURI: defaults.subJsonURI || '',
       subJsonEnable: !!defaults.subJsonEnable,
       publicHost: defaults.subDomain || defaults.webDomain || '',
@@ -209,6 +211,7 @@ export function useInbounds() {
       defaults.subEnable,
       defaults.subTitle,
       defaults.subURI,
+      defaults.hiddifySubURIs,
       defaults.subJsonURI,
       defaults.subJsonEnable,
       defaults.subDomain,

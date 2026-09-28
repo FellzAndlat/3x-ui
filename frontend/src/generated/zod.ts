@@ -432,6 +432,7 @@ export const ClientRecordSchema = z.object({
   flow: z.string(),
   forwardedPorts: z.string(),
   group: z.string(),
+  hiddifySubURI: z.string().optional(),
   id: z.number().int(),
   keepAlive: z.number().int(),
   limitHwid: z.number().int(),

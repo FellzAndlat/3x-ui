@@ -4,6 +4,7 @@ import { Collapse, Modal } from 'antd';
 import type { CollapseProps } from 'antd';
 
 import { Protocols } from '@/schemas/primitives';
+import { clientSubscriptionLink } from '@/lib/subscription-link';
 import {
   genAllLinks,
   genAmneziaWGConfigs,
@@ -161,7 +162,7 @@ export default function QrCodeModal({
     let nextSub = '';
     let nextSubJson = '';
     if (subSettings?.enable && subId) {
-      nextSub = (subSettings.subURI || '') + subId;
+      nextSub = clientSubscriptionLink(subSettings, subId);
       nextSubJson = subSettings.subJsonEnable ? (subSettings.subJsonURI || '') + subId : '';
     }
     setSubLink(nextSub);

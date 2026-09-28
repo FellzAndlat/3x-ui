@@ -24,6 +24,7 @@ import {
 
 import { HttpUtil, SizeFormatter, RandomUtil } from '@/utils';
 import { buildClonePayload } from '@/lib/xray/inbound-clone';
+import { clientSubscriptionLink } from '@/lib/subscription-link';
 import { NODE_ELIGIBLE_PROTOCOLS } from '@/lib/xray/node-protocols';
 import {
   genAmneziaWGLinks,
@@ -400,8 +401,9 @@ export default function InboundsPage() {
       const clients = settings.clients || [];
       const subLinks: string[] = [];
       for (const c of clients) {
-        if (c.subId && subSettings.subURI) {
-          subLinks.push(subSettings.subURI + c.subId);
+        const link = clientSubscriptionLink(subSettings, c.subId);
+        if (link) {
+          subLinks.push(link);
         }
       }
       openText({
@@ -432,8 +434,9 @@ export default function InboundsPage() {
       const settings = coerceInboundJsonField(ib.settings) as { clients?: { subId?: string }[] };
       const clients = settings.clients || [];
       for (const c of clients) {
-        if (c.subId && subSettings.subURI) {
-          out.push(subSettings.subURI + c.subId);
+        const link = clientSubscriptionLink(subSettings, c.subId);
+        if (link) {
+          out.push(link);
         }
       }
     }

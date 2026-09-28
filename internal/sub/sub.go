@@ -383,7 +383,7 @@ func (s *Server) subscriptionDomainValidator(primary string) gin.HandlerFunc {
 		// pages work on the migrated public domain as well.
 		aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
 		if err == nil {
-			if _, ok := legacyHiddifySubID(c.Request.URL.Path, aliases); ok {
+			if subID, ok := legacyHiddifySubID(c.Request.URL.Path, aliases); ok && s.settingService.IsHiddifySubscriptionPath(subID, c.Request.URL.Path) {
 				c.Next()
 				return
 			}
@@ -419,7 +419,7 @@ func (s *Server) legacyHiddifySubscription(c *gin.Context) {
 		return
 	}
 	subID, ok := legacyHiddifySubID(c.Request.URL.Path, aliases)
-	if !ok {
+	if !ok || !s.settingService.IsHiddifySubscriptionPath(subID, c.Request.URL.Path) {
 		c.Status(http.StatusNotFound)
 		return
 	}
@@ -498,7 +498,7 @@ func (s *Server) ServeLegacySubscription(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return false
 	}
-	if _, ok := legacyHiddifySubID(r.URL.Path, aliases); !ok {
+	if subID, ok := legacyHiddifySubID(r.URL.Path, aliases); !ok || !s.settingService.IsHiddifySubscriptionPath(subID, r.URL.Path) {
 		if _, assetOK := legacyHiddifyAssetPath(r.URL.Path, aliases); !assetOK {
 			return false
 		}

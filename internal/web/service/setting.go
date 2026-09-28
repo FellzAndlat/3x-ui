@@ -1863,6 +1863,11 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 			result["subClashURI"] = subURI + subClashPath
 		}
 	}
+	hiddifyURIs, err := s.GetHiddifySubscriptionURIs()
+	if err != nil {
+		return nil, err
+	}
+	result["hiddifySubURIs"] = hiddifyURIs
 
 	return result, nil
 }
