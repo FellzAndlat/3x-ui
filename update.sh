@@ -891,14 +891,20 @@ config_after_update() {
 
         # Prompt and setup SSL (domain or IP)
         prompt_and_setup_ssl "${existing_port}" "${existing_webBasePath}" "${server_ip}"
-
-        echo ""
-        echo -e "${green}═══════════════════════════════════════════${plain}"
-        echo -e "${green}     Panel Access Information              ${plain}"
-        echo -e "${green}═══════════════════════════════════════════${plain}"
-        echo -e "${green}Access URL: https://${SSL_HOST}:${existing_port}/${existing_webBasePath}${plain}"
-        echo -e "${green}═══════════════════════════════════════════${plain}"
-        echo -e "${yellow}⚠ SSL Certificate: Enabled and configured${plain}"
+        if [ $? -eq 0 ]; then
+            panel_needs_restart=1
+            echo -e "${green}SSL certificate setup completed successfully!${plain}"
+            echo ""
+            echo -e "${green}═══════════════════════════════════════════${plain}"
+            echo -e "${green}     Panel Access Information              ${plain}"
+            echo -e "${green}═══════════════════════════════════════════${plain}"
+            echo -e "${green}Access URL: https://${SSL_HOST}:${existing_port}/${existing_webBasePath}${plain}"
+            echo -e "${green}═══════════════════════════════════════════${plain}"
+            echo -e "${yellow}⚠ SSL Certificate: Enabled and configured${plain}"
+        else
+            echo -e "${red}SSL setup failed. Please configure SSL manually.${plain}"
+            echo -e "${yellow}Run 'x-ui' and choose the SSL certificate option.${plain}"
+        fi
     else
         echo -e "${green}SSL certificate is already configured${plain}"
         # Show access URL with existing certificate
@@ -994,14 +1000,41 @@ require_repo_files() {
     [[ "${ref}" == "main" ]] && return 0
     for name in "$@"; do
         status=$(${curl_bin} -sIL --retry 3 --connect-timeout 15 -o /dev/null -w '%{http_code}' "https://raw.githubusercontent.com/SawaMEN/3x-ui/${ref}/${name}")
+        if [[ "${status}" == "000" ]]; then
+            status=$(${curl_bin} -4 -sIL --retry 3 --connect-timeout 15 -o /dev/null -w '%{http_code}' "https://raw.githubusercontent.com/SawaMEN/3x-ui/${ref}/${name}")
+        fi
         if [[ "${status}" != "200" ]]; then
             _fail "ERROR: ${name} is not available for ${ref} (HTTP ${status}). Update to a release that ships it, or to 'dev-latest'. The current installation is untouched."
         fi
     done
 }
 
+# Downloads a release asset with bounded retries. Some hosts have broken or
+# partially configured IPv6 routes; in that case curl may fail before it ever
+# reaches GitHub even though IPv4 works. Retry normally first, then fall back
+# to IPv4 without hiding curl's useful error output from console/web logs.
+download_release_asset() {
+    local url="$1"
+    local dest="$2"
+
+    rm -f "$dest"
+    if ${curl_bin} -fL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 900 -o "$dest" "$url"; then
+        return 0
+    fi
+
+    echo -e "${yellow}Initial download failed; retrying GitHub over IPv4...${plain}"
+    rm -f "$dest"
+    ${curl_bin} -4 -fL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 900 -o "$dest" "$url"
+}
+
 update_x-ui() {
-    cd ${xui_folder%/x-ui}/
+    local install_parent="${xui_folder%/x-ui}"
+    if [[ "${install_parent}" == "${xui_folder}" || -z "${install_parent}" ]]; then
+        _fail "ERROR: XUI_MAIN_FOLDER must end with /x-ui (current: ${xui_folder})."
+    fi
+    if ! cd "${install_parent}"; then
+        _fail "ERROR: Cannot enter x-ui installation parent directory: ${install_parent}"
+    fi
 
     load_xui_env
 
@@ -1020,37 +1053,51 @@ update_x-ui() {
         tag_version="${XUI_UPDATE_TAG}"
         echo -e "${green}Using update tag: ${tag_version}${plain}"
     else
-        tag_version=$(${curl_bin} -Ls "https://api.github.com/repos/SawaMEN/3x-ui/releases/latest" 2> /dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        release_json=$(${curl_bin} -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 "https://api.github.com/repos/SawaMEN/3x-ui/releases/latest" 2> /dev/null)
+        if [[ $? -ne 0 || -z "${release_json}" ]]; then
+            release_json=$(${curl_bin} -4 -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 "https://api.github.com/repos/SawaMEN/3x-ui/releases/latest" 2> /dev/null)
+        fi
+        tag_version=$(printf '%s' "${release_json}" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$tag_version" ]]; then
             _fail "ERROR: Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later"
         fi
     fi
     echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
-    # x-ui.sh, x-ui.rc and the unit files must come from the same release as
-    # the binary; only the rolling dev build tracks main.
+
+    # Keep scripts and service files pinned to exactly the same Git ref as the
+    # release archive. This is especially important for dev-latest: main may
+    # advance after the rolling asset was built, creating a binary/script mismatch.
     script_ref="${tag_version}"
-    if [[ "${tag_version}" == "dev-latest" ]]; then
-        script_ref="main"
-    fi
+
     # The unit files are only fetched when the release tarball lacks them, so
     # they are checked at that point instead of here.
     local required_files=("x-ui.sh")
     [[ $release == "alpine" ]] && required_files+=("x-ui.rc")
     require_repo_files "${script_ref}" "${required_files[@]}"
-    ${curl_bin} -fLRo ${xui_folder}-linux-$(arch).tar.gz https://github.com/SawaMEN/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz 2> /dev/null
-    if [[ $? -ne 0 ]]; then
-        _fail "ERROR: Failed to download x-ui, please be sure that your server can access GitHub"
+
+    local machine_arch
+    machine_arch="$(arch)"
+    local archive="${install_parent}/x-ui-linux-${machine_arch}.tar.gz"
+    local asset_url="https://github.com/SawaMEN/3x-ui/releases/download/${tag_version}/x-ui-linux-${machine_arch}.tar.gz"
+
+    if ! download_release_asset "${asset_url}" "${archive}"; then
+        rm -f "${archive}"
+        _fail "ERROR: Failed to download x-ui release ${tag_version}. Check the curl error above and verify that the server can access GitHub."
     fi
-    if [[ ! -s ${xui_folder}-linux-$(arch).tar.gz ]]; then
-        rm ${xui_folder}-linux-$(arch).tar.gz -f > /dev/null 2>&1
+    if [[ ! -s "${archive}" ]]; then
+        rm -f "${archive}"
         _fail "ERROR: Downloaded x-ui release archive is empty, please be sure that your server can access GitHub"
     fi
+
     # Releases publish <asset>.sha256 next to each archive. A mismatch or a
     # failed sidecar download aborts the update; only a 404 (releases
     # predating the sidecar) is tolerated with a warning.
-    archive="${xui_folder}-linux-$(arch).tar.gz"
     rm -f "${archive}.sha256"
-    sidecar_code=$(${curl_bin} -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${archive}.sha256" -w '%{http_code}' "https://github.com/SawaMEN/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz.sha256" 2> /dev/null)
+    sidecar_code=$(${curl_bin} -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${archive}.sha256" -w '%{http_code}' "${asset_url}.sha256" 2> /dev/null)
+    if [[ "${sidecar_code}" == "000" ]]; then
+        rm -f "${archive}.sha256"
+        sidecar_code=$(${curl_bin} -4 -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${archive}.sha256" -w '%{http_code}' "${asset_url}.sha256" 2> /dev/null)
+    fi
     if [[ "${sidecar_code}" == "200" ]]; then
         expected_sha256=$(awk 'NR == 1 {print $1}' "${archive}.sha256")
         actual_sha256=$(sha256sum "${archive}" | awk '{print $1}')
@@ -1065,7 +1112,19 @@ update_x-ui() {
         echo -e "${yellow}No checksum published for this release, skipping verification${plain}"
     else
         rm -f "${archive}.sha256" "${archive}"
-        _fail "ERROR: Failed to download the checksum for x-ui-linux-$(arch).tar.gz (HTTP ${sidecar_code})"
+        _fail "ERROR: Failed to download the checksum for x-ui-linux-${machine_arch}.tar.gz (HTTP ${sidecar_code})"
+    fi
+
+    # Validate the complete archive before touching the running installation.
+    # A corrupt/truncated asset used to be discovered only after the old binary
+    # and service unit had already been removed.
+    if ! tar -tzf "${archive}" > /dev/null 2>&1; then
+        rm -f "${archive}"
+        _fail "ERROR: Downloaded x-ui release archive is invalid or truncated. The current installation was not changed."
+    fi
+    if ! tar -tzf "${archive}" 2> /dev/null | grep -Eq '^(\./)?x-ui/x-ui$'; then
+        rm -f "${archive}"
+        _fail "ERROR: Release archive does not contain x-ui/x-ui. The current installation was not changed."
     fi
 
     if [[ -e ${xui_folder}/ ]]; then
@@ -1077,7 +1136,7 @@ update_x-ui() {
                 echo -e "${green}Removing old service unit version...${plain}"
                 rm -f /etc/init.d/x-ui > /dev/null 2>&1
             else
-                rm x-ui-linux-$(arch).tar.gz -f > /dev/null 2>&1
+                rm -f "${archive}"
                 _fail "ERROR: x-ui service unit not installed."
             fi
         else
@@ -1085,10 +1144,10 @@ update_x-ui() {
                 systemctl stop x-ui > /dev/null 2>&1
                 systemctl disable x-ui > /dev/null 2>&1
                 echo -e "${green}Removing old systemd unit version...${plain}"
-                rm ${xui_service}/x-ui.service -f > /dev/null 2>&1
+                rm "${xui_service}/x-ui.service" -f > /dev/null 2>&1
                 systemctl daemon-reload > /dev/null 2>&1
             else
-                rm x-ui-linux-$(arch).tar.gz -f > /dev/null 2>&1
+                rm -f "${archive}"
                 _fail "ERROR: x-ui systemd unit not installed."
             fi
         fi
@@ -1099,34 +1158,32 @@ update_x-ui() {
         pkill -f 'mtg-linux-[^ ]* run ' > /dev/null 2>&1 || true
         pkill -f 'tuic-server.*-c .*bin/tuic/tuic_[0-9]+\.json' > /dev/null 2>&1 || true
         echo -e "${green}Removing old x-ui version...${plain}"
-        rm ${xui_folder} -f > /dev/null 2>&1
-        rm ${xui_folder}/x-ui.service -f > /dev/null 2>&1
-        rm ${xui_folder}/x-ui.service.debian -f > /dev/null 2>&1
-        rm ${xui_folder}/x-ui.service.arch -f > /dev/null 2>&1
-        rm ${xui_folder}/x-ui.service.rhel -f > /dev/null 2>&1
-        rm ${xui_folder}/x-ui -f > /dev/null 2>&1
-        rm ${xui_folder}/x-ui.sh -f > /dev/null 2>&1
+        rm "${xui_folder}" -f > /dev/null 2>&1
+        rm "${xui_folder}/x-ui.service" -f > /dev/null 2>&1
+        rm "${xui_folder}/x-ui.service.debian" -f > /dev/null 2>&1
+        rm "${xui_folder}/x-ui.service.arch" -f > /dev/null 2>&1
+        rm "${xui_folder}/x-ui.service.rhel" -f > /dev/null 2>&1
+        rm "${xui_folder}/x-ui" -f > /dev/null 2>&1
+        rm "${xui_folder}/x-ui.sh" -f > /dev/null 2>&1
         echo -e "${green}Removing old mtg version...${plain}"
-        rm ${xui_folder}/bin/mtg-linux-$(arch) -f > /dev/null 2>&1
+        rm "${xui_folder}/bin/mtg-linux-${machine_arch}" -f > /dev/null 2>&1
         echo -e "${green}Removing old xray version...${plain}"
-        rm ${xui_folder}/bin/xray-linux-$(arch) -f > /dev/null 2>&1
+        rm "${xui_folder}/bin/xray-linux-${machine_arch}" -f > /dev/null 2>&1
         echo -e "${green}Removing old README and LICENSE file...${plain}"
-        rm ${xui_folder}/bin/README.md -f > /dev/null 2>&1
-        rm ${xui_folder}/bin/LICENSE -f > /dev/null 2>&1
+        rm "${xui_folder}/bin/README.md" -f > /dev/null 2>&1
+        rm "${xui_folder}/bin/LICENSE" -f > /dev/null 2>&1
     else
-        rm x-ui-linux-$(arch).tar.gz -f > /dev/null 2>&1
+        rm -f "${archive}"
         _fail "ERROR: x-ui not installed."
     fi
 
     echo -e "${green}Installing new x-ui version...${plain}"
-    tar zxvf x-ui-linux-$(arch).tar.gz > /dev/null 2>&1
-    if [[ $? -ne 0 ]]; then
-        rm x-ui-linux-$(arch).tar.gz -f > /dev/null 2>&1
+    if ! tar xzf "${archive}" -C "${install_parent}" > /dev/null 2>&1; then
+        rm -f "${archive}"
         _fail "ERROR: Failed to extract the x-ui release archive -- the previous installation has already been removed, so the panel will not start until this is fixed; try running the update again"
     fi
-    rm x-ui-linux-$(arch).tar.gz -f > /dev/null 2>&1
-    cd x-ui > /dev/null 2>&1
-    if [[ $? -ne 0 || ! -s x-ui ]]; then
+    rm -f "${archive}"
+    if ! cd "${xui_folder}" || [[ ! -s "${xui_folder}/x-ui" ]]; then
         _fail "ERROR: Extracted x-ui archive is missing the x-ui binary -- the previous installation has already been removed, so the panel will not start until this is fixed; try running the update again"
     fi
     chmod +x x-ui > /dev/null 2>&1
@@ -1134,20 +1191,20 @@ update_x-ui() {
     # Check the system's architecture and rename the file accordingly.
     # The panel binary maps GOARCH=arm to "arm32" (internal/xray/process.go),
     # so the Xray binary must be named xray-linux-arm32; mtg keeps plain "arm".
-    if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then
-        mv bin/xray-linux-$(arch) bin/xray-linux-arm32 > /dev/null 2>&1
+    if [[ ${machine_arch} == "armv5" || ${machine_arch} == "armv6" || ${machine_arch} == "armv7" ]]; then
+        mv "bin/xray-linux-${machine_arch}" bin/xray-linux-arm32 > /dev/null 2>&1
         chmod +x bin/xray-linux-arm32 > /dev/null 2>&1
-        if [[ -f bin/mtg-linux-$(arch) ]]; then
-            mv bin/mtg-linux-$(arch) bin/mtg-linux-arm > /dev/null 2>&1
+        if [[ -f "bin/mtg-linux-${machine_arch}" ]]; then
+            mv "bin/mtg-linux-${machine_arch}" bin/mtg-linux-arm > /dev/null 2>&1
             chmod +x bin/mtg-linux-arm > /dev/null 2>&1
         fi
     fi
 
-    chmod +x x-ui bin/xray-linux-$(arch) > /dev/null 2>&1
+    chmod +x x-ui "bin/xray-linux-${machine_arch}" > /dev/null 2>&1
     if [[ -f bin/mtg-linux-arm ]]; then
         chmod +x bin/mtg-linux-arm > /dev/null 2>&1
-    elif [[ -f bin/mtg-linux-$(arch) ]]; then
-        chmod +x bin/mtg-linux-$(arch) > /dev/null 2>&1
+    elif [[ -f "bin/mtg-linux-${machine_arch}" ]]; then
+        chmod +x "bin/mtg-linux-${machine_arch}" > /dev/null 2>&1
     fi
     [[ -f bin/pingtunnel ]] && chmod 0755 bin/pingtunnel
     [[ -f bin/trusttunnel_endpoint ]] && chmod 0755 bin/trusttunnel_endpoint
@@ -1158,8 +1215,7 @@ update_x-ui() {
     echo -e "${green}Downloading and installing x-ui.sh script...${plain}"
     local xui_script_temp="/usr/bin/x-ui-temp.$$"
     rm -f "${xui_script_temp}"
-    ${curl_bin} -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/SawaMEN/3x-ui/${script_ref}/x-ui.sh" > /dev/null 2>&1
-    if [[ $? -ne 0 ]]; then
+    if ! download_release_asset "https://raw.githubusercontent.com/SawaMEN/3x-ui/${script_ref}/x-ui.sh" "${xui_script_temp}"; then
         rm -f "${xui_script_temp}"
         _fail "ERROR: Failed to download x-ui.sh script, please be sure that your server can access GitHub"
     fi
@@ -1173,24 +1229,23 @@ update_x-ui() {
         _fail "ERROR: Failed to install x-ui.sh script"
     fi
 
-    chmod +x ${xui_folder}/x-ui.sh > /dev/null 2>&1
+    chmod +x "${xui_folder}/x-ui.sh" > /dev/null 2>&1
     chmod +x /usr/bin/x-ui > /dev/null 2>&1
     mkdir -p /var/log/x-ui > /dev/null 2>&1
 
     echo -e "${green}Changing owner...${plain}"
-    chown -R root:root ${xui_folder} > /dev/null 2>&1
+    chown -R root:root "${xui_folder}" > /dev/null 2>&1
 
     if [ -f "${xui_folder}/bin/config.json" ]; then
         echo -e "${green}Changing on config file permissions...${plain}"
-        chmod 640 ${xui_folder}/bin/config.json > /dev/null 2>&1
+        chmod 640 "${xui_folder}/bin/config.json" > /dev/null 2>&1
     fi
 
     if [[ $release == "alpine" ]]; then
         echo -e "${green}Downloading and installing startup unit x-ui.rc...${plain}"
         xui_rc_temp="/etc/init.d/x-ui.tmp.$$"
         rm -f "${xui_rc_temp}"
-        ${curl_bin} -fLRo "${xui_rc_temp}" "https://raw.githubusercontent.com/SawaMEN/3x-ui/${script_ref}/x-ui.rc" > /dev/null 2>&1
-        if [[ $? -ne 0 ]]; then
+        if ! download_release_asset "https://raw.githubusercontent.com/SawaMEN/3x-ui/${script_ref}/x-ui.rc" "${xui_rc_temp}"; then
             rm -f "${xui_rc_temp}"
             _fail "ERROR: Failed to download startup unit x-ui.rc, please be sure that your server can access GitHub"
         fi
@@ -1264,8 +1319,8 @@ update_x-ui() {
                 fi
             fi
         fi
-        chown root:root ${xui_service}/x-ui.service > /dev/null 2>&1
-        chmod 644 ${xui_service}/x-ui.service > /dev/null 2>&1
+        chown root:root "${xui_service}/x-ui.service" > /dev/null 2>&1
+        chmod 644 "${xui_service}/x-ui.service" > /dev/null 2>&1
         systemctl daemon-reload > /dev/null 2>&1
         systemctl enable x-ui > /dev/null 2>&1
         if ! systemctl start x-ui > /dev/null 2>&1; then
@@ -1290,6 +1345,7 @@ update_x-ui() {
 │  ${blue}x-ui control menu usages (subcommands):${plain}              │
 │                                                       │
 │  ${blue}x-ui${plain}              - Admin Management Script          │
+│                                                       │
 │  ${blue}x-ui start${plain}        - Start                            │
 │  ${blue}x-ui stop${plain}         - Stop                             │
 │  ${blue}x-ui restart${plain}      - Restart                          │
