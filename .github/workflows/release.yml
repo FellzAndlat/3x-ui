@@ -176,6 +176,7 @@ jobs:
           cp internal/Telemt/telemt-meko-fix.sh x-ui/
           cp internal/Telemt/telemt-meko-fix.service x-ui/
           cp x-ui.sh x-ui/
+          cp x-ui-core.sh x-ui/
           cd x-ui/bin
 
           Xray_URL="https://github.com/XTLS/Xray-core/releases/download/v26.9.9/"
