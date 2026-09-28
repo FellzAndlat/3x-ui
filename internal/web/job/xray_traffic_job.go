@@ -2,7 +2,6 @@ package job
 
 import (
 	"encoding/json"
-	"sync"
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
@@ -16,16 +15,10 @@ import (
 
 // XrayTrafficJob collects and processes traffic statistics from Xray, updating the database and optionally informing external APIs.
 type XrayTrafficJob struct {
-	runMu          sync.Mutex
 	settingService  service.SettingService
 	xrayService     service.XrayService
 	inboundService  service.InboundService
 	outboundService outbound.OutboundService
-	pendingInbound  []*xray.Traffic
-	pendingClients  []*xray.ClientTraffic
-	pendingOutbound []*xray.Traffic
-	retryInbound    bool
-	retryOutbound   bool
 }
 
 // clientStatsSnapshotMaxClients caps how many client_traffics rows the job
@@ -79,56 +72,32 @@ func NewXrayTrafficJob() *XrayTrafficJob {
 // real-time updates over WebSocket using compact delta payloads — no REST
 // fallback, scales to 10k–20k+ clients per inbound.
 func (j *XrayTrafficJob) Run() {
-	// Cron can start another tick while a slow database write is in progress.
-	// A second collector must not advance the Xray baseline out of order.
-	if !j.runMu.TryLock() {
-		return
-	}
-	defer j.runMu.Unlock()
 	if !j.xrayService.IsXrayRunning() {
 		return
 	}
-	if j.retryInbound {
-		needRestart, _, err := j.inboundService.AddTraffic(j.pendingInbound, j.pendingClients)
-		if err != nil {
-			logger.Warning("retry inbound traffic failed:", err)
-			return
-		}
-		j.retryInbound = false
-		j.pendingInbound = nil
-		j.pendingClients = nil
-		if needRestart {
-			j.xrayService.SetToNeedRestart()
-		}
-	}
-	if j.retryOutbound {
-		err, _ := j.outboundService.AddTraffic(j.pendingOutbound, nil)
-		if err != nil {
-			logger.Warning("retry outbound traffic failed:", err)
-			return
-		}
-		j.retryOutbound = false
-		j.pendingOutbound = nil
-	}
-	traffics, clientTraffics, err := j.xrayService.GetXrayTraffic()
+
+	// Keep the Xray delta baseline unacknowledged until inbound, client and
+	// outbound counters are durably committed together. On a DB failure the
+	// baseline is restored, so the same bytes are included in the next poll
+	// instead of being lost permanently.
+	traffics, clientTraffics, trafficRead, err := j.xrayService.BeginXrayTrafficRead()
 	if err != nil {
 		return
 	}
-	needRestart0, clientsDisabled, err := j.inboundService.AddTraffic(traffics, clientTraffics)
-	if err != nil {
-		logger.Warning("add inbound traffic failed:", err)
-		j.pendingInbound, j.pendingClients = traffics, clientTraffics
-		j.retryInbound = true
-		j.pendingOutbound = traffics
-		j.retryOutbound = true
+	// Rollback is idempotent with Commit. This also guarantees that a panic or
+	// future early-return cannot leave xrayTrafficMu locked indefinitely.
+	defer trafficRead.Rollback()
+	if err := j.inboundService.CommitXrayTraffic(traffics, clientTraffics); err != nil {
+		logger.Warning("commit xray traffic failed; delta will be retried:", err)
 		return
 	}
-	err, needRestart1 := j.outboundService.AddTraffic(traffics, clientTraffics)
+	trafficRead.Commit()
+
+	// Traffic itself is already durable. Run quota/expiry lifecycle maintenance
+	// without writing the counters a second time.
+	needRestart0, clientsDisabled, err := j.inboundService.AddTraffic(nil, nil)
 	if err != nil {
-		logger.Warning("add outbound traffic failed:", err)
-		j.pendingOutbound = traffics
-		j.retryOutbound = true
-		return
+		logger.Warning("traffic lifecycle maintenance failed:", err)
 	}
 	if clientsDisabled {
 		restartOnDisable, settingErr := j.settingService.GetRestartXrayOnClientDisable()
@@ -148,7 +117,7 @@ func (j *XrayTrafficJob) Run() {
 	} else if err != nil {
 		logger.Warning("get ExternalTrafficInformEnable failed:", err)
 	}
-	if needRestart0 || needRestart1 {
+	if needRestart0 {
 		j.xrayService.SetToNeedRestart()
 	}
 
