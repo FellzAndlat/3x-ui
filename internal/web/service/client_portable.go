@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -81,13 +82,6 @@ func (s *ClientService) ImportClients(inboundSvc *InboundService, items []Client
 		}
 	}
 
-	skip := func(email, reason string) {
-		if strings.TrimSpace(email) == "" {
-			email = "(missing email)"
-		}
-		result.Skipped = append(result.Skipped, BulkCreateReport{Email: email, Reason: reason})
-	}
-
 	needRestart := false
 	if len(attached) > 0 {
 		sub, nr, err := s.BulkCreate(inboundSvc, attached)
@@ -99,85 +93,109 @@ func (s *ClientService) ImportClients(inboundSvc *InboundService, items []Client
 		result.Skipped = append(result.Skipped, sub.Skipped...)
 	}
 
-	db := database.GetDB()
-	for i := range orphans {
-		client := orphans[i].Client
-		email := strings.TrimSpace(client.Email)
-		if email == "" {
-			skip("", "client email is required")
-			continue
-		}
-		if verr := validateClientEmail(email); verr != nil {
-			skip(email, verr.Error())
-			continue
-		}
-		if verr := validateClientSubID(client.SubID); verr != nil {
-			skip(email, verr.Error())
-			continue
-		}
-		if verr := validateClientResetDay(client.ResetDay); verr != nil {
-			skip(email, verr.Error())
-			continue
-		}
-		if verr := validateClientResetMax(client.ResetMax); verr != nil {
-			skip(email, verr.Error())
-			continue
-		}
-		if verr := validateClientTrafficReset(client.TrafficReset, client.TrafficResetDay); verr != nil {
-			skip(email, verr.Error())
-			continue
-		}
-
-		// An existing record (in the DB or just created from the attached set
-		// above) always wins — import never clobbers a live client.
-		var taken int64
-		if err := db.Model(&model.ClientRecord{}).Where("email = ?", email).Count(&taken).Error; err != nil {
-			return result, needRestart, err
-		}
-		if taken > 0 {
-			skip(email, "email already in use: "+email)
-			continue
-		}
-
-		client.Email = email
-		if client.SubID == "" {
-			client.SubID = uuid.NewString()
-		}
-		if client.SubID != "" {
-			var subTaken int64
-			if err := db.Model(&model.ClientRecord{}).
-				Where("sub_id = ? AND email <> ?", client.SubID, email).
-				Count(&subTaken).Error; err != nil {
-				return result, needRestart, err
-			}
-			if subTaken > 0 {
-				skip(email, "subId already in use: "+client.SubID)
-				continue
-			}
-		}
-		// Preserve exported enable so a disabled orphan stays disabled (#6478).
-		now := time.Now().UnixMilli()
-		if client.CreatedAt == 0 {
-			client.CreatedAt = now
-		}
-		client.UpdatedAt = now
-
-		rec := client.ToRecord()
-		rec.LimitHwid = orphans[i].LimitHwid
-		if err := db.Create(rec).Error; err != nil {
-			skip(email, err.Error())
-			continue
-		}
-		// gorm default:true drops enable=false on Create — restate (#6478).
-		if !client.Enable {
-			if err := db.Model(&model.ClientRecord{}).Where("id = ?", rec.Id).
-				UpdateColumn("enable", false).Error; err != nil {
-				return result, needRestart, err
-			}
-		}
-		result.Created++
+	if len(orphans) == 0 {
+		return result, needRestart, nil
 	}
 
+	// Bare clients are especially common during Hiddify migration. Restore the
+	// whole orphan batch under the same serialized transaction instead of doing
+	// one independent SQLite write per user. Otherwise a transient write failure
+	// can leave a successful-looking partial import (for example 14 of 20 users).
+	// Validation/conflict skips remain per-user, but a real database write error
+	// aborts and rolls back every orphan created by this batch.
+	orphanResult := BulkCreateResult{}
+	skipOrphan := func(email, reason string) {
+		if strings.TrimSpace(email) == "" {
+			email = "(missing email)"
+		}
+		orphanResult.Skipped = append(orphanResult.Skipped, BulkCreateReport{Email: email, Reason: reason})
+	}
+
+	if err := runSerializedTx(func(tx *gorm.DB) error {
+		for i := range orphans {
+			client := orphans[i].Client
+			email := strings.TrimSpace(client.Email)
+			if email == "" {
+				skipOrphan("", "client email is required")
+				continue
+			}
+			if verr := validateClientEmail(email); verr != nil {
+				skipOrphan(email, verr.Error())
+				continue
+			}
+			if verr := validateClientSubID(client.SubID); verr != nil {
+				skipOrphan(email, verr.Error())
+				continue
+			}
+			if verr := validateClientResetDay(client.ResetDay); verr != nil {
+				skipOrphan(email, verr.Error())
+				continue
+			}
+			if verr := validateClientResetMax(client.ResetMax); verr != nil {
+				skipOrphan(email, verr.Error())
+				continue
+			}
+			if verr := validateClientTrafficReset(client.TrafficReset, client.TrafficResetDay); verr != nil {
+				skipOrphan(email, verr.Error())
+				continue
+			}
+
+			// An existing record (in the DB or just created from the attached set
+			// above) always wins — import never clobbers a live client.
+			var taken int64
+			if err := tx.Model(&model.ClientRecord{}).Where("email = ?", email).Count(&taken).Error; err != nil {
+				return err
+			}
+			if taken > 0 {
+				skipOrphan(email, "email already in use: "+email)
+				continue
+			}
+
+			client.Email = email
+			if client.SubID == "" {
+				client.SubID = uuid.NewString()
+			}
+			if client.SubID != "" {
+				var subTaken int64
+				if err := tx.Model(&model.ClientRecord{}).
+					Where("sub_id = ? AND email <> ?", client.SubID, email).
+					Count(&subTaken).Error; err != nil {
+					return err
+				}
+				if subTaken > 0 {
+					skipOrphan(email, "subId already in use: "+client.SubID)
+					continue
+				}
+			}
+
+			// Preserve exported enable so a disabled orphan stays disabled (#6478).
+			now := time.Now().UnixMilli()
+			if client.CreatedAt == 0 {
+				client.CreatedAt = now
+			}
+			client.UpdatedAt = now
+
+			rec := client.ToRecord()
+			rec.LimitHwid = orphans[i].LimitHwid
+			if err := tx.Create(rec).Error; err != nil {
+				return fmt.Errorf("import client %s: %w", email, err)
+			}
+			// gorm default:true drops enable=false on Create — restate (#6478).
+			if !client.Enable {
+				if err := tx.Model(&model.ClientRecord{}).Where("id = ?", rec.Id).
+					UpdateColumn("enable", false).Error; err != nil {
+					return fmt.Errorf("restore disabled client %s: %w", email, err)
+				}
+			}
+			orphanResult.Created++
+		}
+		return nil
+	}); err != nil {
+		return result, needRestart, err
+	}
+
+	result.Created += orphanResult.Created
+	result.Skipped = append(result.Skipped, orphanResult.Skipped...)
 	return result, needRestart, nil
 }
 
