@@ -28,6 +28,10 @@ var (
 	singBoxProcess        = singbox.NewProcess(singbox.GetConfigPath())
 	singBoxTrafficAPI     = singbox.NewConnectionAPIClient()
 	singBoxTrafficMu      sync.Mutex
+	// A snapshot consumes native API deltas. Keep an unsuccessful DB batch so
+	// the next poll can persist it before reading another snapshot.
+	singBoxPendingInbound []*xray.Traffic
+	singBoxPendingClients []*xray.ClientTraffic
 	singBoxInstallMu      sync.Mutex
 )
 
@@ -744,6 +748,13 @@ func (s *SingBoxService) PollTraffic(ctx context.Context) error {
 	// repeatedly allocate a gRPC ClientConn and its background transport state.
 	singBoxTrafficMu.Lock()
 	defer singBoxTrafficMu.Unlock()
+	if len(singBoxPendingInbound) > 0 || len(singBoxPendingClients) > 0 {
+		if _, _, err := singBoxInboundService.AddTraffic(singBoxPendingInbound, singBoxPendingClients); err != nil {
+			return err
+		}
+		singBoxPendingInbound = nil
+		singBoxPendingClients = nil
+	}
 	response, err := singBoxTrafficAPI.SnapshotTrafficEvents(ctx)
 	if err != nil {
 		return err
@@ -754,11 +765,11 @@ func (s *SingBoxService) PollTraffic(ctx context.Context) error {
 	onlineEmails := make(map[string]struct{})
 
 	for _, event := range response.Events {
-		if event == nil || event.Type == singbox.ConnectionEventClosed || event.Connection == nil {
+		if event == nil || event.Connection == nil {
 			continue
 		}
 		connection := event.Connection
-		if connection.User != "" {
+		if event.Type != singbox.ConnectionEventClosed && connection.User != "" {
 			onlineEmails[connection.User] = struct{}{}
 		}
 
@@ -798,6 +809,8 @@ func (s *SingBoxService) PollTraffic(ctx context.Context) error {
 	}
 	if len(inboundTraffic) > 0 || len(clientTraffic) > 0 {
 		if _, _, err = singBoxInboundService.AddTraffic(inboundTraffic, clientTraffic); err != nil {
+			singBoxPendingInbound = inboundTraffic
+			singBoxPendingClients = clientTraffic
 			return err
 		}
 	}

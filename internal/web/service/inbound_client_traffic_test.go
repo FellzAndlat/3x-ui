@@ -231,3 +231,47 @@ func TestAddClientTraffic_ExpiryWriteOnlyForConvertedClients(t *testing.T) {
 		t.Errorf("normal traffic not applied: up=%d down=%d, want 30/40", normal.Up, normal.Down)
 	}
 }
+
+func TestAddClientTrafficSumsMultipleSourcesForOneUser(t *testing.T) {
+	setupSettingTestDB(t)
+	db := database.GetDB()
+	const email = "shared-user"
+	if err := db.Create(&xray.ClientTraffic{Email: email, Enable: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := (&InboundService{}).addClientTraffic(db, []*xray.ClientTraffic{
+		{Email: email, Up: 10, Down: 20},
+		{Email: email, Up: 30, Down: 40},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got xray.ClientTraffic
+	if err := db.Where("email = ?", email).First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Up != 40 || got.Down != 60 {
+		t.Fatalf("traffic from multiple inbounds = %d/%d, want 40/60", got.Up, got.Down)
+	}
+}
+
+func TestAddClientTrafficMultipleSourcesSaturateWithoutSQLOverflow(t *testing.T) {
+	setupSettingTestDB(t)
+	db := database.GetDB()
+	const email = "near-limit"
+	if err := db.Create(&xray.ClientTraffic{Email: email, Enable: true, Up: database.TrafficMax - 3}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := (&InboundService{}).addClientTraffic(db, []*xray.ClientTraffic{
+		{Email: email, Up: database.TrafficMax - 1},
+		{Email: email, Up: database.TrafficMax - 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var got xray.ClientTraffic
+	if err := db.Where("email = ?", email).First(&got).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.Up != database.TrafficMax {
+		t.Fatalf("saturated traffic = %d, want %d", got.Up, database.TrafficMax)
+	}
+}

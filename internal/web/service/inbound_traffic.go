@@ -135,12 +135,22 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 		return nil
 	}
 
+	// The same email can be reported by multiple local inbounds or sidecars.
+	// Aggregate first to keep the SQL IN list small and preserve every delta.
 	emails := make([]string, 0, len(traffics))
+	trafficByEmail := make(map[string]*xray.ClientTraffic, len(traffics))
 	for _, traffic := range traffics {
-		if traffic == nil {
+		if traffic == nil || traffic.Email == "" {
 			continue
 		}
-		emails = append(emails, traffic.Email)
+		item := trafficByEmail[traffic.Email]
+		if item == nil {
+			item = &xray.ClientTraffic{}
+			trafficByEmail[traffic.Email] = item
+			emails = append(emails, traffic.Email)
+		}
+		item.Up = sumTrafficDelta(item.Up, traffic.Up)
+		item.Down = sumTrafficDelta(item.Down, traffic.Down)
 	}
 	if len(emails) == 0 {
 		return nil
@@ -172,13 +182,6 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 		return err
 	}
 
-	// Index by email for O(N) merge.
-	trafficByEmail := make(map[string]*xray.ClientTraffic, len(traffics))
-	for i := range traffics {
-		if traffics[i] != nil {
-			trafficByEmail[traffics[i].Email] = traffics[i]
-		}
-	}
 	now := time.Now().UnixMilli()
 	// Use atomic per-row UPDATE instead of read-modify-write Save. tx.Save
 	// issues UPDATEs in slice order, which varies between concurrent callers;
@@ -190,6 +193,15 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 		if !ok || (t.Up == 0 && t.Down == 0) {
 			continue
 		}
+		up, down := t.Up, t.Down
+		// Clamp against the stored row before SQL addition. Even a LEAST/MIN
+		// expression can overflow int64 while evaluating col + delta.
+		if remaining := max(int64(0), database.TrafficMax-ct.Up); up > remaining {
+			up = remaining
+		}
+		if remaining := max(int64(0), database.TrafficMax-ct.Down); down > remaining {
+			down = remaining
+		}
 		if err = tx.Exec(
 			fmt.Sprintf(
 				`UPDATE client_traffics SET up = %s, down = %s, last_online = %s WHERE email = ?`,
@@ -197,9 +209,9 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 				database.ClampedAddExpr("down"),
 				database.GreatestExpr("last_online", "?"),
 			),
-			t.Up, t.Down, now, ct.Email,
+			up, down, now, ct.Email,
 		).Error; err != nil {
-			logger.Warning("AddClientTraffic update data ", err)
+			return fmt.Errorf("update client traffic %s: %w", ct.Email, err)
 		}
 	}
 
@@ -213,11 +225,21 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 			`UPDATE client_traffics SET expiry_time = ? WHERE email = ? AND expiry_time < 0`,
 			convertedExpiryByEmail[email], email,
 		).Error; err != nil {
-			logger.Warning("AddClientTraffic update expiry_time ", err)
+			return fmt.Errorf("update client expiry %s: %w", email, err)
 		}
 	}
 
 	return nil
+}
+
+func sumTrafficDelta(current, delta int64) int64 {
+	if delta <= 0 {
+		return current
+	}
+	if delta >= database.TrafficMax-current {
+		return database.TrafficMax
+	}
+	return current + delta
 }
 
 func (s *InboundService) adjustTraffics(tx *gorm.DB, dbClientTraffics []*xray.ClientTraffic) ([]*xray.ClientTraffic, map[string]int64, error) {
