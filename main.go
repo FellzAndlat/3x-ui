@@ -198,6 +198,9 @@ func runWebServer() {
 			if err != nil {
 				log.Fatalf("Error restarting sub server: %v", err)
 			}
+			if err := service.RefreshTelemtWebSubscriptionRoutes(); err != nil {
+				logger.Warning("Could not update Telemt WEB subscription routes after restart: ", err)
+			}
 			log.Println("Sub server restarted successfully.")
 		case sys.SIGUSR1:
 			logger.Info("Received USR1 signal, restarting xray-core...")

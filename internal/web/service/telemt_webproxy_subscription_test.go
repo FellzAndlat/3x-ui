@@ -53,3 +53,23 @@ func TestTelemtWebSubscriptionLocationsUseImportedJSONPathAndDisableProxyBufferi
 		})
 	}
 }
+
+func TestTelemtWebSubscriptionLocationsFollowChangedSubscriptionPort(t *testing.T) {
+	setupConflictDB(t)
+	s := &SettingService{}
+	if err := s.AddHiddifyLegacySubscriptionAlias(HiddifyLegacySubscriptionAlias{Path: "ImportedRouteAlpha123"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, port := range []string{"443", "2096"} {
+		if err := s.setString("subPort", port); err != nil {
+			t.Fatal(err)
+		}
+		locations, err := telemtWebSubscriptionLocations(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(locations, "proxy_pass http://127.0.0.1:"+port+";") {
+			t.Fatalf("subscription port %s not reflected in Telemt route:\n%s", port, locations)
+		}
+	}
+}
