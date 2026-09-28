@@ -41,6 +41,7 @@ type PanelUpdateInfo struct {
 
 const (
 	panelUpdaterURL      = "https://raw.githubusercontent.com/SawaMEN/3x-ui/main/update.sh"
+	panelUpdaterRunDir   = "/run/x-ui"
 	maxPanelUpdaterBytes = 2 << 20
 	// devReleaseTag is the fixed-tag rolling pre-release the CI force-moves to the
 	// newest main commit; the dev update channel installs from it.
@@ -356,9 +357,16 @@ func downloadPanelUpdater() (string, error) {
 		return "", fmt.Errorf("download panel updater: unexpected HTTP %d", resp.StatusCode)
 	}
 
-	file, err := os.CreateTemp("", "3x-ui-update-*.sh")
+	// Arch's x-ui.service uses PrivateTmp=true. A script created with
+	// os.CreateTemp("", ...) lands in the panel's private /tmp namespace, which
+	// a detached systemd-run updater unit cannot see. Keep the updater in /run
+	// instead: it is shared between units, root-owned, and naturally ephemeral.
+	if err := os.MkdirAll(panelUpdaterRunDir, 0o700); err != nil {
+		return "", fmt.Errorf("prepare panel updater runtime directory: %w", err)
+	}
+	file, err := os.CreateTemp(panelUpdaterRunDir, "3x-ui-update-*.sh")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create panel updater temp file: %w", err)
 	}
 	path := file.Name()
 	ok := false
