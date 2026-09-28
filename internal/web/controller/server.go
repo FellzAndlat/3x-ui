@@ -126,7 +126,14 @@ func (a *ServerController) importHiddify(c *gin.Context) {
 		jsonMsg(c, "Hiddify import failed", err)
 		return
 	}
-	items, err := backup.HiddifyClients()
+	var selected []string
+	if raw := c.PostForm("selectedUsers"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &selected); err != nil || selected == nil {
+			jsonMsg(c, "Hiddify import failed", fmt.Errorf("invalid selected Hiddify users"))
+			return
+		}
+	}
+	items, err := backup.HiddifyClientsSelected(selected)
 	if err != nil {
 		jsonMsg(c, "Hiddify import failed", err)
 		return

@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   Alert,
   Button,
+  Checkbox,
   Input,
   InputNumber,
   Modal,
@@ -96,11 +97,12 @@ export default function GeneralTab({
   const [runningCore, setRunningCore] = useState<'xray' | 'sing-box' | 'none'>('none');
   const [hiddifyOpen, setHiddifyOpen] = useState(false);
   const [hiddifyFile, setHiddifyFile] = useState<File | null>(null);
-  const [hiddifyDomain, setHiddifyDomain] = useState('');
   const [hiddifyPreview, setHiddifyPreview] = useState<{
     users: number;
+    userList: { uuid: string; name: string; comment?: string }[];
     warnings: string[];
   } | null>(null);
+  const [hiddifySelected, setHiddifySelected] = useState<string[]>([]);
   const [hiddifyResult, setHiddifyResult] = useState<{
     created: number;
     skipped: { email: string; reason: string }[];
@@ -110,9 +112,13 @@ export default function GeneralTab({
   const hiddifyRequest = async (action: 'preview' | 'import', file: File) => {
     const form = new FormData();
     form.append('backup', file);
-    if (action === 'import') form.append('subscriptionDomain', hiddifyDomain.trim());
+    if (action === 'import') {
+      form.append('subscriptionDomain', window.location.hostname);
+      form.append('selectedUsers', JSON.stringify(hiddifySelected));
+    }
     return HttpUtil.post<{
       users?: number;
+      userList?: { uuid: string; name: string; comment?: string }[];
       warnings?: string[];
       created?: number;
       skipped?: unknown[];
@@ -123,12 +129,19 @@ export default function GeneralTab({
   const previewHiddify = async (file: File) => {
     setHiddifyFile(file);
     setHiddifyPreview(null);
+    setHiddifySelected([]);
     setHiddifyResult(null);
     setHiddifyBusy(true);
     try {
       const result = await hiddifyRequest('preview', file);
       if (result.success && typeof result.obj?.users === 'number') {
-        setHiddifyPreview({ users: result.obj.users, warnings: result.obj.warnings ?? [] });
+        const userList = result.obj.userList ?? [];
+        setHiddifyPreview({
+          users: result.obj.users,
+          userList,
+          warnings: result.obj.warnings ?? [],
+        });
+        setHiddifySelected(userList.map((user) => user.uuid));
       }
     } finally {
       setHiddifyBusy(false);
@@ -154,6 +167,7 @@ export default function GeneralTab({
           setHiddifyOpen(false);
           setHiddifyFile(null);
           setHiddifyPreview(null);
+          setHiddifySelected([]);
         }
       }
     } finally {
@@ -660,7 +674,6 @@ export default function GeneralTab({
                         {allSetting.coreType === 'sing-box' && (
                           <Button
                             onClick={() => {
-                              setHiddifyDomain(window.location.origin);
                               setHiddifyOpen(true);
                             }}
                           >
@@ -1034,29 +1047,22 @@ export default function GeneralTab({
         open={hiddifyOpen}
         title="Импорт пользователей Hiddify"
         okText="Импортировать пользователей"
-        okButtonProps={{ disabled: !hiddifyPreview, loading: hiddifyBusy }}
+        okButtonProps={{
+          disabled: !hiddifyPreview || hiddifySelected.length === 0,
+          loading: hiddifyBusy,
+        }}
         onOk={() => void importHiddify()}
         onCancel={() => {
           setHiddifyOpen(false);
           setHiddifyFile(null);
           setHiddifyPreview(null);
+          setHiddifySelected([]);
           setHiddifyResult(null);
         }}
       >
         <p>
           Выберите JSON резервной копии Hiddify. Подключения не импортируются. Путь подписки будет
-          взят из копии.
-        </p>
-        <Input
-          aria-label="Публичный домен подписки"
-          placeholder="https://cdn.example.com"
-          value={hiddifyDomain}
-          onChange={(event) => setHiddifyDomain(event.target.value)}
-          style={{ marginBottom: 12 }}
-        />
-        <p style={{ color: 'var(--ant-color-text-secondary)' }}>
-          Укажите домен, который направляет запросы к службе подписки. Адрес будет сохранён для
-          ссылок пользователей.
+          взят из копии, а домен — из адреса открытой панели без порта (HTTPS, порт 443).
         </p>
         <input
           type="file"
@@ -1069,19 +1075,59 @@ export default function GeneralTab({
         />
         {hiddifyBusy && <p>Обработка резервной копии…</p>}
         {hiddifyPreview && (
-          <Alert
-            style={{ marginTop: 16 }}
-            type="info"
-            showIcon
-            message={`Пользователей в копии: ${hiddifyPreview.users}`}
-            description={
-              <ul style={{ paddingLeft: 20, marginBottom: 0 }}>
-                {hiddifyPreview.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
+          <>
+            <Alert
+              style={{ marginTop: 16 }}
+              type="info"
+              showIcon
+              message={`Пользователей в копии: ${hiddifyPreview.users}. Выбрано: ${hiddifySelected.length}.`}
+              description={
+                <ul style={{ paddingLeft: 20, marginBottom: 0 }}>
+                  {hiddifyPreview.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              }
+            />
+            <div style={{ marginTop: 12 }}>
+              <Checkbox
+                checked={hiddifySelected.length === hiddifyPreview.userList.length}
+                indeterminate={
+                  hiddifySelected.length > 0 &&
+                  hiddifySelected.length < hiddifyPreview.userList.length
+                }
+                onChange={(event) =>
+                  setHiddifySelected(
+                    event.target.checked ? hiddifyPreview.userList.map((user) => user.uuid) : [],
+                  )
+                }
+              >
+                Выбрать всех пользователей
+              </Checkbox>
+              <div style={{ maxHeight: 240, overflowY: 'auto', marginTop: 8 }}>
+                {hiddifyPreview.userList.map((user) => (
+                  <div key={user.uuid} style={{ padding: '4px 0' }}>
+                    <Checkbox
+                      checked={hiddifySelected.includes(user.uuid)}
+                      onChange={(event) =>
+                        setHiddifySelected((previous) =>
+                          event.target.checked
+                            ? [...previous, user.uuid]
+                            : previous.filter((uuid) => uuid !== user.uuid),
+                        )
+                      }
+                    >
+                      {user.name || user.uuid} {user.comment ? `— ${user.comment}` : ''}
+                      <span style={{ color: 'var(--ant-color-text-secondary)' }}>
+                        {' '}
+                        ({user.uuid.slice(0, 8)})
+                      </span>
+                    </Checkbox>
+                  </div>
                 ))}
-              </ul>
-            }
-          />
+              </div>
+            </div>
+          </>
         )}
         {hiddifyResult && hiddifyResult.skipped.length > 0 && (
           <Alert

@@ -61,12 +61,24 @@ func TestHiddifyImportSkipsUnusedDefaultButKeepsLastUser(t *testing.T) {
 	if preview.Users != 2 || !strings.Contains(strings.Join(preview.Warnings, " "), "пропущено: 1") {
 		t.Fatalf("preview = %+v, want two users and a skipped placeholder warning", preview)
 	}
+	if len(preview.UserList) != 2 || preview.UserList[1].Name != "Vadlo" {
+		t.Fatalf("preview selection list = %+v", preview.UserList)
+	}
 	clients, err := parsed.HiddifyClients()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(clients) != 2 || clients[0].Client.SubID != "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" || clients[1].Client.SubID != "cccccccc-cccc-4ccc-8ccc-cccccccccccc" {
 		t.Fatalf("import lost a real default account or the last user: %+v", clients)
+	}
+	selected, err := parsed.HiddifyClientsSelected([]string{preview.UserList[1].UUID})
+	if err != nil || len(selected) != 1 || selected[0].Client.SubID != preview.UserList[1].UUID {
+		t.Fatalf("selected import = %+v, %v", selected, err)
+	}
+	for _, ids := range [][]string{{}, {preview.UserList[1].UUID, preview.UserList[1].UUID}, {"dddddddd-dddd-4ddd-8ddd-dddddddddddd"}, {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}} {
+		if _, err := parsed.HiddifyClientsSelected(ids); err == nil {
+			t.Fatalf("accepted invalid selection: %+v", ids)
+		}
 	}
 }
 

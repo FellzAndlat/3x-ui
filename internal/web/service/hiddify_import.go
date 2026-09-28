@@ -103,8 +103,15 @@ func (b *HiddifyBackup) UnmarshalJSON(data []byte) error {
 }
 
 type HiddifyPreview struct {
-	Users    int      `json:"users"`
-	Warnings []string `json:"warnings"`
+	Users    int                  `json:"users"`
+	UserList []HiddifyPreviewUser `json:"userList"`
+	Warnings []string             `json:"warnings"`
+}
+
+type HiddifyPreviewUser struct {
+	UUID    string `json:"uuid"`
+	Name    string `json:"name"`
+	Comment string `json:"comment,omitempty"`
 }
 
 // hiddifyConfigString reads a value from this backup's hconfigs section.
@@ -165,6 +172,9 @@ func ParseHiddifyBackup(reader io.Reader) (*HiddifyBackup, HiddifyPreview, error
 	for _, user := range b.Users {
 		if !isHiddifySetupPlaceholder(user) {
 			preview.Users++
+			preview.UserList = append(preview.UserList, HiddifyPreviewUser{
+				UUID: user.UUID, Name: user.Name, Comment: user.Comment,
+			})
 		}
 	}
 	if preview.Users == 0 {
@@ -309,10 +319,35 @@ func (b *HiddifyBackup) HiddifyLegacySubscriptionAlias() (HiddifyLegacySubscript
 // Used traffic is subtracted from the allowance because Hiddify's counter is
 // per user, while the new traffic records start at zero.
 func (b *HiddifyBackup) HiddifyClients() ([]ClientCreatePayload, error) {
+	return b.HiddifyClientsSelected(nil)
+}
+
+// HiddifyClientsSelected maps only the chosen UUIDs. A nil selection preserves
+// the old API behavior (all users); an explicit empty selection is rejected.
+func (b *HiddifyBackup) HiddifyClientsSelected(selected []string) ([]ClientCreatePayload, error) {
+	var wanted map[string]bool
+	if selected != nil {
+		if len(selected) == 0 {
+			return nil, fmt.Errorf("select at least one Hiddify user")
+		}
+		wanted = make(map[string]bool, len(selected))
+		for _, id := range selected {
+			if wanted[id] {
+				return nil, fmt.Errorf("duplicate selected Hiddify user UUID")
+			}
+			wanted[id] = true
+		}
+	}
 	items := make([]ClientCreatePayload, 0, len(b.Users))
 	for _, user := range b.Users {
 		if isHiddifySetupPlaceholder(user) {
 			continue
+		}
+		if wanted != nil {
+			if !wanted[user.UUID] {
+				continue
+			}
+			delete(wanted, user.UUID)
 		}
 		remaining := user.UsageLimitGB - user.CurrentUsageGB
 		if remaining < 0 {
@@ -356,6 +391,9 @@ func (b *HiddifyBackup) HiddifyClients() ([]ClientCreatePayload, error) {
 				TgID:   user.TelegramID,
 			},
 		})
+	}
+	if len(wanted) > 0 {
+		return nil, fmt.Errorf("selected Hiddify user is not available in this backup")
 	}
 	return items, nil
 }
