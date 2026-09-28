@@ -50,6 +50,33 @@ func TestGetInstalledVersionReadsBinaryVersion(t *testing.T) {
 	}
 }
 
+func TestGetLogPathToleratesMissingGeneratedConfig(t *testing.T) {
+	t.Setenv("XUI_BIN_FOLDER", t.TempDir())
+
+	got, err := GetAccessLogPath()
+	if err != nil {
+		t.Fatalf("GetAccessLogPath() error = %v, want nil", err)
+	}
+	if got != "" {
+		t.Fatalf("GetAccessLogPath() = %q, want empty path before Xray generates config.json", got)
+	}
+}
+
+func TestWriteFileAtomicCreatesMissingParentDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bin", "config.json")
+	if err := writeFileAtomic(path, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("writeFileAtomic with missing parent: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	if string(data) != "{}" {
+		t.Fatalf("content = %q, want {}", data)
+	}
+}
+
 func TestWriteFileAtomicModeAndRenameFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
