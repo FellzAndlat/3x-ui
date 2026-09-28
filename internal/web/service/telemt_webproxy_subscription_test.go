@@ -54,22 +54,42 @@ func TestTelemtWebSubscriptionLocationsUseImportedJSONPathAndDisableProxyBufferi
 	}
 }
 
-func TestTelemtWebSubscriptionLocationsFollowChangedSubscriptionPort(t *testing.T) {
+func TestTelemtWebSubscriptionLocationsFollowPanelPortNotSubscriptionPort(t *testing.T) {
 	setupConflictDB(t)
 	s := &SettingService{}
 	if err := s.AddHiddifyLegacySubscriptionAlias(HiddifyLegacySubscriptionAlias{Path: "ImportedRouteAlpha123"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, port := range []string{"443", "2096"} {
-		if err := s.setString("subPort", port); err != nil {
-			t.Fatal(err)
-		}
-		locations, err := telemtWebSubscriptionLocations(s)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(locations, "proxy_pass http://127.0.0.1:"+port+";") {
-			t.Fatalf("subscription port %s not reflected in Telemt route:\n%s", port, locations)
-		}
+
+	tests := []struct {
+		name    string
+		webPort string
+		subPort string
+	}{
+		{name: "standard web port with 443 subscription port", webPort: "2053", subPort: "443"},
+		{name: "custom web port with 2096 subscription port", webPort: "8443", subPort: "2096"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := s.setString("webPort", tc.webPort); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.setString("subPort", tc.subPort); err != nil {
+				t.Fatal(err)
+			}
+			locations, err := telemtWebSubscriptionLocations(s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "proxy_pass http://127.0.0.1:" + tc.webPort + ";"
+			if !strings.Contains(locations, want) {
+				t.Fatalf("panel port %s not reflected in Telemt route:\n%s", tc.webPort, locations)
+			}
+			unwanted := "proxy_pass http://127.0.0.1:" + tc.subPort + ";"
+			if tc.webPort != tc.subPort && strings.Contains(locations, unwanted) {
+				t.Fatalf("subscription port %s must not be used by Telemt Hiddify route:\n%s", tc.subPort, locations)
+			}
+		})
 	}
 }
