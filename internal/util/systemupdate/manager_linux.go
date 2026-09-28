@@ -542,8 +542,14 @@ func listAvailableUpdates(ctx context.Context, manager string) (map[string]strin
 			return parsePacmanUpdates(output), nil
 		}
 		output, err := runCommand(ctx, "pacman", "-Qu")
-		if err != nil && strings.TrimSpace(output) == "" {
-			return nil, err
+		if err != nil {
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || strings.Contains(strings.ToLower(output), "error:") {
+				return nil, err
+			}
+			// pacman -Qu exits with status 1 when its filter matches no packages.
+			// Treat that as an empty update list, while preserving real pacman errors.
+			return map[string]string{}, nil
 		}
 		return parsePacmanQueryUpdates(output), nil
 	case "apk":
