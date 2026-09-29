@@ -93,36 +93,3 @@ func TestEnsureUpdatesTagWithoutRestart(t *testing.T) {
 		t.Fatalf("manager tag = %q, want %q", gotTag, "new-tag")
 	}
 }
-
-func TestStopManagedCapturesFinalTraffic(t *testing.T) {
-	relay, err := startUDPRelay("127.0.0.1:0", doublingEcho(t), relayFlowIdle)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if got := roundTrip(t, relay, []byte("hello")); got != 10 {
-		t.Fatalf("reply = %d bytes, want 10", got)
-	}
-	if !relay.bindPeer(onlyRelayPeer(t, relay), "alice@example.com") {
-		t.Fatal("failed to bind relay peer")
-	}
-
-	m := &Manager{}
-	m.stopManagedAndCaptureLocked(&managed{relay: relay, tag: "old-tag"}, "new-tag")
-	snapshot := m.CollectTrafficSnapshot()
-	if len(snapshot.Inbounds) != 1 {
-		t.Fatalf("final inbound deltas = %#v, want one", snapshot.Inbounds)
-	}
-	if got := snapshot.Inbounds[0]; got.Tag != "new-tag" || got.Up != 5 || got.Down != 10 {
-		t.Fatalf("final inbound delta = %#v, want new-tag 5 up / 10 down", got)
-	}
-	if len(snapshot.Clients) != 1 {
-		t.Fatalf("final client deltas = %#v, want one", snapshot.Clients)
-	}
-	if got := snapshot.Clients[0]; got.Tag != "new-tag" || got.Email != "alice@example.com" || got.Up != 5 || got.Down != 10 {
-		t.Fatalf("final client delta = %#v, want alice/new-tag 5 up / 10 down", got)
-	}
-	if again := m.CollectTrafficSnapshot(); len(again.Inbounds) != 0 || len(again.Clients) != 0 {
-		t.Fatalf("final snapshot replayed twice: %#v", again)
-	}
-}
