@@ -1,76 +1,219 @@
-/// <reference types="vite/client" />
 import { describe, expect, it } from 'vitest';
 
 import {
-  canEnableTls,
   canEnableReality,
-  canEnableTlsFlow,
+  canEnableSniffing,
   canEnableStream,
+  canEnableTls,
+  canEnableTlsFlow,
   canEnableVisionSeed,
   isSS2022,
   isSSMultiUser,
 } from '@/lib/xray/protocol-capabilities';
 
-// Pure-function tests for the capability predicates. Each fixture × stream
-// case is locked via snapshot — these were captured at the close of the
-// legacy class migration and verified byte-equal to the legacy Inbound
-// class instance methods. Drift past this baseline is a regression.
-
-const fixtures = import.meta.glob<unknown>('./golden/fixtures/inbound/*.json', {
-  eager: true,
-  import: 'default',
-});
-
-interface FixtureShape {
-  protocol: string;
-  settings: Record<string, unknown>;
-}
-
-const STREAM_CASES: { network: string; security: string }[] = [
-  { network: 'tcp', security: 'none' },
-  { network: 'tcp', security: 'tls' },
-  { network: 'tcp', security: 'reality' },
-  { network: 'ws', security: 'none' },
-  { network: 'ws', security: 'tls' },
-  { network: 'grpc', security: 'none' },
-  { network: 'grpc', security: 'tls' },
-  { network: 'grpc', security: 'reality' },
-  { network: 'kcp', security: 'none' },
-  { network: 'httpupgrade', security: 'none' },
-  { network: 'httpupgrade', security: 'tls' },
-  { network: 'xhttp', security: 'none' },
-  { network: 'xhttp', security: 'tls' },
-  { network: 'xhttp', security: 'reality' },
-];
-
-function fixtureName(path: string): string {
-  return (path.split('/').pop() ?? path).replace(/\.json$/, '');
-}
-
 describe('protocol capability predicates', () => {
-  const entries = Object.entries(fixtures).sort(([a], [b]) => a.localeCompare(b));
-  for (const [path, raw] of entries) {
-    const name = fixtureName(path);
-    const fix = raw as FixtureShape;
-
-    for (const stream of STREAM_CASES) {
-      it(`${name} :: ${stream.network}/${stream.security}`, () => {
-        const values = {
-          protocol: fix.protocol,
-          streamSettings: { network: stream.network, security: stream.security },
-          settings: fix.settings,
-        };
-        const result = {
-          canEnableTls: canEnableTls(values),
-          canEnableReality: canEnableReality(values),
-          canEnableTlsFlow: canEnableTlsFlow(values),
-          canEnableStream: canEnableStream(values),
-          canEnableVisionSeed: canEnableVisionSeed(values),
-          isSS2022: isSS2022(values),
-          isSSMultiUser: isSSMultiUser(values),
-        };
-        expect(result).toMatchSnapshot();
-      });
+  it('gates TLS by protocol and transport', () => {
+    for (const network of ['tcp', 'ws', 'http', 'grpc', 'httpupgrade', 'xhttp']) {
+      expect(canEnableTls({ protocol: 'vless', streamSettings: { network } })).toBe(true);
     }
-  }
+    for (const network of ['', 'kcp', 'quic']) {
+      expect(canEnableTls({ protocol: 'vless', streamSettings: { network } })).toBe(false);
+    }
+    for (const protocol of ['vmess', 'vless', 'trojan', 'shadowsocks']) {
+      expect(canEnableTls({ protocol, streamSettings: { network: 'tcp' } })).toBe(true);
+    }
+    for (const protocol of ['http', 'socks', 'wireguard', 'mtproto']) {
+      expect(canEnableTls({ protocol, streamSettings: { network: 'tcp' } })).toBe(false);
+    }
+
+    // Hysteria terminates TLS itself and does not depend on the Xray transport.
+    expect(canEnableTls({ protocol: 'hysteria', streamSettings: { network: 'kcp' } })).toBe(true);
+  });
+
+  it('gates REALITY by protocol and transport', () => {
+    for (const network of ['tcp', 'http', 'grpc', 'xhttp']) {
+      expect(canEnableReality({ protocol: 'vless', streamSettings: { network } })).toBe(true);
+    }
+    for (const network of ['', 'ws', 'kcp', 'httpupgrade']) {
+      expect(canEnableReality({ protocol: 'vless', streamSettings: { network } })).toBe(false);
+    }
+
+    expect(canEnableReality({ protocol: 'trojan', streamSettings: { network: 'tcp' } })).toBe(true);
+    expect(canEnableReality({ protocol: 'vmess', streamSettings: { network: 'tcp' } })).toBe(false);
+  });
+
+  it('enables Vision flow only for supported VLESS combinations', () => {
+    expect(
+      canEnableTlsFlow({
+        protocol: 'vless',
+        streamSettings: { network: 'tcp', security: 'tls' },
+      }),
+    ).toBe(true);
+    expect(
+      canEnableTlsFlow({
+        protocol: 'vless',
+        streamSettings: { network: 'tcp', security: 'reality' },
+      }),
+    ).toBe(true);
+    expect(
+      canEnableTlsFlow({
+        protocol: 'vless',
+        streamSettings: { network: 'tcp', security: 'none' },
+      }),
+    ).toBe(false);
+    expect(
+      canEnableTlsFlow({
+        protocol: 'vless',
+        settings: { encryption: 'mlkem768x25519plus.native.0rtt.test' },
+        streamSettings: { network: 'xhttp', security: 'none' },
+      }),
+    ).toBe(true);
+    expect(
+      canEnableTlsFlow({
+        protocol: 'vless',
+        settings: { decryption: 'mlkem768x25519plus.native.0rtt.test' },
+        streamSettings: { network: 'xhttp', security: 'none' },
+      }),
+    ).toBe(true);
+    expect(
+      canEnableTlsFlow({
+        protocol: 'vless',
+        settings: { encryption: 'none', decryption: '' },
+        streamSettings: { network: 'xhttp', security: 'none' },
+      }),
+    ).toBe(false);
+    expect(
+      canEnableTlsFlow({
+        protocol: 'vless',
+        streamSettings: { network: 'ws', security: 'tls' },
+      }),
+    ).toBe(false);
+    expect(
+      canEnableTlsFlow({
+        protocol: 'vmess',
+        streamSettings: { network: 'tcp', security: 'tls' },
+      }),
+    ).toBe(false);
+  });
+
+  it('limits stream settings to protocols that expose them', () => {
+    for (const protocol of [
+      'vmess',
+      'vless',
+      'trojan',
+      'shadowsocks',
+      'hysteria',
+      'wireguard',
+      'tunnel',
+    ]) {
+      expect(canEnableStream({ protocol })).toBe(true);
+    }
+    for (const protocol of ['http', 'socks', 'mtproto', 'amneziawg', 'tuic', 'naive']) {
+      expect(canEnableStream({ protocol })).toBe(false);
+    }
+  });
+
+  it('disables Xray sniffing for external/non-Xray protocols', () => {
+    for (const protocol of [
+      'mtproto',
+      'amneziawg',
+      'tuic',
+      'pingtunnel',
+      'trusttunnel',
+      'vk-turn-proxy',
+      'naive',
+      'psiphon',
+      'mieru',
+      'sudoku',
+      'anytls',
+      'shadowtls',
+    ]) {
+      expect(canEnableSniffing({ protocol })).toBe(false);
+    }
+    for (const protocol of ['vmess', 'vless', 'trojan', 'shadowsocks', 'hysteria', 'wireguard']) {
+      expect(canEnableSniffing({ protocol })).toBe(true);
+    }
+  });
+
+  it('requires both Vision-capable transport and a Vision client for the seed', () => {
+    expect(
+      canEnableVisionSeed({
+        protocol: 'vless',
+        streamSettings: { network: 'tcp', security: 'tls' },
+        settings: { clients: [{ flow: 'xtls-rprx-vision' }] },
+      }),
+    ).toBe(true);
+    expect(
+      canEnableVisionSeed({
+        protocol: 'vless',
+        streamSettings: { network: 'tcp', security: 'tls' },
+        settings: { clients: [{ flow: '' }] },
+      }),
+    ).toBe(false);
+    expect(
+      canEnableVisionSeed({
+        protocol: 'vless',
+        settings: {
+          encryption: 'mlkem768x25519plus.native.0rtt.test',
+          clients: [{ flow: 'xtls-rprx-vision' }],
+        },
+        streamSettings: { network: 'xhttp', security: 'none' },
+      }),
+    ).toBe(true);
+    expect(
+      canEnableVisionSeed({
+        protocol: 'vless',
+        streamSettings: { network: 'tcp', security: 'none' },
+        settings: { clients: [{ flow: 'xtls-rprx-vision' }] },
+      }),
+    ).toBe(false);
+    expect(
+      canEnableVisionSeed({
+        protocol: 'vless',
+        streamSettings: { network: 'tcp', security: 'tls' },
+      }),
+    ).toBe(false);
+  });
+
+  it('classifies Shadowsocks 2022 and multi-user methods', () => {
+    const cases = [
+      {
+        values: {
+          protocol: 'shadowsocks',
+          settings: { method: '2022-blake3-chacha20-poly1305' },
+        },
+        is2022: true,
+        isMultiUser: false,
+      },
+      {
+        values: {
+          protocol: 'shadowsocks',
+          settings: { method: '2022-blake3-aes-128-gcm' },
+        },
+        is2022: true,
+        isMultiUser: true,
+      },
+      {
+        values: { protocol: 'shadowsocks', settings: { method: 'aes-128-gcm' } },
+        is2022: false,
+        isMultiUser: true,
+      },
+      {
+        values: { protocol: 'shadowsocks', settings: {} },
+        is2022: false,
+        isMultiUser: true,
+      },
+      {
+        // Preserve the legacy quirk used by callers that narrow on protocol first.
+        values: { protocol: 'vless', settings: {} },
+        is2022: false,
+        isMultiUser: true,
+      },
+    ];
+
+    for (const { values, is2022, isMultiUser } of cases) {
+      expect(isSS2022(values)).toBe(is2022);
+      expect(isSSMultiUser(values)).toBe(isMultiUser);
+    }
+  });
 });

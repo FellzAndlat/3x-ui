@@ -48,50 +48,24 @@ describe('DnsServerObjectSchema fixtures', () => {
 });
 
 describe('DnsServerObjectSchema port defaulting', () => {
-  it('defaults port 53 for a plain address', () => {
-    const parsed = DnsServerObjectSchema.parse({ address: '8.8.8.8' });
-    expect(parsed.port).toBe(53);
-  });
+  it('applies the correct default for each address scheme', () => {
+    const cases = [
+      { address: '8.8.8.8', port: undefined, want: 53 },
+      { address: 'tcp://1.1.1.1', port: undefined, want: 53 },
+      { address: 'https://cloudflare-dns.com/dns-query', port: undefined, want: undefined },
+      { address: 'https+local://dns.google/dns-query', port: undefined, want: undefined },
+      { address: 'quic+local://dns.adguard.com', port: undefined, want: undefined },
+      { address: 'h2c://dns.example.com/dns-query', port: undefined, want: undefined },
+      { address: 'h2c+local://dns.example.com/dns-query', port: undefined, want: undefined },
+      { address: 'HTTPS://dns.google/dns-query', port: undefined, want: undefined },
+      { address: 'https://dns.google/dns-query', port: 8443, want: 8443 },
+    ];
 
-  it('defaults port 53 for a tcp address', () => {
-    const parsed = DnsServerObjectSchema.parse({ address: 'tcp://1.1.1.1' });
-    expect(parsed.port).toBe(53);
-  });
-
-  it('omits port for a DoH (https://) address', () => {
-    const parsed = DnsServerObjectSchema.parse({ address: 'https://cloudflare-dns.com/dns-query' });
-    expect(parsed.port).toBeUndefined();
-  });
-
-  it('omits port for a DoHL (https+local://) address', () => {
-    const parsed = DnsServerObjectSchema.parse({ address: 'https+local://dns.google/dns-query' });
-    expect(parsed.port).toBeUndefined();
-  });
-
-  it('omits port for a DoQ (quic+local://) address', () => {
-    const parsed = DnsServerObjectSchema.parse({ address: 'quic+local://dns.adguard.com' });
-    expect(parsed.port).toBeUndefined();
-  });
-
-  it('omits port for an h2c and h2c+local address', () => {
-    expect(
-      DnsServerObjectSchema.parse({ address: 'h2c://dns.example.com/dns-query' }).port,
-    ).toBeUndefined();
-    expect(
-      DnsServerObjectSchema.parse({ address: 'h2c+local://dns.example.com/dns-query' }).port,
-    ).toBeUndefined();
-  });
-
-  it('omits port for an uppercase encrypted scheme', () => {
-    const parsed = DnsServerObjectSchema.parse({ address: 'HTTPS://dns.google/dns-query' });
-    expect(parsed.port).toBeUndefined();
-  });
-
-  it('preserves an explicit port on an encrypted address', () => {
-    const parsed = DnsServerObjectSchema.parse({
-      address: 'https://dns.google/dns-query',
-      port: 8443,
-    });
-    expect(parsed.port).toBe(8443);
+    for (const { address, port, want } of cases) {
+      const parsed = DnsServerObjectSchema.parse(
+        port === undefined ? { address } : { address, port },
+      );
+      expect(parsed.port).toBe(want);
+    }
   });
 });
