@@ -638,7 +638,10 @@ func (r *Remote) UpdateUser(ctx context.Context, ib *model.Inbound, oldEmail str
 }
 
 func (r *Remote) RestartXray(ctx context.Context) error {
-	_, err := r.do(ctx, http.MethodPost, "panel/api/server/restartXrayService", nil)
+	// Keep the legacy Runtime method name for mixed-version compatibility, but
+	// restart whichever core the node has selected. Newer nodes expose the
+	// core-aware endpoint and route it to Xray or sing-box as appropriate.
+	_, err := r.do(ctx, http.MethodPost, "panel/api/server/restartCoreService", nil)
 	return err
 }
 

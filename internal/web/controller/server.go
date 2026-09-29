@@ -222,8 +222,54 @@ func (a *ServerController) startTask() {
 	}()
 }
 
-// status returns the current server status information.
-func (a *ServerController) status(c *gin.Context) { jsonObj(c, a.serverService.CurrentStatus(), nil) }
+// status returns the current server status information. For compatibility with
+// older masters, the legacy `xray` object mirrors the selected core. New callers
+// can use the explicit `core` object to distinguish Xray from sing-box.
+func (a *ServerController) status(c *gin.Context) {
+	status := a.serverService.CurrentStatus()
+	if status == nil {
+		jsonObj(c, status, nil)
+		return
+	}
+	statusSnapshot := *status
+	status = &statusSnapshot
+
+	coreType, err := a.settingService.GetCoreType()
+	if err != nil || coreType == "" {
+		coreType = service.CoreTypeXray
+	}
+	if coreType == service.CoreTypeSingBox {
+		status.Xray.State = service.Stop
+		status.Xray.ErrorMsg = ""
+		if a.singBoxService.IsRunning() {
+			status.Xray.State = service.Running
+		} else if coreErr := a.singBoxService.LastError(); coreErr != nil {
+			status.Xray.State = service.Error
+			status.Xray.ErrorMsg = coreErr.Error()
+		}
+		if version, versionErr := a.singBoxService.CachedVersion(c.Request.Context()); versionErr == nil {
+			status.Xray.Version = version
+		}
+	}
+
+	raw, err := json.Marshal(status)
+	if err != nil {
+		jsonObj(c, status, nil)
+		return
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		jsonObj(c, status, nil)
+		return
+	}
+	obj["core"] = gin.H{
+		"type":     coreType,
+		"state":    status.Xray.State,
+		"errorMsg": status.Xray.ErrorMsg,
+		"version":  status.Xray.Version,
+	}
+	jsonObj(c, obj, nil)
+}
 
 func (a *ServerController) getFail2banStatus(c *gin.Context) {
 	jsonObj(c, a.serverService.GetFail2banStatus(), nil)
