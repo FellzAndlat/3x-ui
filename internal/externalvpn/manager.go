@@ -426,13 +426,13 @@ func (m *Manager) CollectTraffic() []TrafficDelta {
 			}
 			old := proc.counters[row.Username]
 			up, down := row.Inbound, row.Outbound
-			if up < old.up {
-				old.up = 0
+			delta := TrafficDelta{
+				Tag:    proc.tag,
+				Email:  row.Username,
+				Up:     cumulativeTrafficDelta(up, old.up),
+				Down:   cumulativeTrafficDelta(down, old.down),
+				Active: row.Sessions > 0,
 			}
-			if down < old.down {
-				old.down = 0
-			}
-			delta := TrafficDelta{Tag: proc.tag, Email: row.Username, Up: int64(up - old.up), Down: int64(down - old.down), Active: row.Sessions > 0}
 			if delta.Up > 0 || delta.Down > 0 || delta.Active {
 				deltas = append(deltas, delta)
 			}

@@ -797,6 +797,11 @@ func (s *SingBoxService) DisconnectClientIPs(ctx context.Context, email string, 
 	return nil
 }
 
+func accumulateSingBoxTraffic(up, down *int64, uplinkDelta, downlinkDelta int64) {
+	*up = sumTrafficDelta(*up, uplinkDelta)
+	*down = sumTrafficDelta(*down, downlinkDelta)
+}
+
 func (s *SingBoxService) PollTraffic(ctx context.Context) error {
 	// The cron callback creates a lightweight SingBoxService value every 5s;
 	// keep the native API transport package-wide so traffic polling does not
@@ -840,8 +845,7 @@ func (s *SingBoxService) PollTraffic(ctx context.Context) error {
 				traffic = &xray.Traffic{Tag: connection.Inbound, IsInbound: true}
 				inboundDeltas[connection.Inbound] = traffic
 			}
-			traffic.Up += uplinkDelta
-			traffic.Down += downlinkDelta
+			accumulateSingBoxTraffic(&traffic.Up, &traffic.Down, uplinkDelta, downlinkDelta)
 		}
 		if connection.User != "" {
 			traffic := clientDeltas[connection.User]
@@ -849,8 +853,7 @@ func (s *SingBoxService) PollTraffic(ctx context.Context) error {
 				traffic = &xray.ClientTraffic{Email: connection.User}
 				clientDeltas[connection.User] = traffic
 			}
-			traffic.Up += uplinkDelta
-			traffic.Down += downlinkDelta
+			accumulateSingBoxTraffic(&traffic.Up, &traffic.Down, uplinkDelta, downlinkDelta)
 		}
 	}
 

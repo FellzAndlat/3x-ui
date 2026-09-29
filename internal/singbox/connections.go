@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -19,6 +20,8 @@ const (
 	ConnectionEventOpened = 1
 	ConnectionEventClosed = 2
 )
+
+const trafficSnapshotMissingGrace = 12
 
 type (
 	connectionSubscribeRequest struct{ Interval int64 }
@@ -164,9 +167,7 @@ func decodeConnectionEvent(data []byte, trafficOnly bool) (*connectionEvent, err
 			if used < 0 {
 				return nil, protowire.ParseError(used)
 			}
-			if !trafficOnly {
-				event.ID = string(value)
-			}
+			event.ID = string(value)
 			data = data[used:]
 		case 3:
 			if typ != protowire.BytesType {
@@ -218,27 +219,50 @@ func decodeTrafficConnection(data []byte) (*singBoxConnection, error) {
 			return nil, protowire.ParseError(n)
 		}
 		data = data[n:]
-		if field != 2 && field != 10 {
+		switch field {
+		case 1, 2, 10:
+			if typ != protowire.BytesType {
+				return nil, fmt.Errorf("invalid Connection traffic string field %d wire type %d", field, typ)
+			}
+			value, used := protowire.ConsumeBytes(data)
+			if used < 0 {
+				return nil, protowire.ParseError(used)
+			}
+			switch field {
+			case 1:
+				connection.ID = string(value)
+			case 2:
+				connection.Inbound = string(value)
+			case 10:
+				connection.User = string(value)
+			}
+			data = data[used:]
+		case 12, 13, 16, 17:
+			if typ != protowire.VarintType {
+				return nil, fmt.Errorf("invalid Connection traffic numeric field %d wire type %d", field, typ)
+			}
+			value, used := protowire.ConsumeVarint(data)
+			if used < 0 {
+				return nil, protowire.ParseError(used)
+			}
+			switch field {
+			case 12:
+				connection.CreatedAt = int64(value)
+			case 13:
+				connection.ClosedAt = int64(value)
+			case 16:
+				connection.UplinkTotal = int64(value)
+			case 17:
+				connection.DownlinkTotal = int64(value)
+			}
+			data = data[used:]
+		default:
 			used := protowire.ConsumeFieldValue(field, typ, data)
 			if used < 0 {
 				return nil, protowire.ParseError(used)
 			}
 			data = data[used:]
-			continue
 		}
-		if typ != protowire.BytesType {
-			return nil, fmt.Errorf("invalid Connection traffic string field %d wire type %d", field, typ)
-		}
-		value, used := protowire.ConsumeBytes(data)
-		if used < 0 {
-			return nil, protowire.ParseError(used)
-		}
-		if field == 2 {
-			connection.Inbound = string(value)
-		} else {
-			connection.User = string(value)
-		}
-		data = data[used:]
 	}
 	return connection, nil
 }
@@ -348,11 +372,126 @@ func decodeConnection(data []byte, trafficOnly bool) (*singBoxConnection, error)
 	return connection, nil
 }
 
+type connectionTrafficSnapshot struct {
+	uplink           int64
+	downlink         int64
+	missingSnapshots uint8
+}
+
+func snapshotTrafficDelta(current, previous int64, exists, countInitial bool) int64 {
+	if current <= 0 {
+		return 0
+	}
+	if !exists {
+		if countInitial {
+			return current
+		}
+		return 0
+	}
+	if current >= previous {
+		return current - previous
+	}
+	// The core restarted/reset this connection counter. Count only the bytes
+	// visible after the reset instead of subtracting into a negative delta.
+	return current
+}
+
+func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvents, snapshotAt int64) {
+	if response == nil || !response.Reset {
+		return
+	}
+
+	c.trafficMu.Lock()
+	defer c.trafficMu.Unlock()
+
+	if c.trafficSnapshots == nil {
+		c.trafficSnapshots = make(map[string]connectionTrafficSnapshot)
+	}
+	previousAt := c.trafficSnapshotAt
+	seen := make(map[string]struct{}, len(response.Events))
+
+	for _, event := range response.Events {
+		if event == nil || event.Connection == nil {
+			continue
+		}
+		connection := event.Connection
+		id := event.ID
+		if id == "" {
+			id = connection.ID
+		}
+		if id == "" {
+			continue
+		}
+		if event.ID == "" {
+			event.ID = id
+		}
+		seen[id] = struct{}{}
+
+		currentUp := connection.UplinkTotal
+		currentDown := connection.DownlinkTotal
+		if currentUp < 0 {
+			currentUp = 0
+		}
+		if currentDown < 0 {
+			currentDown = 0
+		}
+
+		previous, exists := c.trafficSnapshots[id]
+		// The first reset snapshot establishes a baseline: its cumulative totals
+		// can already be present in client_traffics when the panel reconnects to
+		// a sing-box process that survived a panel restart. Later unknown IDs are
+		// counted only when sing-box says the connection was created after the
+		// previous snapshot boundary.
+		countInitial := previousAt > 0 && connection.CreatedAt > 0 && connection.CreatedAt >= previousAt
+		event.UplinkDelta = snapshotTrafficDelta(currentUp, previous.uplink, exists, countInitial)
+		event.DownlinkDelta = snapshotTrafficDelta(currentDown, previous.downlink, exists, countInitial)
+
+		c.trafficSnapshots[id] = connectionTrafficSnapshot{
+			uplink:   currentUp,
+			downlink: currentDown,
+		}
+
+		// sing-box's reset snapshot retains recently closed connections as NEW
+		// events. Normalize them so PollTraffic does not mark stale users online;
+		// their final byte delta is still committed above.
+		if connection.ClosedAt > 0 {
+			event.Type = ConnectionEventClosed
+			if event.ClosedAt == 0 {
+				event.ClosedAt = connection.ClosedAt
+			}
+		}
+	}
+
+	// A transiently missing connection must not lose its baseline or its next
+	// appearance would be treated as a new connection. Retain a short grace
+	// window, then evict stale IDs to bound memory.
+	for id, snapshot := range c.trafficSnapshots {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		if snapshot.missingSnapshots+1 >= trafficSnapshotMissingGrace {
+			delete(c.trafficSnapshots, id)
+			continue
+		}
+		snapshot.missingSnapshots++
+		c.trafficSnapshots[id] = snapshot
+	}
+	c.trafficSnapshotAt = snapshotAt
+}
+
 // SnapshotTrafficEvents is a low-allocation variant used by the traffic poll.
+// SubscribeConnections starts with Reset=true and cumulative connection totals.
+// Convert that reset snapshot to deltas locally because this poll uses a
+// short-lived stream and therefore never waits for the server's later update
+// events.
 func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connectionEvents, error) {
 	if err := c.connFor(ctx); err != nil {
 		return connectionEvents{}, err
 	}
+	// Capture the boundary before subscribing. If a connection is created after
+	// the server builds this snapshot but before the next poll, CreatedAt remains
+	// on the correct side of the boundary and its initial bytes are counted once.
+	snapshotAt := time.Now().UnixMilli()
 	stream, err := c.conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, "/daemon.StartedService/SubscribeConnections", grpc.ForceCodec(connectionAPIProtoCodec{trafficOnly: true}))
 	if err != nil {
 		c.Close()
@@ -371,10 +510,16 @@ func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connec
 		c.Close()
 		return connectionEvents{}, err
 	}
+	c.normalizeTrafficSnapshot(&response, snapshotAt)
 	return response, nil
 }
 
-type ConnectionAPIClient struct{ conn *grpc.ClientConn }
+type ConnectionAPIClient struct {
+	conn              *grpc.ClientConn
+	trafficMu         sync.Mutex
+	trafficSnapshots  map[string]connectionTrafficSnapshot
+	trafficSnapshotAt int64
+}
 
 func NewConnectionAPIClient() *ConnectionAPIClient { return &ConnectionAPIClient{} }
 func (c *ConnectionAPIClient) Close() {

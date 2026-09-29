@@ -129,6 +129,20 @@ type clientCounters struct {
 	down int64
 }
 
+// monotonicCounterDelta returns the bytes accumulated since the previous
+// cumulative sample. A lower current value means mtg reset that user's counter
+// (for example after reset-quota), so the current value is traffic accumulated
+// after the reset and must not be discarded.
+func monotonicCounterDelta(current, previous int64) int64 {
+	if current <= 0 {
+		return 0
+	}
+	if current >= previous {
+		return current - previous
+	}
+	return current
+}
+
 type managed struct {
 	proc         *Process
 	tag          string
@@ -438,14 +452,8 @@ func (m *Manager) CollectTraffic() ([]Traffic, []string) {
 			if !had {
 				continue
 			}
-			du := up - prev.up
-			dd := down - prev.down
-			if du < 0 {
-				du = 0
-			}
-			if dd < 0 {
-				dd = 0
-			}
+			du := monotonicCounterDelta(up, prev.up)
+			dd := monotonicCounterDelta(down, prev.down)
 			if du > 0 || dd > 0 {
 				out = append(out, Traffic{Tag: s.tag, Email: email, Up: du, Down: dd})
 			}

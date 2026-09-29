@@ -23,6 +23,10 @@ type Manager struct {
 	mu           sync.Mutex
 	procs        map[int]*managed
 	lastStartErr map[int]string
+	// pending holds the final counters drained from sidecars that were stopped
+	// by Reconcile/StopAll. The next traffic snapshot consumes them together
+	// with counters from still-running instances.
+	pending TrafficSnapshot
 }
 
 var (
@@ -83,7 +87,10 @@ func (m *Manager) ensureLocked(inst Instance) error {
 			existing.proc.UpdateClients(uuidToEmail)
 			return nil
 		}
-		stopManaged(existing)
+		// Quiesce the old sidecar first, then drain its last relay counters before
+		// closing the sockets. Use the new tag for a same-ID restart so a tag edit
+		// cannot strand the final inbound delta under a stale database key.
+		m.stopManagedAndCaptureLocked(existing, inst.Tag)
 		delete(m.procs, inst.Id)
 	}
 
@@ -127,7 +134,7 @@ func (m *Manager) startLocked(inst Instance, uuidToEmail map[string]string) (*Pr
 		_ = RemoveConfigFile(inst.Id)
 		return nil, nil, "", fmt.Errorf("tuic: listen on %s for %d: %w", inst.BindTo(), inst.Id, err)
 	}
-	proc := newProcess(configPath, inst.Tag, uuidToEmail)
+	proc := newProcess(configPath, inst.Tag, uuidToEmail, relay.bindPeer)
 	if err := proc.Start(); err != nil {
 		relay.Close()
 		_ = RemoveConfigFile(inst.Id)
@@ -136,9 +143,32 @@ func (m *Manager) startLocked(inst Instance, uuidToEmail map[string]string) (*Pr
 	return proc, relay, configPath, nil
 }
 
-func stopManaged(mg *managed) {
+func (m *Manager) stopManagedAndCaptureLocked(mg *managed, tag string) {
+	if mg == nil {
+		return
+	}
 	if mg.proc != nil && mg.proc.IsRunning() {
 		_ = mg.proc.Stop()
+	}
+	if mg.relay == nil {
+		return
+	}
+
+	up, down := mg.relay.CollectTraffic()
+	if up > 0 || down > 0 {
+		m.pending.Inbounds = append(m.pending.Inbounds, InboundTrafficDelta{
+			Tag:  tag,
+			Up:   up,
+			Down: down,
+		})
+	}
+	for _, d := range mg.relay.CollectClientTraffic() {
+		m.pending.Clients = append(m.pending.Clients, ClientTrafficDelta{
+			Tag:   tag,
+			Email: d.Email,
+			Up:    d.Up,
+			Down:  d.Down,
+		})
 	}
 	mg.relay.Close()
 }
@@ -166,10 +196,61 @@ type InboundTrafficDelta struct {
 	Down int64
 }
 
+type ClientTrafficDelta struct {
+	Tag   string
+	Email string
+	Up    int64
+	Down  int64
+}
+
+type TrafficSnapshot struct {
+	Inbounds []InboundTrafficDelta
+	Clients  []ClientTrafficDelta
+}
+
+// CollectTrafficSnapshot atomically samples both the aggregate relay counters
+// and the per-email counters attributed from authenticated tuic-server peers.
+// The two counter sets have independent cursors: an unbound flow is retained on
+// the per-client side until authentication identifies it, while the inbound
+// aggregate can still be committed every poll. Final counters drained during a
+// sidecar restart/removal are returned first from m.pending.
+func (m *Manager) CollectTrafficSnapshot() TrafficSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := m.pending
+	m.pending = TrafficSnapshot{}
+	for _, mg := range m.procs {
+		if mg.relay == nil || mg.proc == nil || !mg.proc.IsRunning() {
+			continue
+		}
+		deltaUp, deltaDown := mg.relay.CollectTraffic()
+		if deltaUp > 0 || deltaDown > 0 {
+			out.Inbounds = append(out.Inbounds, InboundTrafficDelta{
+				Tag:  mg.tag,
+				Up:   deltaUp,
+				Down: deltaDown,
+			})
+		}
+		for _, d := range mg.relay.CollectClientTraffic() {
+			out.Clients = append(out.Clients, ClientTrafficDelta{
+				Tag:   mg.tag,
+				Email: d.Email,
+				Up:    d.Up,
+				Down:  d.Down,
+			})
+		}
+	}
+	return out
+}
+
+// CollectTraffic is kept for package/API compatibility with callers that only
+// need inbound totals. It intentionally leaves pending/current per-client
+// cursors untouched.
 func (m *Manager) CollectTraffic() []InboundTrafficDelta {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var out []InboundTrafficDelta
+	out := m.pending.Inbounds
+	m.pending.Inbounds = nil
 	for _, mg := range m.procs {
 		if mg.relay != nil && mg.proc != nil && mg.proc.IsRunning() {
 			deltaUp, deltaDown := mg.relay.CollectTraffic()
@@ -193,7 +274,7 @@ func (m *Manager) Remove(id int) {
 
 func (m *Manager) removeLocked(id int) {
 	if existing, ok := m.procs[id]; ok && existing != nil {
-		stopManaged(existing)
+		m.stopManagedAndCaptureLocked(existing, existing.tag)
 		_ = RemoveConfigFile(id)
 		delete(m.procs, id)
 		delete(m.lastStartErr, id)
@@ -224,7 +305,7 @@ func (m *Manager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, mg := range m.procs {
-		stopManaged(mg)
+		m.stopManagedAndCaptureLocked(mg, mg.tag)
 		_ = RemoveConfigFile(id)
 	}
 	m.procs = make(map[int]*managed)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,6 +62,7 @@ type procLogWriter struct {
 	lastLine    string
 	uuidToEmail map[string]string
 	lastActive  map[string]int64
+	bindPeer    func(peer, email string) bool
 }
 
 func (w *procLogWriter) Write(p []byte) (int, error) {
@@ -89,6 +91,40 @@ func (w *procLogWriter) Flush() {
 	}
 }
 
+// tuicLogPeerForUUID extracts the QUIC peer address from tuic-server 1.0.0 log
+// records of the form "[connection-id] [peer] [uuid] ...". The logger may add
+// its own prefix, so parsing is anchored on the authenticated UUID rather than
+// fixed field positions. The loop also handles an IPv6 peer wrapped by the
+// server's outer brackets, e.g. "[[::1]:12345]".
+func tuicLogPeerForUUID(line, uuid string) string {
+	if uuid == "" {
+		return ""
+	}
+	lowerLine := strings.ToLower(line)
+	marker := "[" + strings.ToLower(uuid) + "]"
+	idx := strings.Index(lowerLine, marker)
+	if idx < 0 {
+		return ""
+	}
+	prefix := strings.TrimSpace(line[:idx])
+	end := strings.LastIndex(prefix, "]")
+	if end < 0 {
+		return ""
+	}
+	search := prefix[:end]
+	for {
+		start := strings.LastIndex(search, "[")
+		if start < 0 {
+			return ""
+		}
+		candidate := strings.TrimSpace(prefix[start+1 : end])
+		if _, _, err := net.SplitHostPort(candidate); err == nil {
+			return candidate
+		}
+		search = search[:start]
+	}
+}
+
 func (w *procLogWriter) emitLocked(line string) {
 	trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
 	if trimmed == "" {
@@ -98,13 +134,24 @@ func (w *procLogWriter) emitLocked(line string) {
 	logger.Infof("tuic: tuic-server %s | %s", w.label, trimmed)
 
 	now := time.Now().UnixMilli()
-	lowerLine := strings.ToLower(line)
 	for uuid, email := range w.uuidToEmail {
-		if strings.Contains(lowerLine, uuid) {
-			if w.lastActive == nil {
-				w.lastActive = make(map[string]int64)
-			}
-			w.lastActive[email] = now
+		if uuid == "" || email == "" {
+			continue
+		}
+		// A UUID appearing only in an error payload does not mean that user was
+		// authenticated. tuic-server puts the validated identity in the dedicated
+		// [uuid] field; requiring that field prevents failed auth attempts from
+		// marking a client online or claiming traffic.
+		peer := tuicLogPeerForUUID(line, uuid)
+		if peer == "" {
+			continue
+		}
+		if w.lastActive == nil {
+			w.lastActive = make(map[string]int64)
+		}
+		w.lastActive[email] = now
+		if w.bindPeer != nil {
+			w.bindPeer(peer, email)
 		}
 	}
 }
@@ -125,13 +172,21 @@ type Process struct {
 	intentionalStop atomic.Bool
 }
 
-func newProcess(configPath, label string, uuidToEmail map[string]string) *Process {
+// newProcess accepts the peer binder variadically to keep package-local tests
+// and older call sites source-compatible while the TUIC relay learns per-client
+// attribution.
+func newProcess(configPath, label string, uuidToEmail map[string]string, binders ...func(string, string) bool) *Process {
+	var bindPeer func(string, string) bool
+	if len(binders) > 0 {
+		bindPeer = binders[0]
+	}
 	return &Process{
 		configPath: configPath,
 		logWriter: &procLogWriter{
 			label:       label,
 			uuidToEmail: uuidToEmail,
 			lastActive:  make(map[string]int64),
+			bindPeer:    bindPeer,
 		},
 	}
 }

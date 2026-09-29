@@ -2,7 +2,6 @@ package job
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -20,8 +19,15 @@ import (
 type AmneziaWGJob struct {
 	inboundService service.InboundService
 	settingService service.SettingService
+	runMu          sync.Mutex
 	mu             sync.Mutex
-	lastTraffic    map[string]amneziaWGTrafficSample
+	lastTraffic    map[amneziaWGTrafficKey]amneziaWGTrafficSample
+	pending        pendingTrafficBatch
+}
+
+type amneziaWGTrafficKey struct {
+	inboundID int
+	email     string
 }
 
 type amneziaWGTrafficSample struct {
@@ -31,12 +37,51 @@ type amneziaWGTrafficSample struct {
 
 // NewAmneziaWGJob creates a new AmneziaWG reconcile job instance.
 func NewAmneziaWGJob() *AmneziaWGJob {
-	return &AmneziaWGJob{lastTraffic: make(map[string]amneziaWGTrafficSample)}
+	return &AmneziaWGJob{lastTraffic: make(map[amneziaWGTrafficKey]amneziaWGTrafficSample)}
 }
 
 const amneziaWGOnlineWindow = 3 * time.Minute
 
+// pruneAmneziaWGBaselines removes only baselines that are known to be stale.
+// A desired inbound whose diagnostics are temporarily unavailable must retain
+// its baseline; otherwise the next successful cumulative sample would replay
+// already-accounted bytes as fresh traffic.
+func pruneAmneziaWGBaselines(
+	last map[amneziaWGTrafficKey]amneziaWGTrafficSample,
+	desiredIDs map[int]struct{},
+	observedIDs map[int]struct{},
+	current map[amneziaWGTrafficKey]struct{},
+) {
+	for key := range last {
+		if _, desired := desiredIDs[key.inboundID]; !desired {
+			delete(last, key)
+			continue
+		}
+		if _, observed := observedIDs[key.inboundID]; !observed {
+			continue
+		}
+		if _, present := current[key]; !present {
+			delete(last, key)
+		}
+	}
+}
+
 func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Instance) {
+	// Diagnostics expose cumulative counters. Serialize sampling and persistence
+	// so overlapping scheduler runs cannot advance the baseline out of order.
+	j.runMu.Lock()
+	defer j.runMu.Unlock()
+
+	// The baseline is advanced when diagnostics are sampled. If the database
+	// rejected the previous AddTraffic call, retry that exact consumed batch
+	// before reading a newer cumulative snapshot.
+	if j.pending.hasData() {
+		if _, _, err := j.pending.flush(j.inboundService.AddTraffic); err != nil {
+			logger.Warning("amneziawg job: retry pending traffic failed:", err)
+			return
+		}
+	}
+
 	if coreType != service.CoreTypeSingBox || len(desired) == 0 {
 		return
 	}
@@ -46,15 +91,19 @@ func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Insta
 	activeEmails := make([]string, 0)
 	activeTags := make([]string, 0)
 	seenActiveTags := make(map[string]struct{})
-	current := make(map[string]struct{})
+	desiredIDs := make(map[int]struct{}, len(desired))
+	observedIDs := make(map[int]struct{}, len(desired))
+	current := make(map[amneziaWGTrafficKey]struct{})
 
 	for _, inst := range desired {
+		desiredIDs[inst.Id] = struct{}{}
 		diag, err := j.inboundService.GetAmneziaWGDiagnostics(inst.Id)
 		if err != nil || !diag.Running {
 			continue
 		}
+		observedIDs[inst.Id] = struct{}{}
 		for _, client := range diag.Clients {
-			key := fmt.Sprintf("%d:%s", inst.Id, client.Email)
+			key := amneziaWGTrafficKey{inboundID: inst.Id, email: client.Email}
 			current[key] = struct{}{}
 			j.mu.Lock()
 			prev := j.lastTraffic[key]
@@ -69,16 +118,18 @@ func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Insta
 				deltaTx = client.TxBytes - prev.tx
 			}
 			if deltaRx > 0 || deltaTx > 0 {
+				up := unsignedTrafficDelta(deltaRx)
+				down := unsignedTrafficDelta(deltaTx)
 				traffic = append(traffic, &xray.Traffic{
 					IsInbound: true,
 					Tag:       inst.Tag,
-					Up:        int64(deltaRx),
-					Down:      int64(deltaTx),
+					Up:        up,
+					Down:      down,
 				})
 				clientTraffic = append(clientTraffic, &xray.ClientTraffic{
 					Email: client.Email,
-					Up:    int64(deltaRx),
-					Down:  int64(deltaTx),
+					Up:    up,
+					Down:  down,
 				})
 			}
 			if !client.LastHandshake.IsZero() && now.Sub(client.LastHandshake) <= amneziaWGOnlineWindow {
@@ -92,16 +143,13 @@ func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Insta
 	}
 
 	j.mu.Lock()
-	for key := range j.lastTraffic {
-		if _, ok := current[key]; !ok {
-			delete(j.lastTraffic, key)
-		}
-	}
+	pruneAmneziaWGBaselines(j.lastTraffic, desiredIDs, observedIDs, current)
 	j.mu.Unlock()
 
 	if len(traffic) > 0 || len(clientTraffic) > 0 {
 		if _, _, err := j.inboundService.AddTraffic(traffic, clientTraffic); err != nil {
-			logger.Warning("amneziawg job: add traffic failed:", err)
+			j.pending.remember(traffic, clientTraffic)
+			logger.Warning("amneziawg job: add traffic failed; batch queued for retry:", err)
 		}
 	}
 	if len(activeEmails) > 0 {
