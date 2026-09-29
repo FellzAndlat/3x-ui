@@ -362,14 +362,16 @@ export function FirewallManager() {
           loading={action === 'add'}
           onClick={() => {
             if (!port) return;
-            void post('/panel/api/server/firewall/rules/add', { port, protocol, label }, 'add').then(
-              (success) => {
-                if (success) {
-                  setPort(null);
-                  setLabel('');
-                }
-              },
-            );
+            void post(
+              '/panel/api/server/firewall/rules/add',
+              { port, protocol, label },
+              'add',
+            ).then((success) => {
+              if (success) {
+                setPort(null);
+                setLabel('');
+              }
+            });
           }}
         >
           {text.add}
