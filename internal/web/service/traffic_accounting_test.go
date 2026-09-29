@@ -73,3 +73,26 @@ func TestSaturatingTrafficDelta(t *testing.T) {
 		})
 	}
 }
+
+func TestClampTrafficDeltaToStored(t *testing.T) {
+	tests := []struct {
+		name   string
+		stored int64
+		delta  int64
+		want   int64
+	}{
+		{name: "normal", stored: 100, delta: 25, want: 25},
+		{name: "near max is clipped", stored: database.TrafficMax - 3, delta: 10, want: 3},
+		{name: "already saturated", stored: database.TrafficMax, delta: 10, want: 0},
+		{name: "negative delta ignored", stored: 100, delta: -1, want: 0},
+		{name: "negative stored treated as zero", stored: -100, delta: 25, want: 25},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clampTrafficDeltaToStored(tt.stored, tt.delta); got != tt.want {
+				t.Fatalf("clampTrafficDeltaToStored(%d, %d) = %d, want %d", tt.stored, tt.delta, got, tt.want)
+			}
+		})
+	}
+}
