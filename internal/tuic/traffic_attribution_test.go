@@ -121,7 +121,7 @@ func TestTuicLogPeerForUUID(t *testing.T) {
 	}
 }
 
-func TestProcLogWriterBindsAuthenticatedPeer(t *testing.T) {
+func TestProcLogWriterBindsOnlyAuthenticatedPeer(t *testing.T) {
 	uuid := "123e4567-e89b-12d3-a456-426614174000"
 	var gotPeer, gotEmail string
 	w := &procLogWriter{
@@ -133,6 +133,15 @@ func TestProcLogWriterBindsAuthenticatedPeer(t *testing.T) {
 			return true
 		},
 	}
+
+	w.emitLocked("[0x0000002a] [127.0.0.1:41327] [unauthenticated] authentication failed for " + uuid)
+	if gotPeer != "" || gotEmail != "" {
+		t.Fatalf("failed authentication created binding (%q, %q)", gotPeer, gotEmail)
+	}
+	if w.lastActive["alice@example.com"] != 0 {
+		t.Fatal("failed authentication marked client active")
+	}
+
 	w.emitLocked("[0x0000002a] [127.0.0.1:41327] [" + uuid + "] [authenticate] " + uuid)
 	if gotPeer != "127.0.0.1:41327" || gotEmail != "alice@example.com" {
 		t.Fatalf("binding = (%q, %q), want peer and alice email", gotPeer, gotEmail)
