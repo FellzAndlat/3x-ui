@@ -115,11 +115,21 @@ export default function SubPage() {
   }, [messageApi]);
   const [lang, setLang] = useState<string>(() => LanguageManager.getLanguage('subscription'));
   const [telemtData, setTelemtData] = useState<TelemtSubscriptionData>({});
+  const [telemtLoading, setTelemtLoading] = useState(true);
+  const [telemtError, setTelemtError] = useState(false);
 
   useEffect(() => {
     const endpoint = buildTelemtEndpoint(window.location.href, sId);
-    if (!endpoint) return;
+    if (!endpoint) {
+      setTelemtLoading(false);
+      setTelemtError(true);
+      return;
+    }
+
     const controller = new AbortController();
+    setTelemtLoading(true);
+    setTelemtError(false);
+
     void fetch(endpoint, {
       method: 'GET',
       cache: 'no-store',
@@ -127,17 +137,27 @@ export default function SubPage() {
       signal: controller.signal,
     })
       .then(async (response) => {
-        if (!response.ok) return null;
+        if (!response.ok) {
+          throw new Error(`Telemt subscription request failed with ${response.status}`);
+        }
         return (await response.json()) as TelemtSubscriptionData;
       })
       .then((data) => {
-        if (data) setTelemtData(data);
+        setTelemtData(data);
+        setTelemtError(false);
       })
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === 'AbortError')) {
           setTelemtData({});
+          setTelemtError(true);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setTelemtLoading(false);
         }
       });
+
     return () => controller.abort();
   }, []);
 
@@ -184,66 +204,90 @@ export default function SubPage() {
         children: <SubAppsTab apps={apps} initialPlatform={initialPlatform} onOpen={open} />,
       });
     }
-    if (telemtData.personal?.link || telemtData.webProxy) {
-      items.push({
-        key: 'telemt',
-        icon: <ApiOutlined />,
-        label: 'Telegram Proxy',
-        children: (
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            {telemtData.personal?.link && (
-              <Card size="small" title="Personal Telegram Proxy">
-                <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                  <Typography.Text type="secondary">
-                    Individual proxy profile for this subscription · {telemtData.personal.host}:
-                    {telemtData.personal.port}
-                  </Typography.Text>
-                  <Typography.Paragraph
-                    copyable={{ text: telemtData.personal.link }}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Typography.Link href={telemtData.personal.link}>
-                      {telemtData.personal.link}
-                    </Typography.Link>
-                  </Typography.Paragraph>
-                  <Button
-                    type="primary"
-                    icon={<ApiOutlined />}
-                    onClick={() => open(telemtData.personal!.link)}
-                  >
-                    Open in Telegram
-                  </Button>
-                </Space>
-              </Card>
+    items.push({
+      key: 'telemt',
+      icon: <ApiOutlined />,
+      label: 'Telegram Proxy',
+      children: (
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          {telemtError && (
+            <Alert
+              type="warning"
+              showIcon
+              title="Telegram Proxy data is temporarily unavailable"
+              description="The subscription is still available. Check the Telemt and Web Proxy settings, then reload this page."
+            />
+          )}
+
+          <Card size="small" title="Personal Telegram Proxy">
+            {telemtData.personal?.link ? (
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Typography.Text type="secondary">
+                  Individual proxy profile for this subscription · {telemtData.personal.host}:
+                  {telemtData.personal.port}
+                </Typography.Text>
+                <Typography.Paragraph
+                  copyable={{ text: telemtData.personal.link }}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Typography.Link href={telemtData.personal.link}>
+                    {telemtData.personal.link}
+                  </Typography.Link>
+                </Typography.Paragraph>
+                <Button
+                  type="primary"
+                  icon={<ApiOutlined />}
+                  onClick={() => open(telemtData.personal!.link)}
+                >
+                  Open in Telegram
+                </Button>
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">
+                {telemtLoading
+                  ? 'Loading personal Telemt profile…'
+                  : telemtError
+                    ? 'Unable to load the personal Telemt profile.'
+                    : 'Personal Telemt proxy is not configured for this subscription.'}
+              </Typography.Text>
             )}
-            {telemtData.webProxy && (
-              <Card size="small" title="Web Proxy">
-                <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                  <Typography.Text type="secondary">
-                    Shared Web Proxy for all subscription users
-                  </Typography.Text>
-                  <Typography.Paragraph
-                    copyable={{ text: telemtData.webProxy }}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Typography.Link href={telemtData.webProxy}>
-                      {telemtData.webProxy}
-                    </Typography.Link>
-                  </Typography.Paragraph>
-                  <Button
-                    type="primary"
-                    icon={<ApiOutlined />}
-                    onClick={() => open(telemtData.webProxy!)}
-                  >
-                    Open in Telegram
-                  </Button>
-                </Space>
-              </Card>
+          </Card>
+
+          <Card size="small" title="Web Proxy">
+            {telemtData.webProxy ? (
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Typography.Text type="secondary">
+                  Shared Web Proxy for all subscription users
+                </Typography.Text>
+                <Typography.Paragraph
+                  copyable={{ text: telemtData.webProxy }}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Typography.Link href={telemtData.webProxy}>
+                    {telemtData.webProxy}
+                  </Typography.Link>
+                </Typography.Paragraph>
+                <Button
+                  type="primary"
+                  icon={<ApiOutlined />}
+                  onClick={() => open(telemtData.webProxy!)}
+                >
+                  Open in Telegram
+                </Button>
+              </Space>
+            ) : (
+              <Typography.Text type="secondary">
+                {telemtLoading
+                  ? 'Loading shared Web Proxy…'
+                  : telemtError
+                    ? 'Unable to load the shared Web Proxy.'
+                    : 'Shared Web Proxy is not configured or is disabled.'}
+              </Typography.Text>
             )}
-          </Space>
-        ),
-      });
-    }
+          </Card>
+        </Space>
+      ),
+    });
     if (links.length > 0) {
       items.push({
         key: 'configs',
@@ -258,7 +302,7 @@ export default function SubPage() {
       });
     }
     return items;
-  }, [t, copy, open, telemtData]);
+  }, [t, copy, open, telemtData, telemtLoading, telemtError]);
 
   const direction = RTL_LANGUAGES.has(lang) ? 'rtl' : 'ltr';
   const pageClass = ['subscription-page', isDark && 'is-dark', isUltra && 'is-ultra']
