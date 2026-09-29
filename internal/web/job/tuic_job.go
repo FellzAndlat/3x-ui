@@ -27,8 +27,8 @@ func tuicTrafficBatch(snapshot tuic.TrafficSnapshot, onlineEmails []string) ([]*
 		if d.Tag == "" {
 			continue
 		}
-		inboundUp[d.Tag] += d.Up
-		inboundDown[d.Tag] += d.Down
+		inboundUp[d.Tag] = accumulateTrafficDelta(inboundUp[d.Tag], d.Up)
+		inboundDown[d.Tag] = accumulateTrafficDelta(inboundDown[d.Tag], d.Down)
 	}
 
 	traffics := make([]*xray.Traffic, 0, len(inboundUp))
@@ -50,8 +50,8 @@ func tuicTrafficBatch(snapshot tuic.TrafficSnapshot, onlineEmails []string) ([]*
 		if d.Email == "" {
 			continue
 		}
-		clientUp[d.Email] += d.Up
-		clientDown[d.Email] += d.Down
+		clientUp[d.Email] = accumulateTrafficDelta(clientUp[d.Email], d.Up)
+		clientDown[d.Email] = accumulateTrafficDelta(clientDown[d.Email], d.Down)
 	}
 	// Keep zero-byte active entries too: adjustTraffics uses their presence to
 	// activate delayed-start expiryTime even when an idle connection moved no
