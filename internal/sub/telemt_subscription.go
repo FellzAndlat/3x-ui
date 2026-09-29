@@ -18,8 +18,9 @@ type telemtSubscriptionProfile struct {
 }
 
 type telemtSubscriptionPayload struct {
-	Personal *telemtSubscriptionProfile `json:"personal,omitempty"`
-	WebProxy string                      `json:"webProxy,omitempty"`
+	Personal        *telemtSubscriptionProfile `json:"personal,omitempty"`
+	WebProxyEnabled bool                        `json:"webProxyEnabled"`
+	WebProxy        string                      `json:"webProxy,omitempty"`
 }
 
 func registerTelemtSubscriptionRoute(g *gin.RouterGroup) {
@@ -84,8 +85,11 @@ func serveTelemtSubscription(c *gin.Context) {
 	}
 	certFile, _ := settings.GetCertFile()
 	keyFile, _ := settings.GetKeyFile()
-	if web, err := telemt.WebProxyStatus(defaultDomain, certFile, keyFile); err == nil && web.Enabled && strings.TrimSpace(web.Link) != "" {
-		payload.WebProxy = web.Link
+	if web, err := telemt.WebProxyStatus(defaultDomain, certFile, keyFile); err == nil {
+		payload.WebProxyEnabled = web.Enabled
+		if web.Enabled && strings.TrimSpace(web.Link) != "" {
+			payload.WebProxy = web.Link
+		}
 	}
 
 	c.Header("Cache-Control", "private, no-store")
