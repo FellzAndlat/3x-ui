@@ -1,6 +1,8 @@
 package job
 
 import (
+	"sync"
+
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/mtproto"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
@@ -13,6 +15,8 @@ import (
 // and inbound traffic accounting.
 type MtprotoJob struct {
 	inboundService service.InboundService
+	mu             sync.Mutex
+	pending        pendingTrafficBatch
 }
 
 // NewMtprotoJob creates a new mtproto reconcile/traffic job instance.
@@ -23,6 +27,11 @@ func NewMtprotoJob() *MtprotoJob {
 // Run reconciles desired mtproto inbounds with running mtg processes and records
 // per-client traffic deltas and online status.
 func (j *MtprotoJob) Run() {
+	// CollectTraffic advances mtg's per-client snapshot baseline. Serialize the
+	// poll so two scheduler runs cannot consume overlapping snapshots.
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
 	desired, err := j.inboundService.DesiredMtprotoInstances()
 	if err != nil {
 		logger.Warning("mtproto job: get desired instances failed:", err)
@@ -40,6 +49,16 @@ func (j *MtprotoJob) Run() {
 
 	mgr := mtproto.GetManager()
 	mgr.Reconcile(desired)
+
+	// The manager advances its cumulative-counter baseline when CollectTraffic
+	// returns. Retry an uncommitted batch before sampling again so a transient DB
+	// failure cannot create a permanent hole in a client's traffic history.
+	if j.pending.hasData() {
+		if _, _, retryErr := j.pending.flush(&j.inboundService); retryErr != nil {
+			logger.Warning("mtproto job: retry pending traffic failed:", retryErr)
+			return
+		}
+	}
 
 	deltas, onlineEmails := mgr.CollectTraffic()
 
@@ -73,7 +92,10 @@ func (j *MtprotoJob) Run() {
 
 	if len(traffics) > 0 || len(clientTraffics) > 0 {
 		if _, _, err := j.inboundService.AddTraffic(traffics, clientTraffics); err != nil {
-			logger.Warning("mtproto job: add traffic failed:", err)
+			// CollectTraffic has already moved mtg's baseline. Preserve the exact
+			// delta batch and retry it before collecting a newer snapshot.
+			j.pending.remember(traffics, clientTraffics)
+			logger.Warning("mtproto job: add traffic failed; batch queued for retry:", err)
 		}
 	}
 
