@@ -116,3 +116,15 @@
     animation: none;
   }
 }
+
+/* Ant Design's nested Spin positions itself inside the dashboard content area
+   and caps the overlay height. Anchor the dashboard loader to the viewport so
+   its indicator stays in the true screen centre on every screen size. */
+.index-page .content-area > .ant-spin-nested-loading > div > .ant-spin {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  max-height: none;
+}
