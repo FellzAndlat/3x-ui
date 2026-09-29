@@ -21,7 +21,7 @@ func NewTuicJob() *TuicJob {
 }
 
 func (j *TuicJob) Run() {
-	// CollectTraffic advances each relay's counter baseline. Serialize the poll
+	// CollectTrafficSnapshot advances relay counter baselines. Serialize the poll
 	// so overlapping scheduler runs cannot consume a newer snapshot while an
 	// earlier one is still being committed.
 	j.mu.Lock()
@@ -46,7 +46,7 @@ func (j *TuicJob) Run() {
 
 	// Retry a batch that was already consumed from the TUIC relays before asking
 	// them for another snapshot. Otherwise a transient DB failure permanently
-	// loses the bytes because CollectTraffic has already advanced its baseline.
+	// loses the bytes because the relay counters have already advanced.
 	if j.pending.hasData() {
 		if _, _, retryErr := j.pending.flush(j.inboundService.AddTraffic); retryErr != nil {
 			logger.Warning("tuic job: retry pending traffic failed:", retryErr)
@@ -68,12 +68,12 @@ func (j *TuicJob) Run() {
 	mgr := tuic.GetManager()
 	mgr.Reconcile(desired)
 
-	deltas := mgr.CollectTraffic()
+	snapshot := mgr.CollectTrafficSnapshot()
 	onlineEmails, _ := mgr.GetActiveClients(30 * time.Second)
 
 	inboundUp := make(map[string]int64)
 	inboundDown := make(map[string]int64)
-	for _, d := range deltas {
+	for _, d := range snapshot.Inbounds {
 		inboundUp[d.Tag] += d.Up
 		inboundDown[d.Tag] += d.Down
 	}
@@ -88,22 +88,44 @@ func (j *TuicJob) Run() {
 		})
 	}
 
-	// Build zero-byte client traffic entries for active clients so adjustTraffics can
-	// activate delayed-start expiryTime for TUIC clients without inflating traffic.
-	clientTraffics := make([]*xray.ClientTraffic, 0, len(onlineEmails))
+	// TUIC's relay now attributes each authenticated QUIC flow to the UUID/email
+	// printed by tuic-server. Merge multiple connections/inbounds for the same
+	// email because client_traffics has one durable row per email.
+	clientUp := make(map[string]int64)
+	clientDown := make(map[string]int64)
+	for _, d := range snapshot.Clients {
+		if d.Email == "" {
+			continue
+		}
+		clientUp[d.Email] += d.Up
+		clientDown[d.Email] += d.Down
+	}
+	// Keep zero-byte active entries too: adjustTraffics uses their presence to
+	// activate delayed-start expiryTime even when an idle connection moved no
+	// bytes during this poll.
 	for _, email := range onlineEmails {
+		if email == "" {
+			continue
+		}
+		if _, ok := clientUp[email]; !ok {
+			clientUp[email] = 0
+		}
+	}
+	clientTraffics := make([]*xray.ClientTraffic, 0, len(clientUp))
+	for email, up := range clientUp {
 		clientTraffics = append(clientTraffics, &xray.ClientTraffic{
 			Email: email,
-			Up:    0,
-			Down:  0,
+			Up:    up,
+			Down:  clientDown[email],
 		})
 	}
 
 	if len(traffics) > 0 || len(clientTraffics) > 0 {
 		needRestart, _, err := j.inboundService.AddTraffic(traffics, clientTraffics)
 		if err != nil {
-			// The relay baselines have already advanced. Keep the exact consumed
-			// batch and retry it before collecting a newer TUIC snapshot.
+			// Both aggregate and per-client relay cursors have already advanced.
+			// Keep the exact consumed batch and retry it before collecting newer
+			// TUIC traffic.
 			j.pending.remember(traffics, clientTraffics)
 			logger.Warning("tuic job: add traffic failed; batch queued for retry:", err)
 		} else if needRestart {
