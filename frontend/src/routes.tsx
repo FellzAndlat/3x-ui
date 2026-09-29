@@ -3,19 +3,20 @@ import { createBrowserRouter, type RouteObject } from 'react-router';
 import { Spin } from 'antd';
 
 import PanelLayout from '@/layouts/PanelLayout';
+import { importWithChunkRecovery } from '@/lib/chunk-load-recovery';
 
-const IndexPage = lazy(() => import('@/pages/index/IndexPage'));
-const InboundsPage = lazy(() => import('@/pages/inbounds/InboundsPage'));
-const ClientsPage = lazy(() => import('@/pages/clients/ClientsPage'));
-const GroupsPage = lazy(() => import('@/pages/groups/GroupsPage'));
-const NodesPage = lazy(() => import('@/pages/nodes/NodesPage'));
-const HostsPage = lazy(() => import('@/pages/hosts/HostsPage'));
-const FirewallPage = lazy(() => import('@/pages/firewall/FirewallPage'));
-const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage'));
-const XrayPage = lazy(() => import('@/pages/xray/XrayPage'));
-const SingBoxPage = lazy(() => import('@/pages/singbox/SingBoxPage'));
-const ApiDocsPage = lazy(() => import('@/pages/api-docs/ApiDocsPage'));
-const TelemtPage = lazy(() => import('@/pages/telemt/TelemtPage'));
+const IndexPage = lazy(() => importWithChunkRecovery(() => import('@/pages/index/IndexPage')));
+const InboundsPage = lazy(() => importWithChunkRecovery(() => import('@/pages/inbounds/InboundsPage')));
+const ClientsPage = lazy(() => importWithChunkRecovery(() => import('@/pages/clients/ClientsPage')));
+const GroupsPage = lazy(() => importWithChunkRecovery(() => import('@/pages/groups/GroupsPage')));
+const NodesPage = lazy(() => importWithChunkRecovery(() => import('@/pages/nodes/NodesPage')));
+const HostsPage = lazy(() => importWithChunkRecovery(() => import('@/pages/hosts/HostsPage')));
+const FirewallPage = lazy(() => importWithChunkRecovery(() => import('@/pages/firewall/FirewallPage')));
+const SettingsPage = lazy(() => importWithChunkRecovery(() => import('@/pages/settings/SettingsPage')));
+const XrayPage = lazy(() => importWithChunkRecovery(() => import('@/pages/xray/XrayPage')));
+const SingBoxPage = lazy(() => importWithChunkRecovery(() => import('@/pages/singbox/SingBoxPage')));
+const ApiDocsPage = lazy(() => importWithChunkRecovery(() => import('@/pages/api-docs/ApiDocsPage')));
+const TelemtPage = lazy(() => importWithChunkRecovery(() => import('@/pages/telemt/TelemtPage')));
 
 function withSuspense(node: React.ReactNode) {
   return (
