@@ -76,7 +76,7 @@ func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Insta
 	// rejected the previous AddTraffic call, retry that exact consumed batch
 	// before reading a newer cumulative snapshot.
 	if j.pending.hasData() {
-		if _, _, err := j.pending.flush(&j.inboundService); err != nil {
+		if _, _, err := j.pending.flush(j.inboundService.AddTraffic); err != nil {
 			logger.Warning("amneziawg job: retry pending traffic failed:", err)
 			return
 		}
