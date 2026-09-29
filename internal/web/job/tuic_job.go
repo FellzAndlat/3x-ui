@@ -27,6 +27,23 @@ func (j *TuicJob) Run() {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	core, err := (&service.SettingService{}).GetCoreType()
+	if err != nil {
+		logger.Warning("tuic job: get selected core failed:", err)
+		return
+	}
+	if core == service.CoreTypeSingBox {
+		// Stop the sidecar immediately on a core switch even if a historical
+		// traffic batch cannot be persisted yet. The batch remains retryable.
+		tuic.GetManager().StopAll()
+		if j.pending.hasData() {
+			if _, _, retryErr := j.pending.flush(j.inboundService.AddTraffic); retryErr != nil {
+				logger.Warning("tuic job: retry pending traffic after core switch failed:", retryErr)
+			}
+		}
+		return
+	}
+
 	// Retry a batch that was already consumed from the TUIC relays before asking
 	// them for another snapshot. Otherwise a transient DB failure permanently
 	// loses the bytes because CollectTraffic has already advanced its baseline.
@@ -37,15 +54,6 @@ func (j *TuicJob) Run() {
 		}
 	}
 
-	core, err := (&service.SettingService{}).GetCoreType()
-	if err != nil {
-		logger.Warning("tuic job: get selected core failed:", err)
-		return
-	}
-	if core == service.CoreTypeSingBox {
-		tuic.GetManager().StopAll()
-		return
-	}
 	desired, err := j.inboundService.DesiredTuicInstances()
 	if err != nil {
 		logger.Warning("tuic job: get desired instances failed:", err)
