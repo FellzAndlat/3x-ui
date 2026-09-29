@@ -20,6 +20,8 @@ const (
 	ConnectionEventClosed = 2
 )
 
+const trafficSnapshotMissingGrace = 12
+
 type (
 	connectionSubscribeRequest struct{ Interval int64 }
 	closeConnectionRequest     struct{ ID string }
@@ -164,9 +166,7 @@ func decodeConnectionEvent(data []byte, trafficOnly bool) (*connectionEvent, err
 			if used < 0 {
 				return nil, protowire.ParseError(used)
 			}
-			if !trafficOnly {
-				event.ID = string(value)
-			}
+			event.ID = string(value)
 			data = data[used:]
 		case 3:
 			if typ != protowire.BytesType {
@@ -218,27 +218,48 @@ func decodeTrafficConnection(data []byte) (*singBoxConnection, error) {
 			return nil, protowire.ParseError(n)
 		}
 		data = data[n:]
-		if field != 2 && field != 10 {
+		switch field {
+		case 1, 2, 10:
+			if typ != protowire.BytesType {
+				return nil, fmt.Errorf("invalid Connection traffic string field %d wire type %d", field, typ)
+			}
+			value, used := protowire.ConsumeBytes(data)
+			if used < 0 {
+				return nil, protowire.ParseError(used)
+			}
+			switch field {
+			case 1:
+				connection.ID = string(value)
+			case 2:
+				connection.Inbound = string(value)
+			case 10:
+				connection.User = string(value)
+			}
+			data = data[used:]
+		case 13, 16, 17:
+			if typ != protowire.VarintType {
+				return nil, fmt.Errorf("invalid Connection traffic numeric field %d wire type %d", field, typ)
+			}
+			value, used := protowire.ConsumeVarint(data)
+			if used < 0 {
+				return nil, protowire.ParseError(used)
+			}
+			switch field {
+			case 13:
+				connection.ClosedAt = int64(value)
+			case 16:
+				connection.UplinkTotal = int64(value)
+			case 17:
+				connection.DownlinkTotal = int64(value)
+			}
+			data = data[used:]
+		default:
 			used := protowire.ConsumeFieldValue(field, typ, data)
 			if used < 0 {
 				return nil, protowire.ParseError(used)
 			}
 			data = data[used:]
-			continue
 		}
-		if typ != protowire.BytesType {
-			return nil, fmt.Errorf("invalid Connection traffic string field %d wire type %d", field, typ)
-		}
-		value, used := protowire.ConsumeBytes(data)
-		if used < 0 {
-			return nil, protowire.ParseError(used)
-		}
-		if field == 2 {
-			connection.Inbound = string(value)
-		} else {
-			connection.User = string(value)
-		}
-		data = data[used:]
 	}
 	return connection, nil
 }
@@ -348,7 +369,68 @@ func decodeConnection(data []byte, trafficOnly bool) (*singBoxConnection, error)
 	return connection, nil
 }
 
+type connectionTrafficSnapshot struct {
+	uplink           int64
+	downlink         int64
+	missingSnapshots uint8
+}
+
+func trafficCounterDelta(current, previous int64) int64 {
+	if current >= previous {
+		return current - previous
+	}
+	return current
+}
+
+func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvents) {
+	if response == nil || !response.Reset {
+		return
+	}
+	if c.trafficSnapshots == nil {
+		c.trafficSnapshots = make(map[string]connectionTrafficSnapshot)
+	}
+	seen := make(map[string]struct{}, len(response.Events))
+	for _, event := range response.Events {
+		if event == nil || event.ID == "" || event.Connection == nil {
+			continue
+		}
+		connection := event.Connection
+		seen[event.ID] = struct{}{}
+		previous, exists := c.trafficSnapshots[event.ID]
+		if exists {
+			event.UplinkDelta = trafficCounterDelta(connection.UplinkTotal, previous.uplink)
+			event.DownlinkDelta = trafficCounterDelta(connection.DownlinkTotal, previous.downlink)
+		} else {
+			event.UplinkDelta = connection.UplinkTotal
+			event.DownlinkDelta = connection.DownlinkTotal
+		}
+		c.trafficSnapshots[event.ID] = connectionTrafficSnapshot{
+			uplink:   connection.UplinkTotal,
+			downlink: connection.DownlinkTotal,
+		}
+		if connection.ClosedAt != 0 {
+			event.Type = ConnectionEventClosed
+			event.ClosedAt = connection.ClosedAt
+		}
+	}
+	for id, snapshot := range c.trafficSnapshots {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		if snapshot.missingSnapshots+1 >= trafficSnapshotMissingGrace {
+			delete(c.trafficSnapshots, id)
+			continue
+		}
+		snapshot.missingSnapshots++
+		c.trafficSnapshots[id] = snapshot
+	}
+}
+
 // SnapshotTrafficEvents is a low-allocation variant used by the traffic poll.
+// SubscribeConnections always starts with Reset=true and cumulative connection
+// totals. Convert that reset snapshot to deltas locally because this poll uses
+// a short-lived stream and therefore never waits for the server's later update
+// events.
 func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connectionEvents, error) {
 	if err := c.connFor(ctx); err != nil {
 		return connectionEvents{}, err
@@ -371,10 +453,14 @@ func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connec
 		c.Close()
 		return connectionEvents{}, err
 	}
+	c.normalizeTrafficSnapshot(&response)
 	return response, nil
 }
 
-type ConnectionAPIClient struct{ conn *grpc.ClientConn }
+type ConnectionAPIClient struct {
+	conn             *grpc.ClientConn
+	trafficSnapshots map[string]connectionTrafficSnapshot
+}
 
 func NewConnectionAPIClient() *ConnectionAPIClient { return &ConnectionAPIClient{} }
 func (c *ConnectionAPIClient) Close() {
