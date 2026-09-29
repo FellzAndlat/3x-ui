@@ -76,39 +76,10 @@ func (m *Manager) CollectTraffic(desired []Instance) ([]TrafficDelta, []string) 
 			cursors = make(map[string]trafficCursor)
 			m.traffic[result.inst.Id] = cursors
 		}
-		for user, st := range result.stats {
-			email := strings.TrimSpace(user)
-			if email == "" {
-				continue
-			}
-			cur := cursors[user]
-			var delta TrafficDelta
-			if cur.initialized {
-				if st.up > cur.up {
-					delta.Up = st.up - cur.up
-				}
-				if st.down > cur.down {
-					delta.Down = st.down - cur.down
-				}
-			}
-			cur.up = st.up
-			cur.down = st.down
-			cur.initialized = true
-			cursors[user] = cur
-
-			if delta.Up > 0 || delta.Down > 0 {
-				delta.Tag = result.inst.Tag
-				delta.Email = email
-				deltas = append(deltas, delta)
-			}
-			if !st.lastActive.IsZero() && now.Sub(st.lastActive) <= defaultOnlineGrace {
-				onlineSet[email] = struct{}{}
-			}
-		}
-		for user := range cursors {
-			if _, present := result.stats[user]; !present {
-				delete(cursors, user)
-			}
+		instanceDeltas, instanceOnline := collectInstanceTraffic(result.inst, cursors, result.stats, now)
+		deltas = append(deltas, instanceDeltas...)
+		for _, email := range instanceOnline {
+			onlineSet[email] = struct{}{}
 		}
 		m.mu.Unlock()
 	}
@@ -116,6 +87,67 @@ func (m *Manager) CollectTraffic(desired []Instance) ([]TrafficDelta, []string) 
 	online := make([]string, 0, len(onlineSet))
 	for email := range onlineSet {
 		online = append(online, email)
+	}
+	return deltas, online
+}
+
+// collectInstanceTraffic advances the cumulative per-user cursors for one
+// Mieru instance. A successful scrape is not guaranteed to contain every
+// configured user, so cursors are retained for configured users that are
+// temporarily absent from the output. This prevents traffic accrued while a
+// user is omitted from one or more scrapes from being silently discarded when
+// that user reappears.
+func collectInstanceTraffic(inst Instance, cursors map[string]trafficCursor, stats map[string]userTrafficStats, now time.Time) ([]TrafficDelta, []string) {
+	configured := make(map[string]struct{}, len(inst.Users))
+	for _, user := range inst.Users {
+		email := strings.TrimSpace(user.Name)
+		if email != "" {
+			configured[email] = struct{}{}
+		}
+	}
+
+	deltas := make([]TrafficDelta, 0, len(stats))
+	online := make([]string, 0, len(stats))
+	for user, st := range stats {
+		email := strings.TrimSpace(user)
+		if email == "" {
+			continue
+		}
+		if _, ok := configured[email]; !ok {
+			continue
+		}
+
+		cur := cursors[email]
+		var delta TrafficDelta
+		if cur.initialized {
+			if st.up > cur.up {
+				delta.Up = st.up - cur.up
+			}
+			if st.down > cur.down {
+				delta.Down = st.down - cur.down
+			}
+		}
+		cur.up = st.up
+		cur.down = st.down
+		cur.initialized = true
+		cursors[email] = cur
+
+		if delta.Up > 0 || delta.Down > 0 {
+			delta.Tag = inst.Tag
+			delta.Email = email
+			deltas = append(deltas, delta)
+		}
+		if !st.lastActive.IsZero() && now.Sub(st.lastActive) <= defaultOnlineGrace {
+			online = append(online, email)
+		}
+	}
+
+	// Only configuration removal invalidates a cursor. Temporary absence from a
+	// successful `get users` response must preserve the last cumulative sample.
+	for email := range cursors {
+		if _, ok := configured[email]; !ok {
+			delete(cursors, email)
+		}
 	}
 	return deltas, online
 }
