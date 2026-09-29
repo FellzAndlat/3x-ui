@@ -226,7 +226,7 @@ function AppSidebar() {
       {
         key: '/settings#security',
         icon: <SafetyOutlined />,
-        label: t('pages.settings.securitySettings'),
+        label: t('security'),
       },
       {
         key: '/settings#telegram',
