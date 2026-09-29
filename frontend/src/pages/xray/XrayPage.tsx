@@ -36,6 +36,7 @@ import {
   detectBalancerCycles,
 } from './balancers/balancer-loopback';
 import { DnsTab } from './dns';
+import { FirewallModal } from './FirewallModal';
 import { WarpModal, NordModal, PiaModal } from './overrides';
 import './XrayPage.css';
 
@@ -83,6 +84,7 @@ export default function XrayPage() {
   const [warpOpen, setWarpOpen] = useState(false);
   const [nordOpen, setNordOpen] = useState(false);
   const [piaOpen, setPiaOpen] = useState(false);
+  const [firewallOpen, setFirewallOpen] = useState(false);
   const [advSettings, setAdvSettings] = useState<AdvKey>('xraySetting');
   const location = useLocation();
   const navigate = useNavigate();
@@ -343,9 +345,12 @@ export default function XrayPage() {
                     <Card hoverable>
                       <Row className="header-row">
                         <Col xs={24} sm={14} className="header-actions">
-                          <Space>
+                          <Space wrap>
                             <Button type="primary" disabled={saveDisabled} onClick={onSaveAll}>
                               {t('pages.xray.save')}
+                            </Button>
+                            <Button onClick={() => setFirewallOpen(true)}>
+                              {t('pages.xray.firewall', { defaultValue: 'Firewall' })}
                             </Button>
                           </Space>
                         </Col>
@@ -366,6 +371,7 @@ export default function XrayPage() {
           </Layout.Content>
         </Layout>
 
+        <FirewallModal open={firewallOpen} onClose={() => setFirewallOpen(false)} />
         <WarpModal
           open={warpOpen}
           templateSettings={templateSettings}

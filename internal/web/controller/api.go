@@ -92,8 +92,7 @@ var monitorScopeAllow = map[string]struct{}{
 	"/nodes/history/:id/:metric/:bucket":          {},
 }
 
-// nodeSyncScopeAllow is the node-sync route/method allowlist relative to
-// /panel/api; Gin patterns prevent concrete parameters broadening authority.
+// nodeSyncScopeAllow is the node-sync route/method allowlist relative to /panel/api; Gin patterns prevent concrete parameters broadening authority.
 var nodeSyncScopeAllow = map[string]map[string]struct{}{
 	"/server/status":               {http.MethodGet: {}},
 	"/inbounds/list":               {http.MethodGet: {}},
@@ -178,6 +177,7 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 	// advertise support, before CSRF/handlers read the body.
 	api.Use(middleware.ConfigEnvelopeMiddleware())
 	api.Use(middleware.CSRFMiddleware())
+	api.Use(firewallAutoSyncMiddleware())
 
 	api.GET("/openapi.json", ServeOpenAPISpec)
 
@@ -192,6 +192,7 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 	// Server API
 	server := api.Group("/server")
 	a.serverController = NewServerController(server)
+	NewFirewallController(server)
 
 	// Nodes API — multi-panel management
 	nodes := api.Group("/nodes")
