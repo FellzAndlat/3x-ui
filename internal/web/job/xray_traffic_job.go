@@ -71,43 +71,65 @@ func NewXrayTrafficJob() *XrayTrafficJob {
 	return new(XrayTrafficJob)
 }
 
-func (j *XrayTrafficJob) runSingBoxPresence() {
-	core, err := j.settingService.GetCoreType()
-	if err != nil || core != service.CoreTypeSingBox {
-		return
+// runNonXrayTraffic keeps the clients page live when Xray is not the active
+// traffic source. Sing-box contributes its connection-presence signal here,
+// while byte counters come from the shared client_traffics table so sidecars
+// and any other collectors are included automatically.
+func (j *XrayTrafficJob) runNonXrayTraffic() {
+	core, coreErr := j.settingService.GetCoreType()
+	if coreErr != nil {
+		logger.Debug("get core type for traffic presence failed:", coreErr)
 	}
-	service.EnsureOnlinePresenceTracker()
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	online, err := (&service.SingBoxService{}).OnlineClientIPs(ctx)
-	cancel()
-	if err != nil {
-		logger.Debug("get online users from sing-box api failed:", err)
-		return
-	}
-	emails := make([]string, 0, len(online))
-	for email := range online {
-		if email != "" {
-			emails = append(emails, email)
+	if coreErr == nil && core == service.CoreTypeSingBox {
+		service.EnsureOnlinePresenceTracker()
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		online, err := (&service.SingBoxService{}).OnlineClientIPs(ctx)
+		cancel()
+		if err != nil {
+			logger.Debug("get online users from sing-box api failed:", err)
+		} else {
+			emails := make([]string, 0, len(online))
+			for email := range online {
+				if email != "" {
+					emails = append(emails, email)
+				}
+			}
+			if len(emails) > 0 {
+				if err := j.inboundService.BumpClientsLastOnline(emails); err != nil {
+					logger.Warning("bump last online for sing-box clients failed:", err)
+				}
+			}
+			j.inboundService.RefreshLocalOnlineClients(emails, nil)
 		}
 	}
-	if len(emails) > 0 {
-		if err := j.inboundService.BumpClientsLastOnline(emails); err != nil {
-			logger.Warning("bump last online for sing-box clients failed:", err)
-		}
-	}
-	j.inboundService.RefreshLocalOnlineClients(emails, nil)
+
 	if !websocket.HasClients() {
+		service.ResetClientTrafficLiveSampler()
 		return
+	}
+
+	liveTraffics, liveStats, err := j.inboundService.SampleClientTrafficDeltas()
+	if err != nil {
+		logger.Warning("sample unified client traffic failed:", err)
+		liveTraffics = []*xray.ClientTraffic{}
+		liveStats = nil
 	}
 	onlineClients := j.inboundService.GetOnlineClients()
 	if onlineClients == nil {
 		onlineClients = []string{}
 	}
 	websocket.BroadcastTraffic(map[string]any{
+		"clientTraffics": liveTraffics,
 		"onlineClients":  onlineClients,
 		"onlineByGuid":   j.inboundService.GetOnlineClientsByGuid(),
 		"activeInbounds": j.inboundService.GetActiveInboundsByGuid(),
 	})
+	if len(liveStats) > 0 {
+		websocket.BroadcastClientStats(map[string]any{
+			"snapshot": false,
+			"clients":  liveStats,
+		})
+	}
 }
 
 // Run collects traffic statistics from Xray, updates the database, and pushes
@@ -115,7 +137,7 @@ func (j *XrayTrafficJob) runSingBoxPresence() {
 // fallback, scales to 10k–20k+ clients per inbound.
 func (j *XrayTrafficJob) Run() {
 	if !j.xrayService.IsXrayRunning() {
-		j.runSingBoxPresence()
+		j.runNonXrayTraffic()
 		return
 	}
 
@@ -168,7 +190,7 @@ func (j *XrayTrafficJob) Run() {
 	// than the shared last_online column, which remote-node syncs also bump
 	// and would otherwise make a client active only on a remote node appear
 	// online on local inbounds.
-	movedTraffics, activeEmails, deltaActive := splitMovedClientTraffics(clientTraffics)
+	_, activeEmails, deltaActive := splitMovedClientTraffics(clientTraffics)
 	// When the core supports the online-stats API, union in connection-based
 	// onlines. Neither signal alone covers everything: an idle-but-connected
 	// client moves no bytes between polls (the delta heuristic's blind spot),
@@ -216,14 +238,25 @@ func (j *XrayTrafficJob) Run() {
 	j.inboundService.RefreshLocalOnlineClients(activeEmails, activeInboundTags)
 
 	if !websocket.HasClients() {
+		service.ResetClientTrafficLiveSampler()
 		return
+	}
+
+	// Read the live deltas back from the shared durable counters. This merges
+	// Xray with sing-box/sidecar/remote collectors instead of letting the Xray
+	// websocket frame overwrite traffic reported by another source.
+	liveTraffics, liveStats, sampleErr := j.inboundService.SampleClientTrafficDeltas()
+	if sampleErr != nil {
+		logger.Warning("sample unified client traffic failed:", sampleErr)
+		liveTraffics = []*xray.ClientTraffic{}
+		liveStats = nil
 	}
 
 	// Small installs broadcast the full snapshot (see GetAllClientTraffics for
 	// why deltas alone left UI rows stale). Above the threshold the snapshot
-	// would be dropped by the hub's payload cap anyway, so ship this poll's
-	// active rows instead and scope last-online to them; the initial full map
-	// still arrives over REST.
+	// would be dropped by the hub's payload cap anyway, so ship only rows that
+	// actually changed in the shared traffic table; the initial full map still
+	// arrives over REST.
 	snapshot := true
 	if total, countErr := j.inboundService.CountClientTraffics(); countErr != nil {
 		logger.Warning("count client traffics for websocket failed:", countErr)
@@ -236,7 +269,7 @@ func (j *XrayTrafficJob) Run() {
 	if snapshot {
 		stats, statsErr = j.inboundService.GetAllClientTraffics()
 	} else {
-		stats, statsErr = j.inboundService.GetActiveClientTraffics(activeEmails)
+		stats = liveStats
 	}
 	if statsErr != nil {
 		logger.Warning("get client traffics for websocket failed:", statsErr)
@@ -264,7 +297,7 @@ func (j *XrayTrafficJob) Run() {
 	}
 	websocket.BroadcastTraffic(map[string]any{
 		"traffics":       traffics,
-		"clientTraffics": movedTraffics,
+		"clientTraffics": liveTraffics,
 		"onlineClients":  onlineClients,
 		"onlineByGuid":   j.inboundService.GetOnlineClientsByGuid(),
 		"activeInbounds": j.inboundService.GetActiveInboundsByGuid(),

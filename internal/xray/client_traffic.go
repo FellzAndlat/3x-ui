@@ -21,6 +21,6 @@ type ClientTraffic struct {
 	ResetMax int `json:"resetMax" form:"resetMax" gorm:"default:0" example:"0"`
 	// ResetCount is how many have fired, so a prepaid plan stops on its own.
 	ResetCount   int   `json:"resetCount" form:"resetCount" gorm:"default:0" example:"0"`
-	LastOnline   int64 `json:"lastOnline" form:"lastOnline" gorm:"default:0" example:"1735680000000"`
+	LastOnline   int64 `json:"lastOnline" form:"lastOnline" gorm:"default:0;index:idx_client_traffics_last_online" example:"1735680000000"`
 	LastSubFetch int64 `json:"lastSubFetch" form:"lastSubFetch" gorm:"default:0" example:"1735680000000"`
 }
