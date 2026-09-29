@@ -64,3 +64,15 @@ func TestClampedAddExprPostgresShape(t *testing.T) {
 		t.Fatalf("postgres expression performs unsafe addition before clamp: %s", expr)
 	}
 }
+
+func TestClientTrafficEnableMergeExprPostgresUsesWideQuotaMath(t *testing.T) {
+	expr := clientTrafficEnableMergeExpr(true)
+	if got := strings.Count(expr, "?"); got != 6 {
+		t.Fatalf("postgres quota expression placeholders = %d, want 6: %s", got, expr)
+	}
+	if !strings.Contains(expr, "CAST(up AS NUMERIC)") ||
+		!strings.Contains(expr, "CAST(down AS NUMERIC)") ||
+		strings.Contains(expr, "up + ? + down + ?") {
+		t.Fatalf("postgres quota expression still uses overflow-prone BIGINT addition: %s", expr)
+	}
+}
