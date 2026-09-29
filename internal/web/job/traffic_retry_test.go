@@ -4,8 +4,31 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 )
+
+func TestAccumulateTrafficDelta(t *testing.T) {
+	tests := []struct {
+		name    string
+		current int64
+		delta   int64
+		want    int64
+	}{
+		{name: "normal", current: 10, delta: 20, want: 30},
+		{name: "negative runtime delta ignored", current: 10, delta: -7, want: 10},
+		{name: "negative current normalized", current: -5, delta: 7, want: 7},
+		{name: "saturates before overflow", current: database.TrafficMax - 2, delta: 10, want: database.TrafficMax},
+		{name: "already saturated", current: database.TrafficMax, delta: 10, want: database.TrafficMax},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := accumulateTrafficDelta(tt.current, tt.delta); got != tt.want {
+				t.Fatalf("accumulateTrafficDelta(%d, %d) = %d, want %d", tt.current, tt.delta, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestPendingTrafficBatchRetainsFailedCommitAndClearsAfterRetry(t *testing.T) {
 	inbounds := []*xray.Traffic{{Tag: "inbound-1", IsInbound: true, Up: 11, Down: 22}}
