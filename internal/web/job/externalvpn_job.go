@@ -35,7 +35,7 @@ func (j *ExternalVPNJob) Run() {
 	// updates the manager baseline immediately, so reading a second snapshot first
 	// would permanently lose the uncommitted delta.
 	if j.pending.hasData() {
-		_, disabled, retryErr := j.pending.flush(&j.inbounds)
+		_, disabled, retryErr := j.pending.flush(j.inbounds.AddTraffic)
 		if retryErr != nil {
 			logger.Warning("external VPN traffic retry:", retryErr)
 			return
