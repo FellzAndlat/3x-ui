@@ -17,8 +17,22 @@ const (
 	maxRelayFlows     = 4096
 )
 
+type clientTrafficDelta struct {
+	Email string
+	Up    int64
+	Down  int64
+}
+
+type trafficTotals struct {
+	up   int64
+	down int64
+}
+
 // udpRelay owns an inbound's public UDP port and counts the bytes it forwards to
 // the sidecar on loopback: tuic-server has no stats API and /proc/io stays at 0.
+// Each external client flow gets its own connected loopback UDP socket. The
+// sidecar logs that socket's source address together with the authenticated
+// UUID, allowing bindPeer to attach exact wire-byte counters to an email.
 type udpRelay struct {
 	public    *net.UDPConn
 	upstream  *net.UDPAddr
@@ -28,6 +42,8 @@ type udpRelay struct {
 	down      atomic.Int64
 	mu        sync.Mutex
 	flows     map[string]*relayFlow
+	peers     map[string]*relayFlow
+	retired   map[string]trafficTotals
 	done      chan struct{}
 	closeOnce sync.Once
 	wg        sync.WaitGroup
@@ -37,6 +53,12 @@ type relayFlow struct {
 	conn     *net.UDPConn
 	client   *net.UDPAddr
 	lastSeen atomic.Int64
+	up       atomic.Int64
+	down     atomic.Int64
+	// email is protected by udpRelay.mu. Keeping the byte counters on the flow
+	// means packets received before authentication remain attributable once the
+	// tuic-server log reveals which UUID owns this QUIC connection.
+	email string
 }
 
 func startUDPRelay(bind string, upstream *net.UDPAddr, idle time.Duration) (*udpRelay, error) {
@@ -56,6 +78,8 @@ func startUDPRelay(bind string, upstream *net.UDPAddr, idle time.Duration) (*udp
 		idle:     idle,
 		maxFlows: maxRelayFlows,
 		flows:    make(map[string]*relayFlow),
+		peers:    make(map[string]*relayFlow),
+		retired:  make(map[string]trafficTotals),
 		done:     make(chan struct{}),
 	}
 	r.wg.Add(2)
@@ -83,6 +107,78 @@ func (r *udpRelay) CollectTraffic() (up, down int64) {
 	return r.up.Swap(0), r.down.Swap(0)
 }
 
+// CollectClientTraffic returns exact per-email relay deltas. An unauthenticated
+// flow is deliberately not reset here: its early QUIC handshake bytes remain on
+// the flow and are included after bindPeer associates the sidecar peer with a
+// validated UUID. Bound flows that expired between polls are preserved in
+// retired, so sweeping a connection cannot silently drop its final bytes.
+func (r *udpRelay) CollectClientTraffic() []clientTrafficDelta {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	totals := r.retired
+	r.retired = make(map[string]trafficTotals)
+	for _, f := range r.flows {
+		if f == nil || f.email == "" {
+			continue
+		}
+		t := totals[f.email]
+		t.up += f.up.Swap(0)
+		t.down += f.down.Swap(0)
+		totals[f.email] = t
+	}
+
+	out := make([]clientTrafficDelta, 0, len(totals))
+	for email, t := range totals {
+		if t.up == 0 && t.down == 0 {
+			continue
+		}
+		out = append(out, clientTrafficDelta{Email: email, Up: t.up, Down: t.down})
+	}
+	return out
+}
+
+// bindPeer attaches the loopback source address observed by tuic-server to the
+// authenticated email from the same server log line. A QUIC migration can
+// create a new relay flow for the same user; binding each peer independently
+// lets CollectClientTraffic merge all of those flows by email.
+func (r *udpRelay) bindPeer(peer, email string) bool {
+	if r == nil || peer == "" || email == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	f := r.peers[peer]
+	if f == nil {
+		return false
+	}
+	if f.email != "" && f.email != email {
+		r.flushFlowTrafficLocked(f)
+	}
+	f.email = email
+	return true
+}
+
+func (r *udpRelay) flushFlowTrafficLocked(f *relayFlow) {
+	if f == nil || f.email == "" {
+		return
+	}
+	t := r.retired[f.email]
+	t.up += f.up.Swap(0)
+	t.down += f.down.Swap(0)
+	r.retired[f.email] = t
+}
+
+func (r *udpRelay) retireFlowLocked(f *relayFlow) {
+	if f == nil {
+		return
+	}
+	r.flushFlowTrafficLocked(f)
+	if f.conn != nil && f.conn.LocalAddr() != nil {
+		delete(r.peers, f.conn.LocalAddr().String())
+	}
+}
+
 func (r *udpRelay) Close() {
 	if r == nil {
 		return
@@ -92,6 +188,7 @@ func (r *udpRelay) Close() {
 		_ = r.public.Close()
 		r.mu.Lock()
 		for key, f := range r.flows {
+			r.retireFlowLocked(f)
 			_ = f.conn.Close()
 			delete(r.flows, key)
 		}
@@ -117,6 +214,7 @@ func (r *udpRelay) serve() {
 		}
 		if _, err := flow.conn.Write(buf[:n]); err == nil {
 			r.up.Add(int64(n))
+			flow.up.Add(int64(n))
 		}
 	}
 }
@@ -147,6 +245,7 @@ func (r *udpRelay) flowFor(client *net.UDPAddr) (*relayFlow, error) {
 	f := &relayFlow{conn: conn, client: client}
 	f.lastSeen.Store(now)
 	r.flows[key] = f
+	r.peers[conn.LocalAddr().String()] = f
 	r.wg.Add(1)
 	go r.pump(f)
 	return f, nil
@@ -163,6 +262,7 @@ func (r *udpRelay) evictLeastRecentLocked() {
 		}
 	}
 	if f, ok := r.flows[oldestKey]; ok {
+		r.retireFlowLocked(f)
 		_ = f.conn.Close()
 		delete(r.flows, oldestKey)
 	}
@@ -183,6 +283,7 @@ func (r *udpRelay) pump(f *relayFlow) {
 		}
 		if _, err := r.public.WriteToUDP(buf[:n], f.client); err == nil {
 			r.down.Add(int64(n))
+			f.down.Add(int64(n))
 		}
 		f.lastSeen.Store(time.Now().UnixMilli())
 	}
@@ -201,6 +302,7 @@ func (r *udpRelay) sweep() {
 			r.mu.Lock()
 			for key, f := range r.flows {
 				if f.lastSeen.Load() < cutoff {
+					r.retireFlowLocked(f)
 					_ = f.conn.Close()
 					delete(r.flows, key)
 				}
