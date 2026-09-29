@@ -104,10 +104,6 @@ func (s *FirewallService) StartAutoSync() {
 				if !firewallControlInitialized() {
 					return
 				}
-				auto, err := firewallAutoSync()
-				if err != nil || !auto {
-					return
-				}
 
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
@@ -124,7 +120,17 @@ func (s *FirewallService) StartAutoSync() {
 					return
 				}
 				on, err := backend.enabled(ctx)
-				if err != nil || !on {
+				if err != nil {
+					return
+				}
+				if err := s.reconcileManagedPingStateLocked(on); err != nil {
+					logger.Debug("firewall ping reconcile failed:", err)
+				}
+				if !on {
+					return
+				}
+				auto, err := firewallAutoSync()
+				if err != nil || !auto {
 					return
 				}
 				if err := s.syncManagedSafeLocked(ctx, backend, rememberedFirewallSafetyPort()); err != nil {

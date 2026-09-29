@@ -18,6 +18,11 @@ type FirewallController struct {
 	firewallService service.FirewallService
 }
 
+type firewallStatusResponse struct {
+	service.FirewallManagedStatus
+	PingEnabled bool `json:"pingEnabled"`
+}
+
 func NewFirewallController(g *gin.RouterGroup) *FirewallController {
 	a := &FirewallController{}
 	a.initRouter(g.Group("/firewall"))
@@ -29,9 +34,23 @@ func (a *FirewallController) initRouter(g *gin.RouterGroup) {
 	g.GET("/status", a.status)
 	g.POST("/enabled", a.setEnabled)
 	g.POST("/auto-sync", a.setAutoSync)
+	g.POST("/ping", a.setPing)
 	g.POST("/sync", a.sync)
 	g.POST("/rules/add", a.addRule)
 	g.POST("/rules/delete", a.deleteRule)
+}
+
+func (a *FirewallController) jsonStatus(c *gin.Context, status service.FirewallManagedStatus, err error) {
+	if err != nil {
+		jsonObj(c, status, err)
+		return
+	}
+	pingEnabled, err := a.firewallService.ManagedPingEnabled()
+	if err != nil {
+		jsonObj(c, status, err)
+		return
+	}
+	jsonObj(c, firewallStatusResponse{FirewallManagedStatus: status, PingEnabled: pingEnabled}, nil)
 }
 
 func (a *FirewallController) status(c *gin.Context) {
@@ -40,7 +59,7 @@ func (a *FirewallController) status(c *gin.Context) {
 		return
 	}
 	status, err := a.firewallService.GetManagedStatusSafe(c.Request.Context(), firewallSafetyPort(c))
-	jsonObj(c, status, err)
+	a.jsonStatus(c, status, err)
 }
 
 func (a *FirewallController) initializeControl(c *gin.Context) bool {
@@ -71,7 +90,10 @@ func (a *FirewallController) setEnabled(c *gin.Context) {
 		return
 	}
 	status, err := a.firewallService.SetManagedEnabledSafe(c.Request.Context(), req.Enabled, firewallSafetyPort(c))
-	jsonObj(c, status, err)
+	if err == nil {
+		status, err = a.firewallService.ReconcileManagedPingState(c.Request.Context(), firewallSafetyPort(c))
+	}
+	a.jsonStatus(c, status, err)
 }
 
 func (a *FirewallController) setAutoSync(c *gin.Context) {
@@ -86,7 +108,22 @@ func (a *FirewallController) setAutoSync(c *gin.Context) {
 		return
 	}
 	status, err := a.firewallService.SetManagedAutoSyncPreferenceSafe(c.Request.Context(), req.Enabled, firewallSafetyPort(c))
-	jsonObj(c, status, err)
+	a.jsonStatus(c, status, err)
+}
+
+func (a *FirewallController) setPing(c *gin.Context) {
+	var req struct {
+		Enabled bool `json:"enabled" form:"enabled"`
+	}
+	if err := c.ShouldBind(&req); err != nil {
+		jsonMsg(c, "invalid firewall ping state", err)
+		return
+	}
+	if !a.initializeControl(c) {
+		return
+	}
+	status, err := a.firewallService.SetManagedPingEnabledSafe(c.Request.Context(), req.Enabled, firewallSafetyPort(c))
+	a.jsonStatus(c, status, err)
 }
 
 func (a *FirewallController) sync(c *gin.Context) {
@@ -94,7 +131,7 @@ func (a *FirewallController) sync(c *gin.Context) {
 		return
 	}
 	status, err := a.firewallService.SyncManagedSafe(c.Request.Context(), firewallSafetyPort(c))
-	jsonObj(c, status, err)
+	a.jsonStatus(c, status, err)
 }
 
 func (a *FirewallController) addRule(c *gin.Context) {
@@ -111,7 +148,7 @@ func (a *FirewallController) addRule(c *gin.Context) {
 		return
 	}
 	status, err := a.firewallService.AddManagedManualRuleSafe(c.Request.Context(), req.Port, req.Protocol, req.Label, firewallSafetyPort(c))
-	jsonObj(c, status, err)
+	a.jsonStatus(c, status, err)
 }
 
 func (a *FirewallController) deleteRule(c *gin.Context) {
@@ -127,7 +164,7 @@ func (a *FirewallController) deleteRule(c *gin.Context) {
 		return
 	}
 	status, err := a.firewallService.DeleteManagedManualRuleSafe(c.Request.Context(), req.Port, req.Protocol, firewallSafetyPort(c))
-	jsonObj(c, status, err)
+	a.jsonStatus(c, status, err)
 }
 
 // firewallAutoSyncMiddleware coalesces successful inbound mutation requests

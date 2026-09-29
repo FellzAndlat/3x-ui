@@ -38,6 +38,7 @@ type FirewallStatus = {
   backend: string;
   enabled: boolean;
   autoSync: boolean;
+  pingEnabled: boolean;
   rules: FirewallRule[];
   manualRules: FirewallManualRule[];
   message?: string;
@@ -69,6 +70,9 @@ function useFirewallText() {
             auto: 'Автоматически открывать и закрывать порты подключений',
             autoHint:
               'При создании, изменении, включении или удалении inbound правила синхронизируются автоматически.',
+            ping: 'Разрешить ping (ICMP)',
+            pingHint:
+              'Отвечать на входящие ICMP Echo Request по IPv4 и IPv6. Служебный ICMP остаётся доступен. Настройка применяется, когда файрволл включён.',
             safety:
               'Порт панели, текущий внешний порт панели, порт подписок и SSH защищаются автоматически, чтобы не потерять доступ к серверу.',
             sync: 'Синхронизировать сейчас',
@@ -104,6 +108,9 @@ function useFirewallText() {
             auto: 'Automatically open and close inbound ports',
             autoHint:
               'Rules are synchronized after inbound create, update, enable, disable, and delete.',
+            ping: 'Allow ping (ICMP)',
+            pingHint:
+              'Respond to incoming ICMP Echo Requests over IPv4 and IPv6. Control ICMP remains available. This setting applies while the firewall is enabled.',
             safety:
               'Panel, current external panel port, subscription port, and SSH are protected automatically to prevent lockout.',
             sync: 'Sync now',
@@ -315,6 +322,24 @@ export function FirewallManager() {
             <Typography.Text strong>{text.auto}</Typography.Text>
             <br />
             <Typography.Text type="secondary">{text.autoHint}</Typography.Text>
+          </div>
+        </Space>
+      </div>
+
+      <div>
+        <Space align="start">
+          <Switch
+            checked={Boolean(status.pingEnabled)}
+            disabled={!status.enabled}
+            loading={action === 'ping'}
+            onChange={(checked) =>
+              void post('/panel/api/server/firewall/ping', { enabled: checked }, 'ping')
+            }
+          />
+          <div>
+            <Typography.Text strong>{text.ping}</Typography.Text>
+            <br />
+            <Typography.Text type="secondary">{text.pingHint}</Typography.Text>
           </div>
         </Space>
       </div>
