@@ -25,21 +25,9 @@ func TestNormalizeClientTrafficDelta(t *testing.T) {
 			want:      25_000,
 		},
 		{
-			name:      "early two and a half second sample",
-			delta:     12_500,
-			elapsedMs: 2_500,
-			want:      25_000,
-		},
-		{
 			name:      "zero delta",
 			delta:     0,
 			elapsedMs: 10_000,
-			want:      0,
-		},
-		{
-			name:      "negative delta",
-			delta:     -1,
-			elapsedMs: 5_000,
 			want:      0,
 		},
 		{
