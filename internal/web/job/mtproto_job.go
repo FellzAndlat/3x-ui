@@ -75,8 +75,8 @@ func (j *MtprotoJob) Run() {
 			Down:  d.Down,
 		})
 		if !routedTags[d.Tag] {
-			inboundUp[d.Tag] += d.Up
-			inboundDown[d.Tag] += d.Down
+			inboundUp[d.Tag] = accumulateTrafficDelta(inboundUp[d.Tag], d.Up)
+			inboundDown[d.Tag] = accumulateTrafficDelta(inboundDown[d.Tag], d.Down)
 		}
 	}
 
