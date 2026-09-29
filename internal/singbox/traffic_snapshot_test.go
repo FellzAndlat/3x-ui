@@ -47,7 +47,7 @@ func TestDecodeTrafficConnectionKeepsSnapshotTotals(t *testing.T) {
 	}
 }
 
-func TestNormalizeTrafficSnapshotUsesCumulativeTotals(t *testing.T) {
+func TestNormalizeTrafficSnapshotEstablishesInitialBaseline(t *testing.T) {
 	client := NewConnectionAPIClient()
 
 	first := connectionEvents{Reset: true, Events: []*connectionEvent{{
@@ -61,8 +61,8 @@ func TestNormalizeTrafficSnapshotUsesCumulativeTotals(t *testing.T) {
 		},
 	}}}
 	client.normalizeTrafficSnapshot(&first)
-	if first.Events[0].UplinkDelta != 100 || first.Events[0].DownlinkDelta != 200 {
-		t.Fatalf("first snapshot delta = %d/%d, want 100/200", first.Events[0].UplinkDelta, first.Events[0].DownlinkDelta)
+	if first.Events[0].UplinkDelta != 0 || first.Events[0].DownlinkDelta != 0 {
+		t.Fatalf("initial snapshot replayed historical bytes: %d/%d", first.Events[0].UplinkDelta, first.Events[0].DownlinkDelta)
 	}
 
 	second := connectionEvents{Reset: true, Events: []*connectionEvent{{
@@ -78,6 +78,26 @@ func TestNormalizeTrafficSnapshotUsesCumulativeTotals(t *testing.T) {
 	client.normalizeTrafficSnapshot(&second)
 	if second.Events[0].UplinkDelta != 45 || second.Events[0].DownlinkDelta != 60 {
 		t.Fatalf("second snapshot delta = %d/%d, want 45/60", second.Events[0].UplinkDelta, second.Events[0].DownlinkDelta)
+	}
+}
+
+func TestNormalizeTrafficSnapshotCountsNewConnectionsAfterBaseline(t *testing.T) {
+	client := NewConnectionAPIClient()
+	client.normalizeTrafficSnapshot(&connectionEvents{Reset: true})
+
+	current := connectionEvents{Reset: true, Events: []*connectionEvent{{
+		Type: ConnectionEventOpened,
+		ID:   "conn-new",
+		Connection: &singBoxConnection{
+			Inbound:       "inbound-1",
+			User:          "bob@example",
+			UplinkTotal:   11,
+			DownlinkTotal: 22,
+		},
+	}}}
+	client.normalizeTrafficSnapshot(&current)
+	if current.Events[0].UplinkDelta != 11 || current.Events[0].DownlinkDelta != 22 {
+		t.Fatalf("new connection delta = %d/%d, want 11/22", current.Events[0].UplinkDelta, current.Events[0].DownlinkDelta)
 	}
 }
 
