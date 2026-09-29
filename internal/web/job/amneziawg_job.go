@@ -118,16 +118,18 @@ func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Insta
 				deltaTx = client.TxBytes - prev.tx
 			}
 			if deltaRx > 0 || deltaTx > 0 {
+				up := unsignedTrafficDelta(deltaRx)
+				down := unsignedTrafficDelta(deltaTx)
 				traffic = append(traffic, &xray.Traffic{
 					IsInbound: true,
 					Tag:       inst.Tag,
-					Up:        int64(deltaRx),
-					Down:      int64(deltaTx),
+					Up:        up,
+					Down:      down,
 				})
 				clientTraffic = append(clientTraffic, &xray.ClientTraffic{
 					Email: client.Email,
-					Up:    int64(deltaRx),
-					Down:  int64(deltaTx),
+					Up:    up,
+					Down:  down,
 				})
 			}
 			if !client.LastHandshake.IsZero() && now.Sub(client.LastHandshake) <= amneziaWGOnlineWindow {
