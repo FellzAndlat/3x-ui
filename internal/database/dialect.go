@@ -3,16 +3,24 @@ package database
 import "fmt"
 
 // TrafficMax caps every traffic counter safely below math.MaxInt64 (~9.22e18)
-// so that one more delta can never overflow int64. SQLite silently promotes an
-// overflowing INTEGER to REAL, after which the column no longer scans into the
-// Go int64 field and every reader of the table fails (#5762).
+// so counters remain representable as signed int64 across SQLite, PostgreSQL
+// and Go. Every additive write must still clamp the delta before addition:
+// PostgreSQL evaluates BIGINT arithmetic before LEAST/GREATEST and would
+// otherwise overflow before the outer clamp can run.
 const TrafficMax = int64(9_000_000_000_000_000_000)
 
+// ClampedAddExpr returns a one-placeholder SQL expression that adds a
+// non-negative delta without ever evaluating an intermediate value above
+// TrafficMax. Keeping a single placeholder preserves the call contract used by
+// all traffic writers while making the clamp safe on PostgreSQL BIGINT as well
+// as SQLite INTEGER.
 func ClampedAddExpr(col string) string {
 	if IsPostgres() {
-		return fmt.Sprintf("LEAST(%s + ?, %d)", col, TrafficMax)
+		base := fmt.Sprintf("GREATEST(LEAST(%s, %d), 0)", col, TrafficMax)
+		return fmt.Sprintf("%s + LEAST(GREATEST(CAST(? AS BIGINT), 0), %d - %s)", base, TrafficMax, base)
 	}
-	return fmt.Sprintf("MIN(%s + ?, %d)", col, TrafficMax)
+	base := fmt.Sprintf("MAX(MIN(%s, %d), 0)", col, TrafficMax)
+	return fmt.Sprintf("%s + MIN(MAX(?, 0), %d - %s)", base, TrafficMax, base)
 }
 
 func JSONClientsFromInbound() string {
