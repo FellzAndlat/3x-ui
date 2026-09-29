@@ -70,6 +70,31 @@ func normalizeHiddifyLegacyDomain(value string) (string, error) {
 	return value, nil
 }
 
+// normalizeHiddifyLegacySubscriptionURI keeps migrated Hiddify links on the
+// public HTTPS vhost. Old imports may have persisted the dedicated subscription
+// listener port (for example :2096); that listener is an internal implementation
+// detail for migrated URLs, which must continue to use standard HTTPS/443.
+func normalizeHiddifyLegacySubscriptionURI(value string) string {
+	raw := strings.TrimSpace(value)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return raw
+	}
+	host := parsed.Hostname()
+	if host == "" {
+		return raw
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	parsed.Scheme = "https"
+	parsed.Host = host
+	return parsed.String()
+}
+
 func normalizeHiddifyLegacySubscriptionAlias(alias HiddifyLegacySubscriptionAlias) (HiddifyLegacySubscriptionAlias, error) {
 	path, err := normalizeHiddifyLegacySubPath(alias.Path)
 	if err != nil {
@@ -359,6 +384,7 @@ func (s *SettingService) SaveHiddifySubscriptionURL(alias HiddifyLegacySubscript
 	if err := s.AddHiddifyLegacySubscriptionAlias(alias); err != nil {
 		return err
 	}
+	uri = normalizeHiddifyLegacySubscriptionURI(uri)
 	if uri == "" {
 		return nil
 	}
@@ -391,7 +417,7 @@ func (s *SettingService) GetHiddifySubscriptionURIs() (map[string]string, error)
 	urls := make(map[string]string, len(records))
 	for _, rec := range records {
 		if rec.SubID != "" {
-			urls[rec.SubID] = rec.HiddifySubURI
+			urls[rec.SubID] = normalizeHiddifyLegacySubscriptionURI(rec.HiddifySubURI)
 		}
 	}
 	return urls, nil
