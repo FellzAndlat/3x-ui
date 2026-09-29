@@ -2,7 +2,6 @@ package job
 
 import (
 	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
@@ -21,7 +20,12 @@ type AmneziaWGJob struct {
 	inboundService service.InboundService
 	settingService service.SettingService
 	mu             sync.Mutex
-	lastTraffic    map[string]amneziaWGTrafficSample
+	lastTraffic    map[amneziaWGTrafficKey]amneziaWGTrafficSample
+}
+
+type amneziaWGTrafficKey struct {
+	inboundID int
+	email     string
 }
 
 type amneziaWGTrafficSample struct {
@@ -31,10 +35,34 @@ type amneziaWGTrafficSample struct {
 
 // NewAmneziaWGJob creates a new AmneziaWG reconcile job instance.
 func NewAmneziaWGJob() *AmneziaWGJob {
-	return &AmneziaWGJob{lastTraffic: make(map[string]amneziaWGTrafficSample)}
+	return &AmneziaWGJob{lastTraffic: make(map[amneziaWGTrafficKey]amneziaWGTrafficSample)}
 }
 
 const amneziaWGOnlineWindow = 3 * time.Minute
+
+// pruneAmneziaWGBaselines removes only baselines that are known to be stale.
+// A desired inbound whose diagnostics are temporarily unavailable must retain
+// its baseline; otherwise the next successful cumulative sample would replay
+// already-accounted bytes as fresh traffic.
+func pruneAmneziaWGBaselines(
+	last map[amneziaWGTrafficKey]amneziaWGTrafficSample,
+	desiredIDs map[int]struct{},
+	observedIDs map[int]struct{},
+	current map[amneziaWGTrafficKey]struct{},
+) {
+	for key := range last {
+		if _, desired := desiredIDs[key.inboundID]; !desired {
+			delete(last, key)
+			continue
+		}
+		if _, observed := observedIDs[key.inboundID]; !observed {
+			continue
+		}
+		if _, present := current[key]; !present {
+			delete(last, key)
+		}
+	}
+}
 
 func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Instance) {
 	if coreType != service.CoreTypeSingBox || len(desired) == 0 {
@@ -46,15 +74,19 @@ func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Insta
 	activeEmails := make([]string, 0)
 	activeTags := make([]string, 0)
 	seenActiveTags := make(map[string]struct{})
-	current := make(map[string]struct{})
+	desiredIDs := make(map[int]struct{}, len(desired))
+	observedIDs := make(map[int]struct{}, len(desired))
+	current := make(map[amneziaWGTrafficKey]struct{})
 
 	for _, inst := range desired {
+		desiredIDs[inst.Id] = struct{}{}
 		diag, err := j.inboundService.GetAmneziaWGDiagnostics(inst.Id)
 		if err != nil || !diag.Running {
 			continue
 		}
+		observedIDs[inst.Id] = struct{}{}
 		for _, client := range diag.Clients {
-			key := fmt.Sprintf("%d:%s", inst.Id, client.Email)
+			key := amneziaWGTrafficKey{inboundID: inst.Id, email: client.Email}
 			current[key] = struct{}{}
 			j.mu.Lock()
 			prev := j.lastTraffic[key]
@@ -92,11 +124,7 @@ func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Insta
 	}
 
 	j.mu.Lock()
-	for key := range j.lastTraffic {
-		if _, ok := current[key]; !ok {
-			delete(j.lastTraffic, key)
-		}
-	}
+	pruneAmneziaWGBaselines(j.lastTraffic, desiredIDs, observedIDs, current)
 	j.mu.Unlock()
 
 	if len(traffic) > 0 || len(clientTraffic) > 0 {
