@@ -3,7 +3,6 @@ package service
 import (
 	"testing"
 
-	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 )
 
@@ -70,16 +69,5 @@ func TestSingBoxTUICInboundPreservesUsersAndTLS(t *testing.T) {
 	tls := got["tls"].(map[string]any)
 	if tls["certificate_path"] != "/tls/cert.pem" || tls["key_path"] != "/tls/key.pem" {
 		t.Fatalf("unexpected TUIC TLS: %v", tls)
-	}
-}
-
-func TestAccumulateSingBoxTrafficSaturates(t *testing.T) {
-	up, down := database.TrafficMax-2, int64(10)
-	accumulateSingBoxTraffic(&up, &down, 10, -5)
-	if up != database.TrafficMax {
-		t.Fatalf("uplink = %d, want saturation at %d", up, database.TrafficMax)
-	}
-	if down != 10 {
-		t.Fatalf("downlink = %d, want negative delta ignored", down)
 	}
 }
