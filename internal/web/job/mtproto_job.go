@@ -27,8 +27,8 @@ func NewMtprotoJob() *MtprotoJob {
 // Run reconciles desired mtproto inbounds with running mtg processes and records
 // per-client traffic deltas and online status.
 func (j *MtprotoJob) Run() {
-	// CollectTraffic advances mtg's per-client snapshot baseline. Serialize the
-	// poll so two scheduler runs cannot consume overlapping snapshots.
+	// CollectTrafficConsistent advances mtg's per-client snapshot baseline.
+	// Serialize the poll so two scheduler runs cannot consume overlapping snapshots.
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
@@ -50,7 +50,7 @@ func (j *MtprotoJob) Run() {
 	mgr := mtproto.GetManager()
 	mgr.Reconcile(desired)
 
-	// The manager advances its cumulative-counter baseline when CollectTraffic
+	// The manager advances its cumulative-counter baseline when traffic collection
 	// returns. Retry an uncommitted batch before sampling again so a transient DB
 	// failure cannot create a permanent hole in a client's traffic history.
 	if j.pending.hasData() {
@@ -60,7 +60,7 @@ func (j *MtprotoJob) Run() {
 		}
 	}
 
-	deltas, onlineEmails := mgr.CollectTraffic()
+	deltas, onlineEmails := mgr.CollectTrafficConsistent()
 
 	// A routed inbound's total is already metered through the Xray bridge by
 	// xray_traffic_job, so only non-routed inbounds are rolled up here; per-client
@@ -92,7 +92,7 @@ func (j *MtprotoJob) Run() {
 
 	if len(traffics) > 0 || len(clientTraffics) > 0 {
 		if _, _, err := j.inboundService.AddTraffic(traffics, clientTraffics); err != nil {
-			// CollectTraffic has already moved mtg's baseline. Preserve the exact
+			// The collector has already moved mtg's baseline. Preserve the exact
 			// delta batch and retry it before collecting a newer snapshot.
 			j.pending.remember(traffics, clientTraffics)
 			logger.Warning("mtproto job: add traffic failed; batch queued for retry:", err)
