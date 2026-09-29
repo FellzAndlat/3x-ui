@@ -24,6 +24,18 @@ describe('buildTelemtEndpoint', () => {
       'https://cdn.example/LegacyPath/id/?format=telemt',
     );
   });
+
+  it('does not build a Telemt endpoint without a subscription id', () => {
+    expect(buildTelemtEndpoint('https://sub.example/custom/id/', '')).toBe('');
+  });
+
+  it('rejects malformed page URLs', () => {
+    expect(buildTelemtEndpoint('not a url', 'id')).toBe('');
+  });
+
+  it('rejects non-http page URLs', () => {
+    expect(buildTelemtEndpoint('file:///tmp/sub/id/index.html', 'id')).toBe('');
+  });
 });
 
 describe('resolveSubStatus', () => {
