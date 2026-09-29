@@ -53,11 +53,14 @@ func GreatestExpr(a, b string) string {
 // now, deltaUp, deltaDown. Mirrors nodeDisableIsStale (#6228 / #4917).
 func ClientTrafficEnableMergeExpr() string {
 	if IsPostgres() {
+		// Use NUMERIC for the quota comparison. BIGINT addition can overflow
+		// before the comparison is evaluated when a stored counter is near its
+		// upper bound and a remote node reports a large delta.
 		return `CASE
 			WHEN ?::boolean THEN enable::boolean
 			WHEN (expiry_time <> CAST(? AS BIGINT) OR total <> CAST(? AS BIGINT))
 				AND (expiry_time <= 0 OR expiry_time > CAST(? AS BIGINT))
-				AND (total <= 0 OR up + ? + down + ? < total) THEN enable::boolean
+				AND (total <= 0 OR CAST(up AS NUMERIC) + CAST(? AS NUMERIC) + CAST(down AS NUMERIC) + CAST(? AS NUMERIC) < CAST(total AS NUMERIC)) THEN enable::boolean
 			ELSE false
 		END`
 	}
