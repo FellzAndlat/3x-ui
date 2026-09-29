@@ -60,8 +60,8 @@ func (j *ExternalVPNJob) Run() {
 		if inbound[row.Tag] == nil {
 			inbound[row.Tag] = &xray.Traffic{Tag: row.Tag, IsInbound: true}
 		}
-		inbound[row.Tag].Up += row.Up
-		inbound[row.Tag].Down += row.Down
+		inbound[row.Tag].Up = accumulateTrafficDelta(inbound[row.Tag].Up, row.Up)
+		inbound[row.Tag].Down = accumulateTrafficDelta(inbound[row.Tag].Down, row.Down)
 		clients = append(clients, &xray.ClientTraffic{Email: row.Email, Up: row.Up, Down: row.Down})
 	}
 	totals := make([]*xray.Traffic, 0, len(inbound))
