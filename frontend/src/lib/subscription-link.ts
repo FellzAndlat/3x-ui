@@ -10,12 +10,13 @@ export function clientSubscriptionLink(
 ): string {
   if (!subId) return '';
 
-  // The panel must always advertise the currently configured subscription URL.
-  // Imported Hiddify URLs are legacy aliases kept only so already-issued links
-  // continue to work; they must not override a new subscription port in the UI.
-  if (settings?.subURI) return `${settings.subURI}${subId}`;
-
+  // Imported Hiddify clients keep their dedicated public HTTPS/443 alias.
+  // This per-client URL must win over the regular subscription listener so
+  // changing subPort/subPath never rewrites Hiddify links. Ordinary clients
+  // have no legacy override and continue to use the configured subURI below.
   const legacy = clientOverride || settings?.hiddifySubURIs?.[subId];
   if (legacy) return `${legacy.replace(/\/$/, '')}/${subId}/`;
+
+  if (settings?.subURI) return `${settings.subURI}${subId}`;
   return '';
 }
