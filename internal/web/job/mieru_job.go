@@ -78,8 +78,8 @@ func (j *MieruJob) Run() {
 				}
 				inboundByTag[delta.Tag] = traffic
 			}
-			traffic.Up += delta.Up
-			traffic.Down += delta.Down
+			traffic.Up = accumulateTrafficDelta(traffic.Up, delta.Up)
+			traffic.Down = accumulateTrafficDelta(traffic.Down, delta.Down)
 		}
 
 		// Feed zero-byte activity for connected clients as well. This lets the
