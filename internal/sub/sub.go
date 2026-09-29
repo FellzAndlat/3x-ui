@@ -308,16 +308,19 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 		}
 
 		// Legacy Hiddify pages must keep their JS/CSS requests below the imported
-		// proxy_path_client prefix. Telemt Nginx intentionally exposes only that
-		// prefix, so sending the SPA bundle to the normal /sub/assets path would
-		// fall through to the WEB Proxy decoy and leave the browser page blank.
+		// proxy_path_client prefix. These assets are served by the subscription
+		// engine only for requests internally forwarded by the public panel listener;
+		// exposing them directly on subPort would make the Hiddify page available
+		// through the generic subscription listener again.
 		engine.Use(func(c *gin.Context) {
-			aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
-			if err == nil {
-				if assetPath, ok := legacyHiddifyAssetPath(c.Request.URL.Path, aliases); ok {
-					c.FileFromFS(assetPath, assetsFS)
-					c.Abort()
-					return
+			if isLegacyHiddifyPanelForward(c.Request) {
+				aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
+				if err == nil {
+					if assetPath, ok := legacyHiddifyAssetPath(c.Request.URL.Path, aliases); ok {
+						c.FileFromFS(assetPath, assetsFS)
+						c.Abort()
+						return
+					}
 				}
 			}
 			c.Next()
@@ -362,12 +365,26 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	)
 	registerTelemtSubscriptionRoute(g)
 
-	// Hiddify migration keeps the original /<proxy_path_client>/<UUID>/ URL as
-	// a compatibility alias. NoRoute is used so configured 3x-ui paths keep
-	// precedence and legacy aliases can be added by an import without restart.
+	// Keep the compatibility handler registered so the panel can dispatch an
+	// imported Hiddify URL into this engine in-process. The handler itself rejects
+	// external requests that arrive directly on the generic subscription listener.
 	engine.NoRoute(s.legacyHiddifySubscription)
 
 	return engine, nil
+}
+
+type legacyHiddifyPanelForwardKey struct{}
+
+func markLegacyHiddifyPanelForward(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), legacyHiddifyPanelForwardKey{}, true))
+}
+
+func isLegacyHiddifyPanelForward(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	forwarded, _ := r.Context().Value(legacyHiddifyPanelForwardKey{}).(bool)
+	return forwarded
 }
 
 func (s *Server) subscriptionDomainValidator(primary string) gin.HandlerFunc {
@@ -379,18 +396,20 @@ func (s *Server) subscriptionDomainValidator(primary string) gin.HandlerFunc {
 			return
 		}
 
-		// Legacy Hiddify URLs are intentionally host-independent after migration.
-		// Their static assets are served below the same secret alias so browser
-		// pages work on the migrated public domain as well.
-		aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
-		if err == nil {
-			if subID, ok := legacyHiddifySubID(c.Request.URL.Path, aliases); ok && s.settingService.IsHiddifySubscriptionPath(subID, c.Request.URL.Path) {
-				c.Next()
-				return
-			}
-			if _, ok := legacyHiddifyAssetPath(c.Request.URL.Path, aliases); ok {
-				c.Next()
-				return
+		// A legacy Hiddify URL may intentionally use its imported public domain,
+		// but only when the main panel listener already validated and forwarded it.
+		// Direct requests on subPort must obey the normal subscription domain rule.
+		if isLegacyHiddifyPanelForward(c.Request) {
+			aliases, err := s.settingService.GetHiddifyLegacySubscriptionAliases()
+			if err == nil {
+				if subID, ok := legacyHiddifySubID(c.Request.URL.Path, aliases); ok && s.settingService.IsHiddifySubscriptionPath(subID, c.Request.URL.Path) {
+					c.Next()
+					return
+				}
+				if _, ok := legacyHiddifyAssetPath(c.Request.URL.Path, aliases); ok {
+					c.Next()
+					return
+				}
 			}
 		}
 
@@ -409,6 +428,13 @@ func normalizeRequestHost(host string) string {
 }
 
 func (s *Server) legacyHiddifySubscription(c *gin.Context) {
+	// The Hiddify compatibility URL belongs to the public panel/web listener,
+	// not to the generic subscription listener. Serve it only after the panel
+	// has explicitly forwarded the validated request in-process.
+	if !isLegacyHiddifyPanelForward(c.Request) {
+		c.Status(http.StatusNotFound)
+		return
+	}
 	if c.Request.Method != http.MethodGet && c.Request.Method != http.MethodHead {
 		c.Status(http.StatusNotFound)
 		return
@@ -513,7 +539,7 @@ func (s *Server) ServeLegacySubscription(w http.ResponseWriter, r *http.Request)
 	if handler == nil {
 		return false
 	}
-	handler.ServeHTTP(w, r)
+	handler.ServeHTTP(w, markLegacyHiddifyPanelForward(r))
 	return true
 }
 
