@@ -337,7 +337,7 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
       {messageContextHolder}
       {modalContextHolder}
       <Tabs
-        defaultActiveKey="1"
+        defaultActiveKey="3"
         items={[
           {
             key: '1',
