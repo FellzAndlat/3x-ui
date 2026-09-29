@@ -15,23 +15,12 @@ import (
 
 var validate = validator.New(validator.WithRequiredStructEnabled())
 
-type boundRequestNormalizer interface {
-	NormalizeBoundRequest(*gin.Context)
-}
-
-func normalizeBoundRequest(c *gin.Context, dst any) {
-	if normalizer, ok := dst.(boundRequestNormalizer); ok {
-		normalizer.NormalizeBoundRequest(c)
-	}
-}
-
 func BindAndValidate[T any](c *gin.Context) (*T, bool) {
 	var dst T
 	if err := c.ShouldBind(&dst); err != nil {
 		writeBindFailure(c, err)
 		return nil, false
 	}
-	normalizeBoundRequest(c, &dst)
 	if err := validate.Struct(&dst); err != nil {
 		writeBindFailure(c, err)
 		return nil, false
@@ -44,7 +33,6 @@ func BindAndValidateInto(c *gin.Context, dst any) bool {
 		writeBindFailure(c, err)
 		return false
 	}
-	normalizeBoundRequest(c, dst)
 	if err := validate.Struct(dst); err != nil {
 		writeBindFailure(c, err)
 		return false
@@ -58,7 +46,6 @@ func BindJSONAndValidate[T any](c *gin.Context) (*T, bool) {
 		writeBindFailure(c, err)
 		return nil, false
 	}
-	normalizeBoundRequest(c, &dst)
 	if err := validate.Struct(&dst); err != nil {
 		writeBindFailure(c, err)
 		return nil, false
@@ -71,7 +58,6 @@ func BindJSONAndValidateInto(c *gin.Context, dst any) bool {
 		writeBindFailure(c, err)
 		return false
 	}
-	normalizeBoundRequest(c, dst)
 	if err := validate.Struct(dst); err != nil {
 		writeBindFailure(c, err)
 		return false
