@@ -182,3 +182,117 @@ func TestNormalizeTrafficSnapshotKeepsBaselineAcrossTemporaryAbsence(t *testing.
 		t.Fatalf("temporary absence lost traffic baseline: up=%d down=%d", reappeared.Events[0].UplinkDelta, reappeared.Events[0].DownlinkDelta)
 	}
 }
+
+func TestNormalizeTrafficSnapshotTracksSameUserConnectionsIndependently(t *testing.T) {
+	client := &ConnectionAPIClient{}
+	first := connectionEvents{Reset: true, Events: []*connectionEvent{
+		{
+			ID: "conn-a",
+			Connection: &singBoxConnection{
+				ID:            "conn-a",
+				Inbound:       "in-tuic",
+				User:          "shared@example",
+				CreatedAt:     500,
+				UplinkTotal:   100,
+				DownlinkTotal: 200,
+			},
+		},
+		{
+			ID: "conn-b",
+			Connection: &singBoxConnection{
+				ID:            "conn-b",
+				Inbound:       "in-vless",
+				User:          "shared@example",
+				CreatedAt:     600,
+				UplinkTotal:   300,
+				DownlinkTotal: 400,
+			},
+		},
+	}}
+	client.normalizeTrafficSnapshot(&first, 1_000)
+
+	second := connectionEvents{Reset: true, Events: []*connectionEvent{
+		{
+			ID: "conn-a",
+			Connection: &singBoxConnection{
+				ID:            "conn-a",
+				Inbound:       "in-tuic",
+				User:          "shared@example",
+				CreatedAt:     500,
+				UplinkTotal:   130,
+				DownlinkTotal: 225,
+			},
+		},
+		{
+			ID: "conn-b",
+			Connection: &singBoxConnection{
+				ID:            "conn-b",
+				Inbound:       "in-vless",
+				User:          "shared@example",
+				CreatedAt:     600,
+				UplinkTotal:   307,
+				DownlinkTotal: 450,
+			},
+		},
+	}}
+	client.normalizeTrafficSnapshot(&second, 2_000)
+
+	if second.Events[0].UplinkDelta != 30 || second.Events[0].DownlinkDelta != 25 {
+		t.Fatalf("conn-a delta = %d/%d, want 30/25", second.Events[0].UplinkDelta, second.Events[0].DownlinkDelta)
+	}
+	if second.Events[1].UplinkDelta != 7 || second.Events[1].DownlinkDelta != 50 {
+		t.Fatalf("conn-b delta = %d/%d, want 7/50", second.Events[1].UplinkDelta, second.Events[1].DownlinkDelta)
+	}
+}
+
+func TestNormalizeTrafficSnapshotResetsMissingGraceWhenConnectionReturns(t *testing.T) {
+	client := &ConnectionAPIClient{}
+	first := connectionEvents{Reset: true, Events: []*connectionEvent{{
+		ID: "conn-gap",
+		Connection: &singBoxConnection{
+			ID:            "conn-gap",
+			CreatedAt:     500,
+			UplinkTotal:   100,
+			DownlinkTotal: 100,
+		},
+	}}}
+	client.normalizeTrafficSnapshot(&first, 1_000)
+
+	snapshotAt := int64(2_000)
+	for i := 0; i < trafficSnapshotMissingGrace-2; i++ {
+		client.normalizeTrafficSnapshot(&connectionEvents{Reset: true}, snapshotAt)
+		snapshotAt += 1_000
+	}
+	returned := connectionEvents{Reset: true, Events: []*connectionEvent{{
+		ID: "conn-gap",
+		Connection: &singBoxConnection{
+			ID:            "conn-gap",
+			CreatedAt:     500,
+			UplinkTotal:   125,
+			DownlinkTotal: 130,
+		},
+	}}}
+	client.normalizeTrafficSnapshot(&returned, snapshotAt)
+	if returned.Events[0].UplinkDelta != 25 || returned.Events[0].DownlinkDelta != 30 {
+		t.Fatalf("first returned delta = %d/%d, want 25/30", returned.Events[0].UplinkDelta, returned.Events[0].DownlinkDelta)
+	}
+
+	snapshotAt += 1_000
+	for i := 0; i < trafficSnapshotMissingGrace-2; i++ {
+		client.normalizeTrafficSnapshot(&connectionEvents{Reset: true}, snapshotAt)
+		snapshotAt += 1_000
+	}
+	returnedAgain := connectionEvents{Reset: true, Events: []*connectionEvent{{
+		ID: "conn-gap",
+		Connection: &singBoxConnection{
+			ID:            "conn-gap",
+			CreatedAt:     500,
+			UplinkTotal:   140,
+			DownlinkTotal: 150,
+		},
+	}}}
+	client.normalizeTrafficSnapshot(&returnedAgain, snapshotAt)
+	if returnedAgain.Events[0].UplinkDelta != 15 || returnedAgain.Events[0].DownlinkDelta != 20 {
+		t.Fatalf("second returned delta = %d/%d, want 15/20", returnedAgain.Events[0].UplinkDelta, returnedAgain.Events[0].DownlinkDelta)
+	}
+}
