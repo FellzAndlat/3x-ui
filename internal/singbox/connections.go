@@ -400,7 +400,7 @@ func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvent
 		if exists {
 			event.UplinkDelta = trafficCounterDelta(connection.UplinkTotal, previous.uplink)
 			event.DownlinkDelta = trafficCounterDelta(connection.DownlinkTotal, previous.downlink)
-		} else {
+		} else if c.trafficInitialized {
 			event.UplinkDelta = connection.UplinkTotal
 			event.DownlinkDelta = connection.DownlinkTotal
 		}
@@ -424,13 +424,15 @@ func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvent
 		snapshot.missingSnapshots++
 		c.trafficSnapshots[id] = snapshot
 	}
+	c.trafficInitialized = true
 }
 
 // SnapshotTrafficEvents is a low-allocation variant used by the traffic poll.
 // SubscribeConnections always starts with Reset=true and cumulative connection
 // totals. Convert that reset snapshot to deltas locally because this poll uses
 // a short-lived stream and therefore never waits for the server's later update
-// events.
+// events. The first successful snapshot only establishes baselines so attaching
+// to an already-running sing-box process cannot replay previously stored bytes.
 func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connectionEvents, error) {
 	if err := c.connFor(ctx); err != nil {
 		return connectionEvents{}, err
@@ -458,8 +460,9 @@ func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connec
 }
 
 type ConnectionAPIClient struct {
-	conn             *grpc.ClientConn
-	trafficSnapshots map[string]connectionTrafficSnapshot
+	conn               *grpc.ClientConn
+	trafficSnapshots   map[string]connectionTrafficSnapshot
+	trafficInitialized bool
 }
 
 func NewConnectionAPIClient() *ConnectionAPIClient { return &ConnectionAPIClient{} }
