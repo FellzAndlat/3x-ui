@@ -43,7 +43,7 @@ func (j *MieruJob) Run() {
 	// A failed AddTraffic must be retried before asking the manager for another
 	// delta snapshot; otherwise its cursor moves forward and those bytes are lost.
 	if j.pending.hasData() {
-		needRestart, _, retryErr := j.pending.flush(&j.inboundService)
+		needRestart, _, retryErr := j.pending.flush(j.inboundService.AddTraffic)
 		if retryErr != nil {
 			logger.Warning("mieru job: retry pending traffic failed:", retryErr)
 			return
