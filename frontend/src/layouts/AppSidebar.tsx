@@ -70,6 +70,7 @@ type IconName =
   | 'setting'
   | 'cluster'
   | 'hosts'
+  | 'firewall'
   | 'logout'
   | 'outbound'
   | 'routing'
@@ -83,6 +84,7 @@ const iconByName: Record<IconName, ComponentType> = {
   setting: SettingOutlined,
   cluster: ClusterOutlined,
   hosts: GlobalOutlined,
+  firewall: SafetyOutlined,
   logout: LogoutOutlined,
   outbound: ExportOutlined,
   routing: SwapOutlined,
@@ -103,7 +105,7 @@ function saveSidebarPinned(pinned: boolean) {
 }
 
 function AppSidebar() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { mode } = useTheme();
   const navigate = useNavigate();
   const { pathname, hash } = useLocation();
@@ -112,6 +114,11 @@ function AppSidebar() {
   const showSubBalancers = !!allSetting.subJsonEnable;
   const isXray = allSetting.coreType === 'xray';
   const isSingBox = allSetting.coreType === 'sing-box';
+  const firewallTitle = (i18n.resolvedLanguage || i18n.language || '')
+    .toLowerCase()
+    .startsWith('ru')
+    ? 'Файрволл'
+    : 'Firewall';
   const [hovered, setHovered] = useState(() => hoveredAcrossRemounts);
   const [pinned, setPinned] = useState(readSidebarPinned);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -263,6 +270,7 @@ function AppSidebar() {
       { key: '/groups', icon: 'groups' as IconName, title: t('menu.groups') },
       { key: '/nodes', icon: 'cluster' as IconName, title: t('menu.nodes') },
       { key: '/hosts', icon: 'hosts' as IconName, title: t('menu.hosts') },
+      { key: '/firewall', icon: 'firewall' as IconName, title: firewallTitle },
       { key: '/outbound', icon: 'outbound' as IconName, title: t('menu.outbounds') },
       { key: '/routing', icon: 'routing' as IconName, title: t('menu.routing') },
       { key: '/telemt', icon: 'telemt' as IconName, title: t('menu.telemt') },
@@ -290,7 +298,7 @@ function AppSidebar() {
       { key: LOGOUT_KEY, icon: 'logout' as IconName, title: t('logout') },
     ];
     return base;
-  }, [t, isXray, isSingBox, xrayChildren, singBoxChildren]);
+  }, [t, firewallTitle, isXray, isSingBox, xrayChildren, singBoxChildren]);
 
   const navItems = useMemo(() => tabs.filter((tab) => tab.icon !== 'logout'), [tabs]);
   const utilItems = useMemo(() => tabs.filter((tab) => tab.icon === 'logout'), [tabs]);

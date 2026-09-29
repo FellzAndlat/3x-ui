@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
@@ -49,6 +49,10 @@ type Props = {
   onClose: () => void;
 };
 
+type FirewallManagerProps = {
+  active?: boolean;
+};
+
 function rulePort(rule: FirewallRule) {
   return rule.portRange || String(rule.port || '');
 }
@@ -59,10 +63,11 @@ function rulePortStart(rule: FirewallRule) {
   return Number.isFinite(value) ? value : 0;
 }
 
-export function FirewallModal({ open, onClose }: Props) {
+function useFirewallText() {
   const { i18n } = useTranslation();
   const ru = (i18n.resolvedLanguage || i18n.language || '').toLowerCase().startsWith('ru');
-  const text = useMemo(
+
+  return useMemo(
     () =>
       ru
         ? {
@@ -139,7 +144,10 @@ export function FirewallModal({ open, onClose }: Props) {
           },
     [ru],
   );
+}
 
+export function FirewallManager({ active = true }: FirewallManagerProps) {
+  const text = useFirewallText();
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [action, setAction] = useState('');
@@ -147,7 +155,7 @@ export function FirewallModal({ open, onClose }: Props) {
   const [protocol, setProtocol] = useState('both');
   const [label, setLabel] = useState('');
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const msg = await HttpUtil.get<FirewallStatus>('/panel/api/server/firewall/status');
@@ -155,7 +163,11 @@ export function FirewallModal({ open, onClose }: Props) {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    if (active) void refresh();
+  }, [active, refresh]);
 
   async function post(path: string, data?: Record<string, unknown>, key = path) {
     setAction(key);
@@ -260,140 +272,137 @@ export function FirewallModal({ open, onClose }: Props) {
 
   const supported = status?.supported ?? false;
 
+  if (!status) {
+    return <Typography.Text type="secondary">{text.loading}</Typography.Text>;
+  }
+
+  if (!supported) {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        title={status.message || text.unsupported}
+        description={text.unsupported}
+      />
+    );
+  }
+
   return (
-    <Modal
-      open={open}
-      onCancel={onClose}
-      afterOpenChange={(visible) => {
-        if (visible) void refresh();
-      }}
-      footer={null}
-      title={text.title}
-      width={900}
-    >
-      {!status ? (
-        <Typography.Text type="secondary">{text.loading}</Typography.Text>
-      ) : !supported ? (
-        <Alert
-          type="warning"
-          showIcon
-          title={status.message || text.unsupported}
-          description={text.unsupported}
-        />
-      ) : (
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Space size="large" wrap>
-            <Space>
-              <Switch
-                checked={Boolean(status.enabled)}
-                loading={action === 'enabled'}
-                onChange={(checked) =>
-                  void post('/panel/api/server/firewall/enabled', { enabled: checked }, 'enabled')
-                }
-              />
-              <Typography.Text strong>
-                {status.enabled ? text.enabled : text.disabled}
-              </Typography.Text>
-            </Space>
-            <Tag>{status.backend}</Tag>
-            <Button
-              loading={action === 'sync'}
-              onClick={() => void post('/panel/api/server/firewall/sync', undefined, 'sync')}
-            >
-              {text.sync}
-            </Button>
-          </Space>
-
-          <Alert type="info" showIcon title={text.safety} />
-
-          <div>
-            <Space align="start">
-              <Switch
-                checked={Boolean(status.autoSync)}
-                loading={action === 'auto'}
-                onChange={(checked) =>
-                  void post('/panel/api/server/firewall/auto-sync', { enabled: checked }, 'auto')
-                }
-              />
-              <div>
-                <Typography.Text strong>{text.auto}</Typography.Text>
-                <br />
-                <Typography.Text type="secondary">{text.autoHint}</Typography.Text>
-              </div>
-            </Space>
-          </div>
-
-          <Divider titlePlacement="start">{text.rules}</Divider>
-          <Table<FirewallRule>
-            size="small"
-            rowKey={(rule) => `${rulePort(rule)}-${rule.protocol}-${rule.source}`}
-            columns={ruleColumns}
-            dataSource={status.rules || []}
-            pagination={false}
-            scroll={{ x: 620 }}
+    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+      <Space size="large" wrap>
+        <Space>
+          <Switch
+            checked={Boolean(status.enabled)}
+            loading={action === 'enabled'}
+            onChange={(checked) =>
+              void post('/panel/api/server/firewall/enabled', { enabled: checked }, 'enabled')
+            }
           />
-
-          <Divider titlePlacement="start">{text.manual}</Divider>
-          <Space wrap>
-            <InputNumber
-              min={1}
-              max={65535}
-              value={port}
-              placeholder={text.port}
-              onChange={(value) => setPort(value)}
-              style={{ width: 140 }}
-            />
-            <Select
-              value={protocol}
-              onChange={setProtocol}
-              style={{ width: 130 }}
-              options={[
-                { value: 'both', label: 'TCP + UDP' },
-                { value: 'tcp', label: 'TCP' },
-                { value: 'udp', label: 'UDP' },
-              ]}
-            />
-            <Input
-              value={label}
-              maxLength={120}
-              placeholder={text.labelPlaceholder}
-              onChange={(event) => setLabel(event.target.value)}
-              style={{ width: 290 }}
-            />
-            <Button
-              type="primary"
-              disabled={!port}
-              loading={action === 'add'}
-              onClick={() => {
-                if (!port) return;
-                void post(
-                  '/panel/api/server/firewall/rules/add',
-                  { port, protocol, label },
-                  'add',
-                ).then((success) => {
-                  if (success) {
-                    setPort(null);
-                    setLabel('');
-                  }
-                });
-              }}
-            >
-              {text.add}
-            </Button>
-          </Space>
-          <Table<FirewallManualRule>
-            size="small"
-            rowKey={(rule) => `${rule.port}-${rule.protocol}`}
-            columns={manualColumns}
-            dataSource={status.manualRules || []}
-            pagination={false}
-            locale={{ emptyText: text.noManual }}
-          />
+          <Typography.Text strong>{status.enabled ? text.enabled : text.disabled}</Typography.Text>
         </Space>
-      )}
-      {loading && status ? (
-        <Typography.Text type="secondary"> {text.loading}</Typography.Text>
-      ) : null}
+        <Tag>{status.backend}</Tag>
+        <Button
+          loading={action === 'sync' || loading}
+          onClick={() => void post('/panel/api/server/firewall/sync', undefined, 'sync')}
+        >
+          {text.sync}
+        </Button>
+      </Space>
+
+      <Alert type="info" showIcon title={text.safety} />
+
+      <div>
+        <Space align="start">
+          <Switch
+            checked={Boolean(status.autoSync)}
+            loading={action === 'auto'}
+            onChange={(checked) =>
+              void post('/panel/api/server/firewall/auto-sync', { enabled: checked }, 'auto')
+            }
+          />
+          <div>
+            <Typography.Text strong>{text.auto}</Typography.Text>
+            <br />
+            <Typography.Text type="secondary">{text.autoHint}</Typography.Text>
+          </div>
+        </Space>
+      </div>
+
+      <Divider titlePlacement="start">{text.rules}</Divider>
+      <Table<FirewallRule>
+        size="small"
+        rowKey={(rule) => `${rulePort(rule)}-${rule.protocol}-${rule.source}`}
+        columns={ruleColumns}
+        dataSource={status.rules || []}
+        pagination={false}
+        scroll={{ x: 620 }}
+      />
+
+      <Divider titlePlacement="start">{text.manual}</Divider>
+      <Space wrap>
+        <InputNumber
+          min={1}
+          max={65535}
+          value={port}
+          placeholder={text.port}
+          onChange={(value) => setPort(value)}
+          style={{ width: 140 }}
+        />
+        <Select
+          value={protocol}
+          onChange={setProtocol}
+          style={{ width: 130 }}
+          options={[
+            { value: 'both', label: 'TCP + UDP' },
+            { value: 'tcp', label: 'TCP' },
+            { value: 'udp', label: 'UDP' },
+          ]}
+        />
+        <Input
+          value={label}
+          maxLength={120}
+          placeholder={text.labelPlaceholder}
+          onChange={(event) => setLabel(event.target.value)}
+          style={{ width: 290 }}
+        />
+        <Button
+          type="primary"
+          disabled={!port}
+          loading={action === 'add'}
+          onClick={() => {
+            if (!port) return;
+            void post('/panel/api/server/firewall/rules/add', { port, protocol, label }, 'add').then(
+              (success) => {
+                if (success) {
+                  setPort(null);
+                  setLabel('');
+                }
+              },
+            );
+          }}
+        >
+          {text.add}
+        </Button>
+      </Space>
+      <Table<FirewallManualRule>
+        size="small"
+        rowKey={(rule) => `${rule.port}-${rule.protocol}`}
+        columns={manualColumns}
+        dataSource={status.manualRules || []}
+        pagination={false}
+        locale={{ emptyText: text.noManual }}
+      />
+      {loading ? <Typography.Text type="secondary">{text.loading}</Typography.Text> : null}
+    </Space>
+  );
+}
+
+export function FirewallModal({ open, onClose }: Props) {
+  const text = useFirewallText();
+
+  return (
+    <Modal open={open} onCancel={onClose} footer={null} title={text.title} width={900} destroyOnHidden>
+      <FirewallManager active={open} />
     </Modal>
   );
 }
