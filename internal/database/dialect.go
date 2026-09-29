@@ -52,7 +52,11 @@ func GreatestExpr(a, b string) string {
 // ClientTrafficEnableMergeExpr: placeholders nodeEnable, nodeExpiry, nodeTotal,
 // now, deltaUp, deltaDown. Mirrors nodeDisableIsStale (#6228 / #4917).
 func ClientTrafficEnableMergeExpr() string {
-	if IsPostgres() {
+	return clientTrafficEnableMergeExpr(IsPostgres())
+}
+
+func clientTrafficEnableMergeExpr(postgres bool) string {
+	if postgres {
 		// Use NUMERIC for the quota comparison. BIGINT addition can overflow
 		// before the comparison is evaluated when a stored counter is near its
 		// upper bound and a remote node reports a large delta.
