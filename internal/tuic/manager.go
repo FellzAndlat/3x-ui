@@ -127,7 +127,7 @@ func (m *Manager) startLocked(inst Instance, uuidToEmail map[string]string) (*Pr
 		_ = RemoveConfigFile(inst.Id)
 		return nil, nil, "", fmt.Errorf("tuic: listen on %s for %d: %w", inst.BindTo(), inst.Id, err)
 	}
-	proc := newProcess(configPath, inst.Tag, uuidToEmail)
+	proc := newProcess(configPath, inst.Tag, uuidToEmail, relay.bindPeer)
 	if err := proc.Start(); err != nil {
 		relay.Close()
 		_ = RemoveConfigFile(inst.Id)
@@ -166,6 +166,53 @@ type InboundTrafficDelta struct {
 	Down int64
 }
 
+type ClientTrafficDelta struct {
+	Tag   string
+	Email string
+	Up    int64
+	Down  int64
+}
+
+type TrafficSnapshot struct {
+	Inbounds []InboundTrafficDelta
+	Clients  []ClientTrafficDelta
+}
+
+// CollectTrafficSnapshot atomically samples both the aggregate relay counters
+// and the per-email counters attributed from authenticated tuic-server peers.
+// The two counter sets have independent cursors: an unbound flow is retained on
+// the per-client side until authentication identifies it, while the inbound
+// aggregate can still be committed every poll.
+func (m *Manager) CollectTrafficSnapshot() TrafficSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out TrafficSnapshot
+	for _, mg := range m.procs {
+		if mg.relay == nil || mg.proc == nil || !mg.proc.IsRunning() {
+			continue
+		}
+		deltaUp, deltaDown := mg.relay.CollectTraffic()
+		if deltaUp > 0 || deltaDown > 0 {
+			out.Inbounds = append(out.Inbounds, InboundTrafficDelta{
+				Tag:  mg.tag,
+				Up:   deltaUp,
+				Down: deltaDown,
+			})
+		}
+		for _, d := range mg.relay.CollectClientTraffic() {
+			out.Clients = append(out.Clients, ClientTrafficDelta{
+				Tag:   mg.tag,
+				Email: d.Email,
+				Up:    d.Up,
+				Down:  d.Down,
+			})
+		}
+	}
+	return out
+}
+
+// CollectTraffic is kept for package/API compatibility with callers that only
+// need inbound totals. It intentionally leaves the per-client cursor untouched.
 func (m *Manager) CollectTraffic() []InboundTrafficDelta {
 	m.mu.Lock()
 	defer m.mu.Unlock()
