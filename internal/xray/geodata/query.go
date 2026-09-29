@@ -2,6 +2,37 @@ package geodata
 
 import "strings"
 
+// AllEntries reads one category in a single scan for core configuration
+// generation. Unlike Entries, this is not a browser endpoint; refuse very
+// large categories rather than allocating an unbounded sing-box config.
+func (s *Store) AllEntries(name, code string, maxEntries int) ([]GeoEntry, error) {
+	idx, err := s.index(name)
+	if err != nil {
+		return nil, err
+	}
+	code = strings.ToLower(strings.TrimSpace(code))
+	category, ok := idx.byCode[code]
+	if !ok {
+		return nil, ErrUnknownCategory
+	}
+	if maxEntries < 1 || category.Entries > maxEntries {
+		return nil, ErrFileTooLarge
+	}
+	if _, err := s.resolve(name); err != nil {
+		return nil, err
+	}
+	s.scan.Lock()
+	defer s.scan.Unlock()
+	page, err := scanEntriesFromSpans(s.dir, name, idx.spans[code], idx.kind, code, "", 0, maxEntries)
+	if err != nil {
+		return nil, err
+	}
+	if page.Total > maxEntries {
+		return nil, ErrFileTooLarge
+	}
+	return page.Items, nil
+}
+
 // Categories returns the database's categories, filtered by a case-insensitive
 // substring of the category code. A non-positive limit returns all of them:
 // the category index is small even for the largest databases, and the panel

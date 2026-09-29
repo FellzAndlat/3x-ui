@@ -21,6 +21,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/tuic"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/tail"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
+	"github.com/SawaMEN/3x-ui/v3/internal/xray/geodata"
 )
 
 var (
@@ -165,7 +166,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 				}
 			}
 			if rawRouting, ok := xrayCfg["routing"].(map[string]any); ok && len(rawRouting) > 0 {
-				if route, err := singbox.TranslateXrayRouting(rawRouting); err != nil {
+				if route, err := singbox.TranslateXrayRoutingWithGeoData(rawRouting, geodata.NewStore(filepath.Dir(singbox.GetBinaryPath()))); err != nil {
 					return nil, err
 				} else if len(route) > 0 {
 					cfg.Route = route

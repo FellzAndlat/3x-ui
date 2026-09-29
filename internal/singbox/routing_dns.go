@@ -7,12 +7,21 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/xray/geodata"
 )
 
 // TranslateXrayRouting provides a compile-safe compatibility layer for the
 // panel's Xray routing configuration. Unsupported legacy matchers are rejected
 // instead of being emitted as invalid sing-box fields.
 func TranslateXrayRouting(raw map[string]any) (map[string]any, error) {
+	return TranslateXrayRoutingWithGeoData(raw, nil)
+}
+
+// TranslateXrayRoutingWithGeoData expands the categories in Xray's .dat files
+// into sing-box matchers. Never omit a failed category: doing so could send
+// traffic through a different outbound than the administrator configured.
+func TranslateXrayRoutingWithGeoData(raw map[string]any, store *geodata.Store) (map[string]any, error) {
 	out := map[string]any{}
 	rulesRaw, ok := raw["rules"].([]any)
 	if raw["rules"] != nil && !ok {
@@ -49,6 +58,27 @@ func TranslateXrayRouting(raw map[string]any) (map[string]any, error) {
 			domains = compatStringSlice(xr["domains"])
 		}
 		if len(domains) > 0 {
+			var expanded []string
+			for _, domain := range domains {
+				if isGeoToken(domain, "geosite:") || isGeoToken(domain, "ext:") {
+					entries, err := routingGeoEntries(store, domain, geodata.KindSite)
+					if err != nil {
+						return nil, fmt.Errorf("routing rule %d: domain %q: %w", i, domain, err)
+					}
+					for _, entry := range entries {
+						switch entry.Kind {
+						case "domain": expanded = append(expanded, "domain:"+entry.Value)
+						case "full": expanded = append(expanded, "full:"+entry.Value)
+						case "keyword": expanded = append(expanded, "keyword:"+entry.Value)
+						case "regexp": expanded = append(expanded, "regexp:"+entry.Value)
+						default: return nil, fmt.Errorf("routing rule %d: domain %q has invalid entry %q", i, domain, entry.Value)
+						}
+					}
+				} else {
+					expanded = append(expanded, domain)
+				}
+			}
+			domains = expanded
 			if err := translateCompatDomains(r, domains); err != nil {
 				return nil, fmt.Errorf("routing rule %d: %w", i, err)
 			}
@@ -56,6 +86,14 @@ func TranslateXrayRouting(raw map[string]any) (map[string]any, error) {
 		if ips := compatStringSlice(xr["ip"]); len(ips) > 0 {
 			cidrs := make([]string, 0, len(ips))
 			for _, ip := range ips {
+				if !strings.EqualFold(ip, "geoip:private") && (isGeoToken(ip, "geoip:") || isGeoToken(ip, "ext:")) {
+					entries, err := routingGeoEntries(store, ip, geodata.KindIP)
+					if err != nil {
+						return nil, fmt.Errorf("routing rule %d: IP %q: %w", i, ip, err)
+					}
+					for _, entry := range entries { cidrs = append(cidrs, entry.Value) }
+					continue
+				}
 				if strings.EqualFold(ip, "geoip:private") {
 					// Xray's geoip:private is a semantic matcher for private
 					// addresses. sing-box has the native equivalent.
@@ -84,6 +122,14 @@ func TranslateXrayRouting(raw map[string]any) (map[string]any, error) {
 		}
 		var sourceCIDRs []string
 		for _, source := range sources {
+			if !strings.EqualFold(source, "geoip:private") && (isGeoToken(source, "geoip:") || isGeoToken(source, "ext:")) {
+				entries, err := routingGeoEntries(store, source, geodata.KindIP)
+				if err != nil {
+					return nil, fmt.Errorf("routing rule %d: sourceIP %q: %w", i, source, err)
+				}
+				for _, entry := range entries { sourceCIDRs = append(sourceCIDRs, entry.Value) }
+				continue
+			}
 			if strings.EqualFold(source, "geoip:private") {
 				r["source_ip_is_private"] = true
 				continue
@@ -162,6 +208,43 @@ func TranslateXrayRouting(raw map[string]any) (map[string]any, error) {
 		out["rules"] = rules
 	}
 	return out, nil
+}
+
+const maxRoutingGeoEntries = 100000
+
+func isGeoToken(value, prefix string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), prefix)
+}
+
+func routingGeoEntries(store *geodata.Store, token string, kind geodata.GeoKind) ([]geodata.GeoEntry, error) {
+	if store == nil {
+		return nil, fmt.Errorf("geodata directory is unavailable")
+	}
+	token = strings.TrimSpace(token)
+	var file, category string
+	if isGeoToken(token, "ext:") {
+		file, category, _ = strings.Cut(token[4:], ":")
+	} else if kind == geodata.KindIP && isGeoToken(token, "geoip:") {
+		file, category = "geoip.dat", token[6:]
+	} else if kind == geodata.KindSite && isGeoToken(token, "geosite:") {
+		file, category = "geosite.dat", token[8:]
+	}
+	if file == "" || category == "" || strings.ContainsAny(category, "@!:") {
+		return nil, fmt.Errorf("unsupported geodata category")
+	}
+	entries, err := store.AllEntries(file, category, maxRoutingGeoEntries)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("geodata category is empty")
+	}
+	for _, entry := range entries {
+		if kind == geodata.KindIP && entry.Kind != "cidr" || kind == geodata.KindSite && entry.Kind == "cidr" {
+			return nil, fmt.Errorf("geodata file %q has the wrong type", file)
+		}
+	}
+	return entries, nil
 }
 
 func translateCompatPorts(dst map[string]any, field string, value any) error {
