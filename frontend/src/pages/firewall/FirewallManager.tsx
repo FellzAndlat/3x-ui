@@ -5,7 +5,6 @@ import {
   Divider,
   Input,
   InputNumber,
-  Modal,
   Popconfirm,
   Select,
   Space,
@@ -44,15 +43,6 @@ type FirewallStatus = {
   message?: string;
 };
 
-type Props = {
-  open: boolean;
-  onClose: () => void;
-};
-
-type FirewallManagerProps = {
-  active?: boolean;
-};
-
 function rulePort(rule: FirewallRule) {
   return rule.portRange || String(rule.port || '');
 }
@@ -71,7 +61,6 @@ function useFirewallText() {
     () =>
       ru
         ? {
-            title: 'Управление файрволлом',
             loading: 'Получение состояния файрволла…',
             unsupported:
               'Поддерживаемый файрволл не найден. Установите UFW, firewalld, nftables или iptables.',
@@ -107,7 +96,6 @@ function useFirewallText() {
             manualSource: 'Ручное правило',
           }
         : {
-            title: 'Firewall management',
             loading: 'Loading firewall status…',
             unsupported:
               'No supported firewall found. Install UFW, firewalld, nftables, or iptables.',
@@ -146,7 +134,7 @@ function useFirewallText() {
   );
 }
 
-export function FirewallManager({ active = true }: FirewallManagerProps) {
+export function FirewallManager() {
   const text = useFirewallText();
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -166,8 +154,8 @@ export function FirewallManager({ active = true }: FirewallManagerProps) {
   }, []);
 
   useEffect(() => {
-    if (active) void refresh();
-  }, [active, refresh]);
+    void refresh();
+  }, [refresh]);
 
   async function post(path: string, data?: Record<string, unknown>, key = path) {
     setAction(key);
@@ -394,15 +382,5 @@ export function FirewallManager({ active = true }: FirewallManagerProps) {
       />
       {loading ? <Typography.Text type="secondary">{text.loading}</Typography.Text> : null}
     </Space>
-  );
-}
-
-export function FirewallModal({ open, onClose }: Props) {
-  const text = useFirewallText();
-
-  return (
-    <Modal open={open} onCancel={onClose} footer={null} title={text.title} width={900} destroyOnHidden>
-      <FirewallManager active={open} />
-    </Modal>
   );
 }

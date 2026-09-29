@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 
 import AppSidebar from '@/layouts/AppSidebar';
 import { useTheme } from '@/hooks/useTheme';
-import { FirewallManager } from '@/pages/xray/FirewallModal';
+import { FirewallManager } from './FirewallManager';
 
 export default function FirewallPage() {
   const { i18n } = useTranslation();
