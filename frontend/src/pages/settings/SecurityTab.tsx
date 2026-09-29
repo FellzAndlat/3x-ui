@@ -259,7 +259,7 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
 
   function confirmDeleteToken(row: ApiTokenRow) {
     modal.confirm({
-      title: `${t('delete')} "${row.name}"?`,
+      title: `${t('delete')} \"${row.name}\"?`,
       content:
         t('pages.settings.security.apiTokenDeleteWarning') ||
         'Any caller using this token will stop authenticating immediately.',
@@ -399,6 +399,54 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
             ),
           },
           {
+            key: '3',
+            label: catTabLabel(<ApiOutlined />, t('pages.nodes.apiToken'), isMobile),
+            children: (
+              <div className="api-token-section">
+                <div className="api-token-header">
+                  <p className="api-token-hint">{t('pages.nodes.apiTokenHint')}</p>
+                  <Button type="primary" size="small" onClick={openCreateModal}>
+                    + {t('pages.settings.security.apiTokenNew') || 'New token'}
+                  </Button>
+                </div>
+                <Spin spinning={apiTokensLoading}>
+                  {!apiTokens.length && !apiTokensLoading && (
+                    <Empty
+                      description={t('pages.settings.security.apiTokenEmpty') || 'No tokens yet'}
+                    />
+                  )}
+                  {apiTokens.map((row) => (
+                    <div key={row.id} className={`api-token-row${row.enabled ? '' : ' disabled'}`}>
+                      <div className="api-token-row-head">
+                        <div className="api-token-name-wrap">
+                          <span className="api-token-name">{row.name}</span>
+                          <span className="api-token-created">
+                            {formatTokenDate(row.createdAt)}
+                          </span>
+                        </div>
+                        <div className="api-token-actions">
+                          <Switch
+                            size="small"
+                            checked={row.enabled}
+                            onChange={() => toggleTokenEnabled(row)}
+                          />
+                          <Button
+                            size="small"
+                            danger
+                            type="text"
+                            onClick={() => confirmDeleteToken(row)}
+                          >
+                            {t('delete')}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </Spin>
+              </div>
+            ),
+          },
+          {
             key: '4',
             label: catTabLabel(<LoginOutlined />, t('pages.settings.security.sessions'), isMobile),
             children: (
@@ -475,54 +523,6 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
                             {t('delete')}
                           </Button>
                         )}
-                      </div>
-                    </div>
-                  ))}
-                </Spin>
-              </div>
-            ),
-          },
-          {
-            key: '3',
-            label: catTabLabel(<ApiOutlined />, t('pages.nodes.apiToken'), isMobile),
-            children: (
-              <div className="api-token-section">
-                <div className="api-token-header">
-                  <p className="api-token-hint">{t('pages.nodes.apiTokenHint')}</p>
-                  <Button type="primary" size="small" onClick={openCreateModal}>
-                    + {t('pages.settings.security.apiTokenNew') || 'New token'}
-                  </Button>
-                </div>
-                <Spin spinning={apiTokensLoading}>
-                  {!apiTokens.length && !apiTokensLoading && (
-                    <Empty
-                      description={t('pages.settings.security.apiTokenEmpty') || 'No tokens yet'}
-                    />
-                  )}
-                  {apiTokens.map((row) => (
-                    <div key={row.id} className={`api-token-row${row.enabled ? '' : ' disabled'}`}>
-                      <div className="api-token-row-head">
-                        <div className="api-token-name-wrap">
-                          <span className="api-token-name">{row.name}</span>
-                          <span className="api-token-created">
-                            {formatTokenDate(row.createdAt)}
-                          </span>
-                        </div>
-                        <div className="api-token-actions">
-                          <Switch
-                            size="small"
-                            checked={row.enabled}
-                            onChange={() => toggleTokenEnabled(row)}
-                          />
-                          <Button
-                            size="small"
-                            danger
-                            type="text"
-                            onClick={() => confirmDeleteToken(row)}
-                          >
-                            {t('delete')}
-                          </Button>
-                        </div>
                       </div>
                     </div>
                   ))}
