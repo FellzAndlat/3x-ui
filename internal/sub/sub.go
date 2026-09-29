@@ -360,6 +360,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 		WithSUBIncyEnableRouting(SubIncyEnableRouting),
 		WithSUBIncyRoutingRules(SubIncyRoutingRules),
 	)
+	registerTelemtSubscriptionRoute(g)
 
 	// Hiddify migration keeps the original /<proxy_path_client>/<UUID>/ URL as
 	// a compatibility alias. NoRoute is used so configured 3x-ui paths keep

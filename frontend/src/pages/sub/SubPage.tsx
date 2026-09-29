@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Card, ConfigProvider, Layout, Tabs, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  ConfigProvider,
+  Layout,
+  Space,
+  Tabs,
+  Typography,
+  message,
+} from 'antd';
 import type { TabsProps } from 'antd';
 import {
+  ApiOutlined,
   AppstoreOutlined,
   ClockCircleOutlined,
   CustomerServiceOutlined,
@@ -18,7 +29,13 @@ import SubConfigsTab from './SubConfigsTab';
 import SubHeader from './SubHeader';
 import SubHero from './SubHero';
 import SubLinksTab from './SubLinksTab';
-import { buildSubApps, daysUntil, detectPlatform, resolveSubStatus } from './subPageModel';
+import {
+  buildSubApps,
+  buildTelemtEndpoint,
+  daysUntil,
+  detectPlatform,
+  resolveSubStatus,
+} from './subPageModel';
 import './SubPage.css';
 
 const subData = window.__SUB_PAGE_DATA__ || {};
@@ -40,6 +57,18 @@ const usedByte =
 const expireMs = Number(subData.expire || 0) * 1000;
 const clientEmail = [...new Set(linkEmails.filter(Boolean))].join(', ');
 const loadedAt = Date.now();
+
+type TelemtProxyProfile = {
+  host: string;
+  port: number;
+  tls: boolean;
+  link: string;
+};
+
+type TelemtSubscriptionData = {
+  personal?: TelemtProxyProfile;
+  webProxy?: string;
+};
 
 const heroData = {
   status: resolveSubStatus({ enabled: !!subData.enabled, usedByte, totalByte, expireMs }, loadedAt),
@@ -85,6 +114,32 @@ export default function SubPage() {
     setMessageInstance(messageApi);
   }, [messageApi]);
   const [lang, setLang] = useState<string>(() => LanguageManager.getLanguage('subscription'));
+  const [telemtData, setTelemtData] = useState<TelemtSubscriptionData>({});
+
+  useEffect(() => {
+    const endpoint = buildTelemtEndpoint(window.location.href, sId);
+    if (!endpoint) return;
+    const controller = new AbortController();
+    void fetch(endpoint, {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as TelemtSubscriptionData;
+      })
+      .then((data) => {
+        if (data) setTelemtData(data);
+      })
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          setTelemtData({});
+        }
+      });
+    return () => controller.abort();
+  }, []);
 
   const onLangChange = useCallback((next: string) => {
     setLang(next);
@@ -129,6 +184,66 @@ export default function SubPage() {
         children: <SubAppsTab apps={apps} initialPlatform={initialPlatform} onOpen={open} />,
       });
     }
+    if (telemtData.personal?.link || telemtData.webProxy) {
+      items.push({
+        key: 'telemt',
+        icon: <ApiOutlined />,
+        label: 'Telegram Proxy',
+        children: (
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            {telemtData.personal?.link && (
+              <Card size="small" title="Personal Telegram Proxy">
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                  <Typography.Text type="secondary">
+                    Individual proxy profile for this subscription · {telemtData.personal.host}:
+                    {telemtData.personal.port}
+                  </Typography.Text>
+                  <Typography.Paragraph
+                    copyable={{ text: telemtData.personal.link }}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Typography.Link href={telemtData.personal.link}>
+                      {telemtData.personal.link}
+                    </Typography.Link>
+                  </Typography.Paragraph>
+                  <Button
+                    type="primary"
+                    icon={<ApiOutlined />}
+                    onClick={() => open(telemtData.personal!.link)}
+                  >
+                    Open in Telegram
+                  </Button>
+                </Space>
+              </Card>
+            )}
+            {telemtData.webProxy && (
+              <Card size="small" title="Web Proxy">
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                  <Typography.Text type="secondary">
+                    Shared Web Proxy for all subscription users
+                  </Typography.Text>
+                  <Typography.Paragraph
+                    copyable={{ text: telemtData.webProxy }}
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Typography.Link href={telemtData.webProxy}>
+                      {telemtData.webProxy}
+                    </Typography.Link>
+                  </Typography.Paragraph>
+                  <Button
+                    type="primary"
+                    icon={<ApiOutlined />}
+                    onClick={() => open(telemtData.webProxy!)}
+                  >
+                    Open in Telegram
+                  </Button>
+                </Space>
+              </Card>
+            )}
+          </Space>
+        ),
+      });
+    }
     if (links.length > 0) {
       items.push({
         key: 'configs',
@@ -143,7 +258,7 @@ export default function SubPage() {
       });
     }
     return items;
-  }, [t, copy, open]);
+  }, [t, copy, open, telemtData]);
 
   const direction = RTL_LANGUAGES.has(lang) ? 'rtl' : 'ltr';
   const pageClass = ['subscription-page', isDark && 'is-dark', isUltra && 'is-ultra']

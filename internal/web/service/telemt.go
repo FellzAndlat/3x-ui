@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -326,6 +326,7 @@ func fetchTelemtLatestRelease() string {
 	}
 	return strings.TrimSpace(release.TagName)
 }
+
 const telemtUpdaterPath = "/usr/local/x-ui/telemt-update.sh"
 const telemtUpdaterURL = "https://raw.githubusercontent.com/SawaMEN/3x-ui/main/internal/Telemt/telemt-update.sh"
 
@@ -706,7 +707,7 @@ func (TelemtService) ListProxies() ([]TelemtProxy, error) {
 	}
 	out := make([]TelemtProxy, 0, len(raw.Access.Users))
 	for username, secret := range raw.Access.Users {
-		if username == "xui" || username == telemtWebUser {
+		if username == "xui" || username == telemtWebUser || isTelemtSubscriptionUsername(username) {
 			continue
 		}
 		link, linkErr := telemtGeneratedLink(username, raw.General.Modes.TLS)

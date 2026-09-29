@@ -1,5 +1,18 @@
 const DAY_MS = 86_400_000;
 
+export function buildTelemtEndpoint(pageURL: string, subID: string): string {
+  if (!subID) return '';
+  try {
+    const endpoint = new URL(pageURL);
+    if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') return '';
+    endpoint.search = '?format=telemt';
+    endpoint.hash = '';
+    return endpoint.toString();
+  } catch {
+    return '';
+  }
+}
+
 export type SubStatus = 'active' | 'unlimited' | 'expired' | 'depleted' | 'disabled';
 
 export interface SubUsage {

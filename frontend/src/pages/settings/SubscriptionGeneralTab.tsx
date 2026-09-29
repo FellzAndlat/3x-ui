@@ -29,6 +29,30 @@ interface SubscriptionGeneralTabProps {
 const PANEL_SETTINGS_TAB = '1';
 const HAPP_SETTINGS_TAB = '5';
 
+function uriWithSubscriptionPort(uri: string, previousPort: number, nextPort: number): string {
+  if (!uri) return uri;
+  try {
+    const parsed = new URL(uri);
+    if (parsed.port !== String(previousPort)) return uri;
+    parsed.port =
+      (parsed.protocol === 'https:' && nextPort === 443) ||
+      (parsed.protocol === 'http:' && nextPort === 80)
+        ? ''
+        : String(nextPort);
+    return parsed.toString();
+  } catch {
+    return uri;
+  }
+}
+
+function usesOldDefaultPort(uri: string): boolean {
+  try {
+    return new URL(uri).port === '2096';
+  } catch {
+    return false;
+  }
+}
+
 export default function SubscriptionGeneralTab({
   allSetting,
   updateSetting,
@@ -40,6 +64,26 @@ export default function SubscriptionGeneralTab({
   // Keep the URL semantic while mapping to the legacy numeric key used by these inner tabs.
   const initialTab =
     searchParams.get('subscriptionTab') === 'happ' ? HAPP_SETTINGS_TAB : PANEL_SETTINGS_TAB;
+
+  const changeSubscriptionPort = (nextPort: number) => {
+    updateSetting({
+      subPort: nextPort,
+      subURI: uriWithSubscriptionPort(allSetting.subURI, allSetting.subPort, nextPort),
+      subJsonURI: uriWithSubscriptionPort(allSetting.subJsonURI, allSetting.subPort, nextPort),
+      subClashURI: uriWithSubscriptionPort(allSetting.subClashURI, allSetting.subPort, nextPort),
+    });
+  };
+  const hasOldSubscriptionURL =
+    allSetting.subPort !== 2096 &&
+    [allSetting.subURI, allSetting.subJsonURI, allSetting.subClashURI].some(usesOldDefaultPort);
+
+  const repairOldSubscriptionURLs = () => {
+    updateSetting({
+      subURI: uriWithSubscriptionPort(allSetting.subURI, 2096, allSetting.subPort),
+      subJsonURI: uriWithSubscriptionPort(allSetting.subJsonURI, 2096, allSetting.subPort),
+      subClashURI: uriWithSubscriptionPort(allSetting.subClashURI, 2096, allSetting.subPort),
+    });
+  };
 
   return (
     <Tabs
@@ -121,9 +165,22 @@ export default function SubscriptionGeneralTab({
                   min={1}
                   max={65535}
                   style={{ width: '100%' }}
-                  onChange={onNumber((v) => updateSetting({ subPort: v }))}
+                  onChange={onNumber(changeSubscriptionPort)}
                 />
               </SettingListItem>
+              {hasOldSubscriptionURL && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ margin: '12px 20px' }}
+                  title={t('pages.settings.subOldPortWarning')}
+                  action={
+                    <Button size="small" onClick={repairOldSubscriptionURLs}>
+                      {t('pages.settings.subOldPortRepair')}
+                    </Button>
+                  }
+                />
+              )}
               <SettingListItem
                 paddings="small"
                 title={t('pages.settings.subPath')}

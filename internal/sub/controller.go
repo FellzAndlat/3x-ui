@@ -466,6 +466,13 @@ func buildRawSubscriptionBody(subs []string) string {
 // subs handles HTTP requests for subscription links, returning either HTML page or base64-encoded subscription data.
 func (a *SUBController) subs(c *gin.Context) {
 	userAgent := c.GetHeader("User-Agent")
+	// Fetch page extras through the URL that actually served the page. This
+	// also works for migrated Hiddify aliases and reverse proxies whose public
+	// port differs from the subscription listener.
+	if strings.EqualFold(c.Query("format"), "telemt") {
+		serveTelemtSubscription(c)
+		return
+	}
 	if a.maybeServeSubInfo(c) {
 		logSubscriptionRoute(userAgent, "info")
 		return

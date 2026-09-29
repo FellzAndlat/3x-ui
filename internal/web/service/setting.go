@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"regexp"
@@ -1553,6 +1554,27 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting, clears 
 		for _, st := range existing {
 			byKey[st.Key] = st
 		}
+		// An explicit subscription URI may have been generated from the previous
+		// listener port. Move it with the listener only when the submitted URI is
+		// unchanged and actually uses that port; independent reverse proxies keep
+		// their own address.
+		if old := byKey["subPort"]; old != nil && old.Value != strconv.Itoa(allSetting.SubPort) {
+			oldPort, err := strconv.Atoi(old.Value)
+			if err == nil {
+				for _, pair := range []struct {
+					key string
+					uri *string
+				}{
+					{"subURI", &allSetting.SubURI},
+					{"subJsonURI", &allSetting.SubJsonURI},
+					{"subClashURI", &allSetting.SubClashURI},
+				} {
+					if stored := byKey[pair.key]; stored != nil && *pair.uri == stored.Value {
+						*pair.uri = moveSubscriptionURIPort(*pair.uri, oldPort, allSetting.SubPort)
+					}
+				}
+			}
+		}
 		for _, field := range fields {
 			key := field.Tag.Get("json")
 			fieldV := v.FieldByName(field.Name)
@@ -1573,6 +1595,21 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting, clears 
 		}
 		return nil
 	})
+}
+
+func moveSubscriptionURIPort(raw string, oldPort, newPort int) string {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.Port() != strconv.Itoa(oldPort) {
+		return raw
+	}
+	u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(newPort))
+	if (u.Scheme == "https" && newPort == 443) || (u.Scheme == "http" && newPort == 80) {
+		u.Host = u.Hostname()
+		if strings.Contains(u.Host, ":") {
+			u.Host = "[" + u.Host + "]"
+		}
+	}
+	return u.String()
 }
 
 func validateSubUserAgentRegexes(allSetting *entity.AllSetting) error {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildSubApps,
+  buildTelemtEndpoint,
   daysUntil,
   detectPlatform,
   resolveSubStatus,
@@ -10,6 +11,20 @@ import {
 
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 8, 15, 12, 0, 0);
+
+describe('buildTelemtEndpoint', () => {
+  it('uses the page origin after the subscription listener port changes', () => {
+    expect(buildTelemtEndpoint('https://sub.example:8443/custom/id?html=1#links', 'id')).toBe(
+      'https://sub.example:8443/custom/id?format=telemt',
+    );
+  });
+
+  it('keeps a migrated Hiddify alias on its public port', () => {
+    expect(buildTelemtEndpoint('https://cdn.example/LegacyPath/id/', 'id')).toBe(
+      'https://cdn.example/LegacyPath/id/?format=telemt',
+    );
+  });
+});
 
 describe('resolveSubStatus', () => {
   const base = { enabled: true, usedByte: 10, totalByte: 100, expireMs: NOW + DAY };
