@@ -20,60 +20,13 @@ func NewTuicJob() *TuicJob {
 	return new(TuicJob)
 }
 
-func (j *TuicJob) Run() {
-	// CollectTrafficSnapshot advances relay counter baselines. Serialize the poll
-	// so overlapping scheduler runs cannot consume a newer snapshot while an
-	// earlier one is still being committed.
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	core, err := (&service.SettingService{}).GetCoreType()
-	if err != nil {
-		logger.Warning("tuic job: get selected core failed:", err)
-		return
-	}
-	if core == service.CoreTypeSingBox {
-		// Stop the sidecar immediately on a core switch even if a historical
-		// traffic batch cannot be persisted yet. The batch remains retryable.
-		tuic.GetManager().StopAll()
-		if j.pending.hasData() {
-			if _, _, retryErr := j.pending.flush(j.inboundService.AddTraffic); retryErr != nil {
-				logger.Warning("tuic job: retry pending traffic after core switch failed:", retryErr)
-			}
-		}
-		return
-	}
-
-	// Retry a batch that was already consumed from the TUIC relays before asking
-	// them for another snapshot. Otherwise a transient DB failure permanently
-	// loses the bytes because the relay counters have already advanced.
-	if j.pending.hasData() {
-		if _, _, retryErr := j.pending.flush(j.inboundService.AddTraffic); retryErr != nil {
-			logger.Warning("tuic job: retry pending traffic failed:", retryErr)
-			return
-		}
-	}
-
-	desired, err := j.inboundService.DesiredTuicInstances()
-	if err != nil {
-		logger.Warning("tuic job: get desired instances failed:", err)
-		return
-	}
-
-	activeTags := make([]string, 0, len(desired))
-	for _, inst := range desired {
-		activeTags = append(activeTags, inst.Tag)
-	}
-
-	mgr := tuic.GetManager()
-	mgr.Reconcile(desired)
-
-	snapshot := mgr.CollectTrafficSnapshot()
-	onlineEmails, _ := mgr.GetActiveClients(30 * time.Second)
-
+func tuicTrafficBatch(snapshot tuic.TrafficSnapshot, onlineEmails []string) ([]*xray.Traffic, []*xray.ClientTraffic) {
 	inboundUp := make(map[string]int64)
 	inboundDown := make(map[string]int64)
 	for _, d := range snapshot.Inbounds {
+		if d.Tag == "" {
+			continue
+		}
 		inboundUp[d.Tag] += d.Up
 		inboundDown[d.Tag] += d.Down
 	}
@@ -88,9 +41,9 @@ func (j *TuicJob) Run() {
 		})
 	}
 
-	// TUIC's relay now attributes each authenticated QUIC flow to the UUID/email
-	// printed by tuic-server. Merge multiple connections/inbounds for the same
-	// email because client_traffics has one durable row per email.
+	// TUIC's relay attributes authenticated QUIC flows to the UUID/email printed
+	// by tuic-server. Merge multiple connections/inbounds for the same email
+	// because client_traffics has one durable row per email.
 	clientUp := make(map[string]int64)
 	clientDown := make(map[string]int64)
 	for _, d := range snapshot.Clients {
@@ -119,6 +72,68 @@ func (j *TuicJob) Run() {
 			Down:  clientDown[email],
 		})
 	}
+	return traffics, clientTraffics
+}
+
+func (j *TuicJob) Run() {
+	// CollectTrafficSnapshot advances relay counter baselines. Serialize the poll
+	// so overlapping scheduler runs cannot consume a newer snapshot while an
+	// earlier one is still being committed.
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	core, err := (&service.SettingService{}).GetCoreType()
+	if err != nil {
+		logger.Warning("tuic job: get selected core failed:", err)
+		return
+	}
+	if core == service.CoreTypeSingBox {
+		// Stop the sidecar immediately on a core switch. StopAll drains each
+		// quiesced relay into the manager's pending snapshot, so the last bytes are
+		// not discarded even if there is also an older DB retry waiting.
+		mgr := tuic.GetManager()
+		mgr.StopAll()
+		finalSnapshot := mgr.CollectTrafficSnapshot()
+		finalTraffics, finalClients := tuicTrafficBatch(finalSnapshot, nil)
+		j.pending.appendBatch(finalTraffics, finalClients)
+		if j.pending.hasData() {
+			if _, _, retryErr := j.pending.flush(j.inboundService.AddTraffic); retryErr != nil {
+				logger.Warning("tuic job: persist final traffic after core switch failed; batch retained:", retryErr)
+			}
+		}
+		return
+	}
+
+	// Retry a batch that was already consumed from the TUIC relays before asking
+	// them for another snapshot. Otherwise a transient DB failure permanently
+	// loses the bytes because the relay counters have already advanced.
+	if j.pending.hasData() {
+		if _, _, retryErr := j.pending.flush(j.inboundService.AddTraffic); retryErr != nil {
+			logger.Warning("tuic job: retry pending traffic failed:", retryErr)
+			return
+		}
+	}
+
+	desired, err := j.inboundService.DesiredTuicInstances()
+	if err != nil {
+		logger.Warning("tuic job: get desired instances failed:", err)
+		return
+	}
+
+	activeTags := make([]string, 0, len(desired))
+	for _, inst := range desired {
+		activeTags = append(activeTags, inst.Tag)
+	}
+
+	mgr := tuic.GetManager()
+	// Reconcile drains the final counters from any sidecar it has to restart or
+	// remove. CollectTrafficSnapshot below consumes those together with current
+	// counters from sidecars that remain running.
+	mgr.Reconcile(desired)
+
+	snapshot := mgr.CollectTrafficSnapshot()
+	onlineEmails, _ := mgr.GetActiveClients(30 * time.Second)
+	traffics, clientTraffics := tuicTrafficBatch(snapshot, onlineEmails)
 
 	if len(traffics) > 0 || len(clientTraffics) > 0 {
 		needRestart, _, err := j.inboundService.AddTraffic(traffics, clientTraffics)
