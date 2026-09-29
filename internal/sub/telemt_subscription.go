@@ -18,6 +18,7 @@ type telemtSubscriptionProfile struct {
 }
 
 type telemtSubscriptionPayload struct {
+	Enabled         bool                        `json:"enabled"`
 	Personal        *telemtSubscriptionProfile `json:"personal,omitempty"`
 	WebProxyEnabled bool                        `json:"webProxyEnabled"`
 	WebProxy        string                      `json:"webProxy,omitempty"`
@@ -66,7 +67,16 @@ func serveTelemtSubscription(c *gin.Context) {
 	}
 
 	telemt := service.TelemtService{}
-	payload := telemtSubscriptionPayload{}
+	payload := telemtSubscriptionPayload{Enabled: telemt.Status().Enabled}
+	if !payload.Enabled {
+		c.Header("Cache-Control", "private, no-store")
+		c.JSON(http.StatusOK, payload)
+		return
+	}
+
+	// Loading the subscription page is also the lifecycle hook for its personal
+	// Telemt profile. EnsureSubscriptionProxy is idempotent: it reuses an
+	// existing profile or creates one when this subscription is seen first.
 	if personal, err := telemt.EnsureSubscriptionProxy(subID, host); err == nil {
 		payload.Personal = &telemtSubscriptionProfile{
 			Host: personal.Host,
