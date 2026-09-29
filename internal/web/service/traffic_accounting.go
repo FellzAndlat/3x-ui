@@ -162,6 +162,17 @@ func (s *InboundService) addClientTrafficStrict(tx *gorm.DB, traffics []*xray.Cl
 		if !ok || (traffic.Up == 0 && traffic.Down == 0) {
 			continue
 		}
+
+		// The SQL clamp cannot protect PostgreSQL from overflowing while it
+		// evaluates "stored + delta". Limit each delta against the durable row
+		// first, just like the non-strict AddTraffic path does. Otherwise a
+		// near-saturated client makes the transaction fail forever and the Xray
+		// baseline keeps rolling back to the same unacknowledged delta.
+		up := clampTrafficDeltaToStored(ct.Up, traffic.Up)
+		down := clampTrafficDeltaToStored(ct.Down, traffic.Down)
+		if up == 0 && down == 0 {
+			continue
+		}
 		if err := tx.Exec(
 			fmt.Sprintf(
 				`UPDATE client_traffics SET up = %s, down = %s, last_online = %s WHERE email = ?`,
@@ -169,7 +180,7 @@ func (s *InboundService) addClientTrafficStrict(tx *gorm.DB, traffics []*xray.Cl
 				database.ClampedAddExpr("down"),
 				database.GreatestExpr("last_online", "?"),
 			),
-			traffic.Up, traffic.Down, now, ct.Email,
+			up, down, now, ct.Email,
 		).Error; err != nil {
 			return err
 		}
@@ -194,6 +205,24 @@ func saturatingTrafficDelta(a, b int64) int64 {
 		return database.TrafficMax
 	}
 	return a + b
+}
+
+// clampTrafficDeltaToStored returns the part of delta that can still be added
+// to an already stored counter without making the intermediate SQL addition
+// exceed TrafficMax. Invalid/negative stored values are treated as zero usage;
+// negative deltas are never applied.
+func clampTrafficDeltaToStored(stored, delta int64) int64 {
+	if delta <= 0 || stored >= database.TrafficMax {
+		return 0
+	}
+	if stored < 0 {
+		stored = 0
+	}
+	remaining := database.TrafficMax - stored
+	if delta > remaining {
+		return remaining
+	}
+	return delta
 }
 
 func addOutboundTrafficStrict(tx *gorm.DB, traffics []*xray.Traffic) error {
