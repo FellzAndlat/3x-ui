@@ -15,7 +15,11 @@ const TrafficMax = int64(9_000_000_000_000_000_000)
 // all traffic writers while making the clamp safe on PostgreSQL BIGINT as well
 // as SQLite INTEGER.
 func ClampedAddExpr(col string) string {
-	if IsPostgres() {
+	return clampedAddExpr(col, IsPostgres())
+}
+
+func clampedAddExpr(col string, postgres bool) string {
+	if postgres {
 		base := fmt.Sprintf("GREATEST(LEAST(%s, %d), 0)", col, TrafficMax)
 		return fmt.Sprintf("%s + LEAST(GREATEST(CAST(? AS BIGINT), 0), %d - %s)", base, TrafficMax, base)
 	}
