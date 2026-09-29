@@ -1,6 +1,7 @@
 package job
 
 import (
+	"sync"
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
@@ -11,6 +12,8 @@ import (
 
 type TuicJob struct {
 	inboundService service.InboundService
+	mu             sync.Mutex
+	pending        pendingTrafficBatch
 }
 
 func NewTuicJob() *TuicJob {
@@ -18,6 +21,22 @@ func NewTuicJob() *TuicJob {
 }
 
 func (j *TuicJob) Run() {
+	// CollectTraffic advances each relay's counter baseline. Serialize the poll
+	// so overlapping scheduler runs cannot consume a newer snapshot while an
+	// earlier one is still being committed.
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	// Retry a batch that was already consumed from the TUIC relays before asking
+	// them for another snapshot. Otherwise a transient DB failure permanently
+	// loses the bytes because CollectTraffic has already advanced its baseline.
+	if j.pending.hasData() {
+		if _, _, retryErr := j.pending.flush(j.inboundService.AddTraffic); retryErr != nil {
+			logger.Warning("tuic job: retry pending traffic failed:", retryErr)
+			return
+		}
+	}
+
 	core, err := (&service.SettingService{}).GetCoreType()
 	if err != nil {
 		logger.Warning("tuic job: get selected core failed:", err)
@@ -75,7 +94,10 @@ func (j *TuicJob) Run() {
 	if len(traffics) > 0 || len(clientTraffics) > 0 {
 		needRestart, _, err := j.inboundService.AddTraffic(traffics, clientTraffics)
 		if err != nil {
-			logger.Warning("tuic job: add traffic failed:", err)
+			// The relay baselines have already advanced. Keep the exact consumed
+			// batch and retry it before collecting a newer TUIC snapshot.
+			j.pending.remember(traffics, clientTraffics)
+			logger.Warning("tuic job: add traffic failed; batch queued for retry:", err)
 		} else if needRestart {
 			if desired, err := j.inboundService.DesiredTuicInstances(); err == nil {
 				mgr.Reconcile(desired)
