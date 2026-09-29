@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
@@ -137,25 +137,28 @@ function useFirewallText() {
 export function FirewallManager() {
   const text = useFirewallText();
   const [status, setStatus] = useState<FirewallStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [action, setAction] = useState('');
   const [port, setPort] = useState<number | null>(null);
   const [protocol, setProtocol] = useState('both');
   const [label, setLabel] = useState('');
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const msg = await HttpUtil.get<FirewallStatus>('/panel/api/server/firewall/status');
-      if (msg.success && msg.obj) setStatus(msg.obj);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const msg = await HttpUtil.get<FirewallStatus>('/panel/api/server/firewall/status');
+        if (!cancelled && msg.success && msg.obj) setStatus(msg.obj);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function post(path: string, data?: Record<string, unknown>, key = path) {
     setAction(key);
