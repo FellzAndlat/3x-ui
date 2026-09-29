@@ -210,7 +210,7 @@ func TranslateXrayRoutingWithGeoData(raw map[string]any, store *geodata.Store) (
 	return out, nil
 }
 
-const maxRoutingGeoEntries = 100000
+const maxRoutingGeoEntries = 500000
 
 func isGeoToken(value, prefix string) bool {
 	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), prefix)
