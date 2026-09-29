@@ -54,7 +54,7 @@ func (j *MtprotoJob) Run() {
 	// returns. Retry an uncommitted batch before sampling again so a transient DB
 	// failure cannot create a permanent hole in a client's traffic history.
 	if j.pending.hasData() {
-		if _, _, retryErr := j.pending.flush(&j.inboundService); retryErr != nil {
+		if _, _, retryErr := j.pending.flush(j.inboundService.AddTraffic); retryErr != nil {
 			logger.Warning("mtproto job: retry pending traffic failed:", retryErr)
 			return
 		}
