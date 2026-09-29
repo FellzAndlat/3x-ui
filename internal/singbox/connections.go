@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -236,7 +237,7 @@ func decodeTrafficConnection(data []byte) (*singBoxConnection, error) {
 				connection.User = string(value)
 			}
 			data = data[used:]
-		case 13, 16, 17:
+		case 12, 13, 16, 17:
 			if typ != protowire.VarintType {
 				return nil, fmt.Errorf("invalid Connection traffic numeric field %d wire type %d", field, typ)
 			}
@@ -245,6 +246,8 @@ func decodeTrafficConnection(data []byte) (*singBoxConnection, error) {
 				return nil, protowire.ParseError(used)
 			}
 			switch field {
+			case 12:
+				connection.CreatedAt = int64(value)
 			case 13:
 				connection.ClosedAt = int64(value)
 			case 16:
@@ -375,44 +378,93 @@ type connectionTrafficSnapshot struct {
 	missingSnapshots uint8
 }
 
-func trafficCounterDelta(current, previous int64) int64 {
+func snapshotTrafficDelta(current, previous int64, exists, countInitial bool) int64 {
+	if current <= 0 {
+		return 0
+	}
+	if !exists {
+		if countInitial {
+			return current
+		}
+		return 0
+	}
 	if current >= previous {
 		return current - previous
 	}
+	// The core restarted/reset this connection counter. Count only the bytes
+	// visible after the reset instead of subtracting into a negative delta.
 	return current
 }
 
-func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvents) {
+func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvents, snapshotAt int64) {
 	if response == nil || !response.Reset {
 		return
 	}
+
+	c.trafficMu.Lock()
+	defer c.trafficMu.Unlock()
+
 	if c.trafficSnapshots == nil {
 		c.trafficSnapshots = make(map[string]connectionTrafficSnapshot)
 	}
+	previousAt := c.trafficSnapshotAt
 	seen := make(map[string]struct{}, len(response.Events))
+
 	for _, event := range response.Events {
-		if event == nil || event.ID == "" || event.Connection == nil {
+		if event == nil || event.Connection == nil {
 			continue
 		}
 		connection := event.Connection
-		seen[event.ID] = struct{}{}
-		previous, exists := c.trafficSnapshots[event.ID]
-		if exists {
-			event.UplinkDelta = trafficCounterDelta(connection.UplinkTotal, previous.uplink)
-			event.DownlinkDelta = trafficCounterDelta(connection.DownlinkTotal, previous.downlink)
-		} else if c.trafficInitialized {
-			event.UplinkDelta = connection.UplinkTotal
-			event.DownlinkDelta = connection.DownlinkTotal
+		id := event.ID
+		if id == "" {
+			id = connection.ID
 		}
-		c.trafficSnapshots[event.ID] = connectionTrafficSnapshot{
-			uplink:   connection.UplinkTotal,
-			downlink: connection.DownlinkTotal,
+		if id == "" {
+			continue
 		}
-		if connection.ClosedAt != 0 {
+		if event.ID == "" {
+			event.ID = id
+		}
+		seen[id] = struct{}{}
+
+		currentUp := connection.UplinkTotal
+		currentDown := connection.DownlinkTotal
+		if currentUp < 0 {
+			currentUp = 0
+		}
+		if currentDown < 0 {
+			currentDown = 0
+		}
+
+		previous, exists := c.trafficSnapshots[id]
+		// The first reset snapshot establishes a baseline: its cumulative totals
+		// can already be present in client_traffics when the panel reconnects to
+		// a sing-box process that survived a panel restart. Later unknown IDs are
+		// counted only when sing-box says the connection was created after the
+		// previous snapshot boundary.
+		countInitial := previousAt > 0 && connection.CreatedAt > 0 && connection.CreatedAt >= previousAt
+		event.UplinkDelta = snapshotTrafficDelta(currentUp, previous.uplink, exists, countInitial)
+		event.DownlinkDelta = snapshotTrafficDelta(currentDown, previous.downlink, exists, countInitial)
+
+		c.trafficSnapshots[id] = connectionTrafficSnapshot{
+			uplink:   currentUp,
+			downlink: currentDown,
+		}
+
+		// sing-box's reset snapshot retains recently closed connections as NEW
+		// events. Normalize them so PollTraffic does not mark stale users online;
+		// their final byte delta is still committed above.
+		if connection.ClosedAt > 0 {
 			event.Type = ConnectionEventClosed
-			event.ClosedAt = connection.ClosedAt
+			if event.ClosedAt == 0 {
+				event.ClosedAt = connection.ClosedAt
+			}
 		}
 	}
+
+	// A transiently missing connection must not lose its baseline or its next
+	// appearance would be treated as a new connection. Retain a short grace
+	// window, then evict stale IDs to bound memory.
 	for id, snapshot := range c.trafficSnapshots {
 		if _, ok := seen[id]; ok {
 			continue
@@ -424,19 +476,22 @@ func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvent
 		snapshot.missingSnapshots++
 		c.trafficSnapshots[id] = snapshot
 	}
-	c.trafficInitialized = true
+	c.trafficSnapshotAt = snapshotAt
 }
 
 // SnapshotTrafficEvents is a low-allocation variant used by the traffic poll.
-// SubscribeConnections always starts with Reset=true and cumulative connection
-// totals. Convert that reset snapshot to deltas locally because this poll uses
-// a short-lived stream and therefore never waits for the server's later update
-// events. The first successful snapshot only establishes baselines so attaching
-// to an already-running sing-box process cannot replay previously stored bytes.
+// SubscribeConnections starts with Reset=true and cumulative connection totals.
+// Convert that reset snapshot to deltas locally because this poll uses a
+// short-lived stream and therefore never waits for the server's later update
+// events.
 func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connectionEvents, error) {
 	if err := c.connFor(ctx); err != nil {
 		return connectionEvents{}, err
 	}
+	// Capture the boundary before subscribing. If a connection is created after
+	// the server builds this snapshot but before the next poll, CreatedAt remains
+	// on the correct side of the boundary and its initial bytes are counted once.
+	snapshotAt := time.Now().UnixMilli()
 	stream, err := c.conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, "/daemon.StartedService/SubscribeConnections", grpc.ForceCodec(connectionAPIProtoCodec{trafficOnly: true}))
 	if err != nil {
 		c.Close()
@@ -455,14 +510,15 @@ func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connec
 		c.Close()
 		return connectionEvents{}, err
 	}
-	c.normalizeTrafficSnapshot(&response)
+	c.normalizeTrafficSnapshot(&response, snapshotAt)
 	return response, nil
 }
 
 type ConnectionAPIClient struct {
-	conn               *grpc.ClientConn
-	trafficSnapshots   map[string]connectionTrafficSnapshot
-	trafficInitialized bool
+	conn              *grpc.ClientConn
+	trafficMu         sync.Mutex
+	trafficSnapshots  map[string]connectionTrafficSnapshot
+	trafficSnapshotAt int64
 }
 
 func NewConnectionAPIClient() *ConnectionAPIClient { return &ConnectionAPIClient{} }

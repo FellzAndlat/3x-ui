@@ -6,165 +6,179 @@ import (
 	"google.golang.org/protobuf/encoding/protowire"
 )
 
-func TestDecodeTrafficConnectionKeepsSnapshotTotals(t *testing.T) {
+func TestDecodeTrafficConnectionKeepsSnapshotCounters(t *testing.T) {
 	var connection []byte
 	connection = protowire.AppendTag(connection, 1, protowire.BytesType)
 	connection = protowire.AppendString(connection, "conn-traffic")
 	connection = protowire.AppendTag(connection, 2, protowire.BytesType)
-	connection = protowire.AppendString(connection, "inbound-tuic")
+	connection = protowire.AppendString(connection, "in-tuic")
 	connection = protowire.AppendTag(connection, 10, protowire.BytesType)
 	connection = protowire.AppendString(connection, "user@example")
+	connection = protowire.AppendTag(connection, 12, protowire.VarintType)
+	connection = protowire.AppendVarint(connection, 1_000)
 	connection = protowire.AppendTag(connection, 13, protowire.VarintType)
-	connection = protowire.AppendVarint(connection, 123456)
+	connection = protowire.AppendVarint(connection, 2_000)
 	connection = protowire.AppendTag(connection, 16, protowire.VarintType)
-	connection = protowire.AppendVarint(connection, 700)
+	connection = protowire.AppendVarint(connection, 12_345)
 	connection = protowire.AppendTag(connection, 17, protowire.VarintType)
-	connection = protowire.AppendVarint(connection, 900)
+	connection = protowire.AppendVarint(connection, 67_890)
 
-	var eventData []byte
-	eventData = protowire.AppendTag(eventData, 1, protowire.VarintType)
-	eventData = protowire.AppendVarint(eventData, ConnectionEventOpened)
-	eventData = protowire.AppendTag(eventData, 2, protowire.BytesType)
-	eventData = protowire.AppendString(eventData, "conn-traffic")
-	eventData = protowire.AppendTag(eventData, 3, protowire.BytesType)
-	eventData = protowire.AppendBytes(eventData, connection)
+	var data []byte
+	data = protowire.AppendTag(data, 1, protowire.VarintType)
+	data = protowire.AppendVarint(data, ConnectionEventOpened)
+	data = protowire.AppendTag(data, 2, protowire.BytesType)
+	data = protowire.AppendString(data, "conn-traffic")
+	data = protowire.AppendTag(data, 3, protowire.BytesType)
+	data = protowire.AppendBytes(data, connection)
 
-	got, err := decodeConnectionEvent(eventData, true)
+	got, err := decodeConnectionEvent(data, true)
 	if err != nil {
-		t.Fatalf("decodeConnectionEvent() error = %v", err)
+		t.Fatalf("decodeConnectionEvent(trafficOnly) error = %v", err)
 	}
-	if got.ID != "conn-traffic" {
-		t.Fatalf("traffic-only event ID = %q, want conn-traffic", got.ID)
+	if got.ID != "conn-traffic" || got.Connection == nil {
+		t.Fatalf("unexpected traffic event: %+v", got)
 	}
-	if got.Connection == nil {
-		t.Fatal("traffic-only event lost connection snapshot")
+	conn := got.Connection
+	if conn.ID != "conn-traffic" || conn.Inbound != "in-tuic" || conn.User != "user@example" {
+		t.Fatalf("unexpected traffic connection identity: %+v", conn)
 	}
-	if got.Connection.Inbound != "inbound-tuic" || got.Connection.User != "user@example" {
-		t.Fatalf("unexpected traffic identity: %+v", got.Connection)
-	}
-	if got.Connection.ClosedAt != 123456 || got.Connection.UplinkTotal != 700 || got.Connection.DownlinkTotal != 900 {
-		t.Fatalf("unexpected traffic totals: %+v", got.Connection)
+	if conn.CreatedAt != 1_000 || conn.ClosedAt != 2_000 || conn.UplinkTotal != 12_345 || conn.DownlinkTotal != 67_890 {
+		t.Fatalf("unexpected traffic snapshot counters: %+v", conn)
 	}
 }
 
-func TestNormalizeTrafficSnapshotEstablishesInitialBaseline(t *testing.T) {
-	client := NewConnectionAPIClient()
+func TestNormalizeTrafficSnapshotDerivesDeltas(t *testing.T) {
+	client := &ConnectionAPIClient{}
 
 	first := connectionEvents{Reset: true, Events: []*connectionEvent{{
 		Type: ConnectionEventOpened,
 		ID:   "conn-1",
 		Connection: &singBoxConnection{
-			Inbound:       "inbound-1",
-			User:          "alice@example",
+			ID:            "conn-1",
+			Inbound:       "in-vless",
+			User:          "user@example",
+			CreatedAt:     900,
 			UplinkTotal:   100,
 			DownlinkTotal: 200,
 		},
 	}}}
-	client.normalizeTrafficSnapshot(&first)
+	client.normalizeTrafficSnapshot(&first, 1_000)
 	if first.Events[0].UplinkDelta != 0 || first.Events[0].DownlinkDelta != 0 {
-		t.Fatalf("initial snapshot replayed historical bytes: %d/%d", first.Events[0].UplinkDelta, first.Events[0].DownlinkDelta)
+		t.Fatalf("first snapshot must establish baseline, got up=%d down=%d", first.Events[0].UplinkDelta, first.Events[0].DownlinkDelta)
 	}
 
 	second := connectionEvents{Reset: true, Events: []*connectionEvent{{
 		Type: ConnectionEventOpened,
 		ID:   "conn-1",
 		Connection: &singBoxConnection{
-			Inbound:       "inbound-1",
-			User:          "alice@example",
-			UplinkTotal:   145,
+			ID:            "conn-1",
+			Inbound:       "in-vless",
+			User:          "user@example",
+			CreatedAt:     900,
+			UplinkTotal:   160,
+			DownlinkTotal: 275,
+		},
+	}}}
+	client.normalizeTrafficSnapshot(&second, 2_000)
+	if second.Events[0].UplinkDelta != 60 || second.Events[0].DownlinkDelta != 75 {
+		t.Fatalf("unexpected incremental delta: up=%d down=%d", second.Events[0].UplinkDelta, second.Events[0].DownlinkDelta)
+	}
+
+	third := connectionEvents{Reset: true, Events: []*connectionEvent{
+		{
+			Type: ConnectionEventOpened,
+			ID:   "conn-1",
+			Connection: &singBoxConnection{
+				ID:            "conn-1",
+				Inbound:       "in-vless",
+				User:          "user@example",
+				CreatedAt:     900,
+				UplinkTotal:   10,
+				DownlinkTotal: 20,
+			},
+		},
+		{
+			Type: ConnectionEventOpened,
+			ID:   "conn-2",
+			Connection: &singBoxConnection{
+				ID:            "conn-2",
+				Inbound:       "in-tuic",
+				User:          "tuic@example",
+				CreatedAt:     2_500,
+				UplinkTotal:   33,
+				DownlinkTotal: 44,
+			},
+		},
+	}}
+	client.normalizeTrafficSnapshot(&third, 3_000)
+	if third.Events[0].UplinkDelta != 10 || third.Events[0].DownlinkDelta != 20 {
+		t.Fatalf("counter reset must count post-reset bytes, got up=%d down=%d", third.Events[0].UplinkDelta, third.Events[0].DownlinkDelta)
+	}
+	if third.Events[1].UplinkDelta != 33 || third.Events[1].DownlinkDelta != 44 {
+		t.Fatalf("new connection must count bytes since previous snapshot, got up=%d down=%d", third.Events[1].UplinkDelta, third.Events[1].DownlinkDelta)
+	}
+}
+
+func TestNormalizeTrafficSnapshotMarksRetainedClosedConnection(t *testing.T) {
+	client := &ConnectionAPIClient{}
+	client.trafficSnapshots = map[string]connectionTrafficSnapshot{
+		"conn-closed": {uplink: 100, downlink: 200},
+	}
+	client.trafficSnapshotAt = 1_000
+
+	response := connectionEvents{Reset: true, Events: []*connectionEvent{{
+		Type: ConnectionEventOpened,
+		ID:   "conn-closed",
+		Connection: &singBoxConnection{
+			ID:            "conn-closed",
+			Inbound:       "in-tuic",
+			User:          "user@example",
+			CreatedAt:     500,
+			ClosedAt:      1_500,
+			UplinkTotal:   125,
 			DownlinkTotal: 260,
 		},
 	}}}
-	client.normalizeTrafficSnapshot(&second)
-	if second.Events[0].UplinkDelta != 45 || second.Events[0].DownlinkDelta != 60 {
-		t.Fatalf("second snapshot delta = %d/%d, want 45/60", second.Events[0].UplinkDelta, second.Events[0].DownlinkDelta)
+
+	client.normalizeTrafficSnapshot(&response, 2_000)
+	event := response.Events[0]
+	if event.Type != ConnectionEventClosed || event.ClosedAt != 1_500 {
+		t.Fatalf("retained closed connection was not normalized: %+v", event)
+	}
+	if event.UplinkDelta != 25 || event.DownlinkDelta != 60 {
+		t.Fatalf("final closed-connection bytes were lost: up=%d down=%d", event.UplinkDelta, event.DownlinkDelta)
 	}
 }
 
-func TestNormalizeTrafficSnapshotCountsNewConnectionsAfterBaseline(t *testing.T) {
-	client := NewConnectionAPIClient()
-	client.normalizeTrafficSnapshot(&connectionEvents{Reset: true})
-
-	current := connectionEvents{Reset: true, Events: []*connectionEvent{{
-		Type: ConnectionEventOpened,
-		ID:   "conn-new",
-		Connection: &singBoxConnection{
-			Inbound:       "inbound-1",
-			User:          "bob@example",
-			UplinkTotal:   11,
-			DownlinkTotal: 22,
-		},
-	}}}
-	client.normalizeTrafficSnapshot(&current)
-	if current.Events[0].UplinkDelta != 11 || current.Events[0].DownlinkDelta != 22 {
-		t.Fatalf("new connection delta = %d/%d, want 11/22", current.Events[0].UplinkDelta, current.Events[0].DownlinkDelta)
-	}
-}
-
-func TestNormalizeTrafficSnapshotPreservesMissingBaseline(t *testing.T) {
-	client := NewConnectionAPIClient()
+func TestNormalizeTrafficSnapshotKeepsBaselineAcrossTemporaryAbsence(t *testing.T) {
+	client := &ConnectionAPIClient{}
 	first := connectionEvents{Reset: true, Events: []*connectionEvent{{
-		ID: "conn-1",
+		Type: ConnectionEventOpened,
+		ID:   "conn-gap",
 		Connection: &singBoxConnection{
+			ID:            "conn-gap",
+			CreatedAt:     500,
 			UplinkTotal:   100,
 			DownlinkTotal: 200,
 		},
 	}}}
-	client.normalizeTrafficSnapshot(&first)
-	client.normalizeTrafficSnapshot(&connectionEvents{Reset: true})
+	client.normalizeTrafficSnapshot(&first, 1_000)
 
-	returned := connectionEvents{Reset: true, Events: []*connectionEvent{{
-		ID: "conn-1",
-		Connection: &singBoxConnection{
-			UplinkTotal:   130,
-			DownlinkTotal: 240,
-		},
-	}}}
-	client.normalizeTrafficSnapshot(&returned)
-	if returned.Events[0].UplinkDelta != 30 || returned.Events[0].DownlinkDelta != 40 {
-		t.Fatalf("returned snapshot delta = %d/%d, want 30/40", returned.Events[0].UplinkDelta, returned.Events[0].DownlinkDelta)
-	}
-}
+	empty := connectionEvents{Reset: true}
+	client.normalizeTrafficSnapshot(&empty, 2_000)
 
-func TestNormalizeTrafficSnapshotHandlesCounterResetAndClosedConnection(t *testing.T) {
-	client := NewConnectionAPIClient()
-	first := connectionEvents{Reset: true, Events: []*connectionEvent{{
-		ID: "conn-1",
-		Connection: &singBoxConnection{
-			UplinkTotal:   500,
-			DownlinkTotal: 800,
-		},
-	}}}
-	client.normalizeTrafficSnapshot(&first)
-
-	reset := connectionEvents{Reset: true, Events: []*connectionEvent{{
+	reappeared := connectionEvents{Reset: true, Events: []*connectionEvent{{
 		Type: ConnectionEventOpened,
-		ID:   "conn-1",
+		ID:   "conn-gap",
 		Connection: &singBoxConnection{
-			ClosedAt:      987654,
-			UplinkTotal:   25,
-			DownlinkTotal: 35,
+			ID:            "conn-gap",
+			CreatedAt:     500,
+			UplinkTotal:   150,
+			DownlinkTotal: 260,
 		},
 	}}}
-	client.normalizeTrafficSnapshot(&reset)
-	if reset.Events[0].UplinkDelta != 25 || reset.Events[0].DownlinkDelta != 35 {
-		t.Fatalf("reset snapshot delta = %d/%d, want 25/35", reset.Events[0].UplinkDelta, reset.Events[0].DownlinkDelta)
-	}
-	if reset.Events[0].Type != ConnectionEventClosed || reset.Events[0].ClosedAt != 987654 {
-		t.Fatalf("closed snapshot not normalized: %+v", reset.Events[0])
-	}
-
-	repeated := connectionEvents{Reset: true, Events: []*connectionEvent{{
-		Type: ConnectionEventOpened,
-		ID:   "conn-1",
-		Connection: &singBoxConnection{
-			ClosedAt:      987654,
-			UplinkTotal:   25,
-			DownlinkTotal: 35,
-		},
-	}}}
-	client.normalizeTrafficSnapshot(&repeated)
-	if repeated.Events[0].UplinkDelta != 0 || repeated.Events[0].DownlinkDelta != 0 {
-		t.Fatalf("repeated closed snapshot was counted twice: %d/%d", repeated.Events[0].UplinkDelta, repeated.Events[0].DownlinkDelta)
+	client.normalizeTrafficSnapshot(&reappeared, 3_000)
+	if reappeared.Events[0].UplinkDelta != 50 || reappeared.Events[0].DownlinkDelta != 60 {
+		t.Fatalf("temporary absence lost traffic baseline: up=%d down=%d", reappeared.Events[0].UplinkDelta, reappeared.Events[0].DownlinkDelta)
 	}
 }
