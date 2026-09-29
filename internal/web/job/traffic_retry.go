@@ -6,7 +6,7 @@ type trafficCommitFunc func([]*xray.Traffic, []*xray.ClientTraffic) (bool, bool,
 
 // pendingTrafficBatch keeps deltas that were already consumed from a runtime
 // counter source but could not be committed to the database. Runtime collectors
-// such as Mieru and MTProto advance their own cursors when they are sampled, so
+// such as Mieru, MTProto and TUIC advance their own cursors when sampled, so
 // dropping a failed AddTraffic call would permanently lose those bytes.
 type pendingTrafficBatch struct {
 	inbounds []*xray.Traffic
@@ -20,6 +20,15 @@ func (b *pendingTrafficBatch) hasData() bool {
 func (b *pendingTrafficBatch) remember(inbounds []*xray.Traffic, clients []*xray.ClientTraffic) {
 	b.inbounds = inbounds
 	b.clients = clients
+}
+
+// appendBatch adds another already-consumed runtime snapshot to a batch that
+// may itself still be waiting for persistence. This is used when a collector
+// must stop immediately (for example on a core switch) before a previous DB
+// retry has succeeded.
+func (b *pendingTrafficBatch) appendBatch(inbounds []*xray.Traffic, clients []*xray.ClientTraffic) {
+	b.inbounds = append(b.inbounds, inbounds...)
+	b.clients = append(b.clients, clients...)
 }
 
 // flush retries the exact batch before a collector is sampled again. On
