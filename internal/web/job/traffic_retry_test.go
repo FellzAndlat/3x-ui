@@ -55,6 +55,38 @@ func TestPendingTrafficBatchRetainsFailedCommitAndClearsAfterRetry(t *testing.T)
 	}
 }
 
+func TestPendingTrafficBatchAppendKeepsOlderAndFinalSnapshots(t *testing.T) {
+	oldInbound := &xray.Traffic{Tag: "tuic-1", IsInbound: true, Up: 10, Down: 20}
+	oldClient := &xray.ClientTraffic{Email: "alice@example.com", Up: 3, Down: 4}
+	finalInbound := &xray.Traffic{Tag: "tuic-1", IsInbound: true, Up: 30, Down: 40}
+	finalClient := &xray.ClientTraffic{Email: "alice@example.com", Up: 5, Down: 6}
+
+	batch := pendingTrafficBatch{}
+	batch.remember([]*xray.Traffic{oldInbound}, []*xray.ClientTraffic{oldClient})
+	batch.appendBatch([]*xray.Traffic{finalInbound}, []*xray.ClientTraffic{finalClient})
+
+	calls := 0
+	_, _, err := batch.flush(func(inbounds []*xray.Traffic, clients []*xray.ClientTraffic) (bool, bool, error) {
+		calls++
+		if len(inbounds) != 2 || inbounds[0] != oldInbound || inbounds[1] != finalInbound {
+			t.Fatalf("combined inbound batch = %#v", inbounds)
+		}
+		if len(clients) != 2 || clients[0] != oldClient || clients[1] != finalClient {
+			t.Fatalf("combined client batch = %#v", clients)
+		}
+		return false, false, nil
+	})
+	if err != nil {
+		t.Fatalf("flush combined batch: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("commit calls = %d, want 1", calls)
+	}
+	if batch.hasData() {
+		t.Fatal("combined batch not cleared after successful commit")
+	}
+}
+
 func TestPendingTrafficBatchEmptyFlushDoesNotCallCommit(t *testing.T) {
 	batch := pendingTrafficBatch{}
 	called := false
