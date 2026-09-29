@@ -134,9 +134,16 @@ func (w *procLogWriter) emitLocked(line string) {
 	logger.Infof("tuic: tuic-server %s | %s", w.label, trimmed)
 
 	now := time.Now().UnixMilli()
-	lowerLine := strings.ToLower(line)
 	for uuid, email := range w.uuidToEmail {
-		if uuid == "" || email == "" || !strings.Contains(lowerLine, strings.ToLower(uuid)) {
+		if uuid == "" || email == "" {
+			continue
+		}
+		// A UUID appearing only in an error payload does not mean that user was
+		// authenticated. tuic-server puts the validated identity in the dedicated
+		// [uuid] field; requiring that field prevents failed auth attempts from
+		// marking a client online or claiming traffic.
+		peer := tuicLogPeerForUUID(line, uuid)
+		if peer == "" {
 			continue
 		}
 		if w.lastActive == nil {
@@ -144,9 +151,7 @@ func (w *procLogWriter) emitLocked(line string) {
 		}
 		w.lastActive[email] = now
 		if w.bindPeer != nil {
-			if peer := tuicLogPeerForUUID(line, uuid); peer != "" {
-				w.bindPeer(peer, email)
-			}
+			w.bindPeer(peer, email)
 		}
 	}
 }
