@@ -67,7 +67,7 @@ func serveTelemtSubscription(c *gin.Context) {
 	}
 
 	telemt := service.TelemtService{}
-	payload := telemtSubscriptionPayload{Enabled: telemt.Status().Enabled}
+	payload := telemtSubscriptionPayload{Enabled: telemt.IsEnabled()}
 	if !payload.Enabled {
 		c.Header("Cache-Control", "private, no-store")
 		c.JSON(http.StatusOK, payload)
