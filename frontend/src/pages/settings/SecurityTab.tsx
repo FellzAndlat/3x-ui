@@ -259,7 +259,7 @@ export default function SecurityTab({ allSetting, updateSetting, saveSetting }: 
 
   function confirmDeleteToken(row: ApiTokenRow) {
     modal.confirm({
-      title: `${t('delete')} \"${row.name}\"?`,
+      title: `${t('delete')} "${row.name}"?`,
       content:
         t('pages.settings.security.apiTokenDeleteWarning') ||
         'Any caller using this token will stop authenticating immediately.',
