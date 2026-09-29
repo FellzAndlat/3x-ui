@@ -1,9 +1,8 @@
 package job
 
-import (
-	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
-	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-)
+import "github.com/SawaMEN/3x-ui/v3/internal/xray"
+
+type trafficCommitFunc func([]*xray.Traffic, []*xray.ClientTraffic) (bool, bool, error)
 
 // pendingTrafficBatch keeps deltas that were already consumed from a runtime
 // counter source but could not be committed to the database. Runtime collectors
@@ -26,11 +25,11 @@ func (b *pendingTrafficBatch) remember(inbounds []*xray.Traffic, clients []*xray
 // flush retries the exact batch before a collector is sampled again. On
 // success it clears the batch; on failure it leaves the slices intact so the
 // next poll can retry without double-consuming the runtime counters.
-func (b *pendingTrafficBatch) flush(inboundService *service.InboundService) (bool, bool, error) {
+func (b *pendingTrafficBatch) flush(commit trafficCommitFunc) (bool, bool, error) {
 	if !b.hasData() {
 		return false, false, nil
 	}
-	needRestart, clientsDisabled, err := inboundService.AddTraffic(b.inbounds, b.clients)
+	needRestart, clientsDisabled, err := commit(b.inbounds, b.clients)
 	if err != nil {
 		return needRestart, clientsDisabled, err
 	}
