@@ -19,8 +19,10 @@ import (
 type AmneziaWGJob struct {
 	inboundService service.InboundService
 	settingService service.SettingService
+	runMu          sync.Mutex
 	mu             sync.Mutex
 	lastTraffic    map[amneziaWGTrafficKey]amneziaWGTrafficSample
+	pending        pendingTrafficBatch
 }
 
 type amneziaWGTrafficKey struct {
@@ -65,6 +67,21 @@ func pruneAmneziaWGBaselines(
 }
 
 func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Instance) {
+	// Diagnostics expose cumulative counters. Serialize sampling and persistence
+	// so overlapping scheduler runs cannot advance the baseline out of order.
+	j.runMu.Lock()
+	defer j.runMu.Unlock()
+
+	// The baseline is advanced when diagnostics are sampled. If the database
+	// rejected the previous AddTraffic call, retry that exact consumed batch
+	// before reading a newer cumulative snapshot.
+	if j.pending.hasData() {
+		if _, _, err := j.pending.flush(&j.inboundService); err != nil {
+			logger.Warning("amneziawg job: retry pending traffic failed:", err)
+			return
+		}
+	}
+
 	if coreType != service.CoreTypeSingBox || len(desired) == 0 {
 		return
 	}
@@ -129,7 +146,8 @@ func (j *AmneziaWGJob) collectTraffic(coreType string, desired []amneziawg.Insta
 
 	if len(traffic) > 0 || len(clientTraffic) > 0 {
 		if _, _, err := j.inboundService.AddTraffic(traffic, clientTraffic); err != nil {
-			logger.Warning("amneziawg job: add traffic failed:", err)
+			j.pending.remember(traffic, clientTraffic)
+			logger.Warning("amneziawg job: add traffic failed; batch queued for retry:", err)
 		}
 	}
 	if len(activeEmails) > 0 {
