@@ -2,6 +2,7 @@ package firewall
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -36,7 +37,11 @@ func (osCommandRunner) LookPath(file string) (string, error) {
 }
 
 func (osCommandRunner) CombinedOutput(ctx context.Context, path string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, path, args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, path, args...)
+	// Firewall CLIs such as UFW expose human-readable status text. Force a
+	// stable locale so backend detection does not break on localized servers.
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	return cmd.CombinedOutput()
 }
 
 func (osCommandRunner) Run(ctx context.Context, path string, args ...string) error {
@@ -64,7 +69,7 @@ var candidates = []candidate{
 		binary:  "firewall-cmd",
 		args:    []string{"--state"},
 		active: func(output string) bool {
-			return strings.TrimSpace(output) == "running"
+			return strings.EqualFold(strings.TrimSpace(output), "running")
 		},
 	},
 	{
