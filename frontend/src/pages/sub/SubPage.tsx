@@ -116,23 +116,17 @@ export default function SubPage() {
     setMessageInstance(messageApi);
   }, [messageApi]);
   const [lang, setLang] = useState<string>(() => LanguageManager.getLanguage('subscription'));
+  const telemtEndpoint = buildTelemtEndpoint(window.location.href, sId);
   const [telemtData, setTelemtData] = useState<TelemtSubscriptionData>({});
-  const [telemtLoading, setTelemtLoading] = useState(true);
-  const [telemtError, setTelemtError] = useState(false);
+  const [telemtLoading, setTelemtLoading] = useState(() => Boolean(telemtEndpoint));
+  const [telemtError, setTelemtError] = useState(() => !telemtEndpoint);
 
   useEffect(() => {
-    const endpoint = buildTelemtEndpoint(window.location.href, sId);
-    if (!endpoint) {
-      setTelemtLoading(false);
-      setTelemtError(true);
-      return;
-    }
+    if (!telemtEndpoint) return;
 
     const controller = new AbortController();
-    setTelemtLoading(true);
-    setTelemtError(false);
 
-    void fetch(endpoint, {
+    void fetch(telemtEndpoint, {
       method: 'GET',
       cache: 'no-store',
       credentials: 'same-origin',
@@ -161,7 +155,7 @@ export default function SubPage() {
       });
 
     return () => controller.abort();
-  }, []);
+  }, [telemtEndpoint]);
 
   const onLangChange = useCallback((next: string) => {
     setLang(next);

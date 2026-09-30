@@ -736,6 +736,7 @@ export interface Node {
   clientCount: number;
   configDirty: boolean;
   configDirtyAt: number;
+  coreType: string;
   cpuPct: number;
   createdAt: number;
   depletedCount: number;
@@ -760,7 +761,13 @@ export interface Node {
   pinnedCertSha256: string;
   port: number;
   remark: string;
+  runningCore: string;
   scheme: string;
+  singboxError: string;
+  singboxInstalled: boolean;
+  singboxKnown: boolean;
+  singboxState: string;
+  singboxVersion: string;
   sortOrder: number;
   status: string;
   tlsVerifyMode: string;
@@ -799,6 +806,7 @@ export interface NodeView {
   clientCount: number;
   configDirty: boolean;
   configDirtyAt: number;
+  coreType: string;
   cpuPct: number;
   createdAt: number;
   depletedCount: number;
@@ -824,7 +832,13 @@ export interface NodeView {
   pinnedCertSha256: string;
   port: number;
   remark: string;
+  runningCore: string;
   scheme: string;
+  singboxError: string;
+  singboxInstalled: boolean;
+  singboxKnown: boolean;
+  singboxState: string;
+  singboxVersion: string;
   status: string;
   tlsVerifyMode: string;
   transitive?: boolean;
@@ -866,11 +880,18 @@ export interface PeerActivity {
 }
 
 export interface ProbeResultUI {
+  coreType: string;
   cpuPct: number;
   error: string;
   latencyMs: number;
   memPct: number;
   panelVersion: string;
+  runningCore: string;
+  singboxError: string;
+  singboxInstalled: boolean;
+  singboxKnown: boolean;
+  singboxState: string;
+  singboxVersion: string;
   status: string;
   uptimeSecs: number;
   xrayError: string;

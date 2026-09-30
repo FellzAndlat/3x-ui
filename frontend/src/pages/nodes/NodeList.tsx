@@ -130,22 +130,22 @@ function statusIssue(
   return { tip, iconColor };
 }
 
-function StatusDot(props: HealthProps) {
-  if (props.status === 'online') {
-    return hasCoreProblem(props) ? (
+function StatusDot({ record }: { record: HealthProps }) {
+  if (record.status === 'online') {
+    return hasCoreProblem(record) ? (
       <span className="xray-error-dot" />
     ) : (
       <span className="online-dot" />
     );
   }
-  return <Badge status={badgeStatus(props.status)} />;
+  return <Badge status={badgeStatus(record.status)} />;
 }
 
-function StatusLabel(props: HealthProps) {
+function StatusLabel({ record }: { record: HealthProps }) {
   const { t } = useTranslation();
-  if (props.status === 'online') {
-    const health = coreHealth(props);
-    if (hasCoreProblem(props)) {
+  if (record.status === 'online') {
+    const health = coreHealth(record);
+    if (hasCoreProblem(record)) {
       return (
         <span style={{ color: CORE_ERROR_COLOR }}>
           {t('pages.nodes.statusValues.online')} ({health.configured}: {health.state || 'stopped'})
@@ -155,11 +155,11 @@ function StatusLabel(props: HealthProps) {
     return (
       <span style={{ color: 'var(--ant-color-success)' }}>
         {t('pages.nodes.statusValues.online')}
-        {props.runningCore ? ` (${props.runningCore})` : ''}
+        {record.runningCore ? ` (${record.runningCore})` : ''}
       </span>
     );
   }
-  return <span>{t(`pages.nodes.statusValues.${props.status || 'unknown'}`)}</span>;
+  return <span>{t(`pages.nodes.statusValues.${record.status || 'unknown'}`)}</span>;
 }
 
 function formatPct(p?: number): string {
@@ -457,8 +457,8 @@ function NodeList({
           const { tip, iconColor } = statusIssue(record);
           return (
             <Space size={4}>
-              <StatusDot {...record} />
-              <StatusLabel {...record} />
+              <StatusDot record={record} />
+              <StatusLabel record={record} />
               {tip && (
                 <Tooltip title={tip}>
                   <ExclamationCircleOutlined style={{ color: iconColor }} />
@@ -720,7 +720,7 @@ function NodeList({
                   >
                     <div className="card-head">
                       <ApartmentOutlined style={{ opacity: 0.6 }} />
-                      <StatusDot {...record} />
+                      <StatusDot record={record} />
                       <span className="node-name">{record.name}</span>
                       <div className="card-actions">
                         <Tag icon={<ApartmentOutlined />} style={{ margin: 0 }}>
@@ -769,7 +769,7 @@ function NodeList({
                         aria-label={record.name}
                         onKeyDown={activateOnKey(() => toggleExpanded(record.id))}
                       />
-                      <StatusDot {...record} />
+                      <StatusDot record={record} />
                       <span className="node-name">{record.name}</span>
                       <div className="card-actions">
                         <Tooltip title={t('info')}>
@@ -922,8 +922,8 @@ function NodeList({
                 </div>
                 <div className="stat-row">
                   <span className="stat-label">{t('pages.nodes.status')}</span>
-                  <StatusDot {...statsNode} />
-                  <StatusLabel {...statsNode} />
+                  <StatusDot record={statsNode} />
+                  <StatusLabel record={statsNode} />
                   {(() => {
                     const { tip, iconColor } = statusIssue(statsNode);
                     return tip ? (

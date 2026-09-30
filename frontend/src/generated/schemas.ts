@@ -3176,6 +3176,9 @@ export const SCHEMAS: Record<string, unknown> = {
         "format": "int64",
         "type": "integer"
       },
+      "coreType": {
+        "type": "string"
+      },
       "cpuPct": {
         "example": 23.5,
         "type": "number"
@@ -3280,12 +3283,30 @@ export const SCHEMAS: Record<string, unknown> = {
       "remark": {
         "type": "string"
       },
+      "runningCore": {
+        "type": "string"
+      },
       "scheme": {
         "enum": [
           "http",
           "https"
         ],
         "example": "https",
+        "type": "string"
+      },
+      "singboxError": {
+        "type": "string"
+      },
+      "singboxInstalled": {
+        "type": "boolean"
+      },
+      "singboxKnown": {
+        "type": "boolean"
+      },
+      "singboxState": {
+        "type": "string"
+      },
+      "singboxVersion": {
         "type": "string"
       },
       "sortOrder": {
@@ -3339,6 +3360,7 @@ export const SCHEMAS: Record<string, unknown> = {
       "clientCount",
       "configDirty",
       "configDirtyAt",
+      "coreType",
       "cpuPct",
       "createdAt",
       "depletedCount",
@@ -3362,7 +3384,13 @@ export const SCHEMAS: Record<string, unknown> = {
       "pinnedCertSha256",
       "port",
       "remark",
+      "runningCore",
       "scheme",
+      "singboxError",
+      "singboxInstalled",
+      "singboxKnown",
+      "singboxState",
+      "singboxVersion",
       "sortOrder",
       "status",
       "tlsVerifyMode",
@@ -3496,6 +3524,9 @@ export const SCHEMAS: Record<string, unknown> = {
         "format": "int64",
         "type": "integer"
       },
+      "coreType": {
+        "type": "string"
+      },
       "cpuPct": {
         "example": 12.5,
         "type": "number"
@@ -3602,8 +3633,27 @@ export const SCHEMAS: Record<string, unknown> = {
         "example": "Primary edge",
         "type": "string"
       },
+      "runningCore": {
+        "type": "string"
+      },
       "scheme": {
         "example": "https",
+        "type": "string"
+      },
+      "singboxError": {
+        "type": "string"
+      },
+      "singboxInstalled": {
+        "type": "boolean"
+      },
+      "singboxKnown": {
+        "type": "boolean"
+      },
+      "singboxState": {
+        "example": "running",
+        "type": "string"
+      },
+      "singboxVersion": {
         "type": "string"
       },
       "status": {
@@ -3648,6 +3698,7 @@ export const SCHEMAS: Record<string, unknown> = {
       "clientCount",
       "configDirty",
       "configDirtyAt",
+      "coreType",
       "cpuPct",
       "createdAt",
       "depletedCount",
@@ -3672,7 +3723,13 @@ export const SCHEMAS: Record<string, unknown> = {
       "pinnedCertSha256",
       "port",
       "remark",
+      "runningCore",
       "scheme",
+      "singboxError",
+      "singboxInstalled",
+      "singboxKnown",
+      "singboxState",
+      "singboxVersion",
       "status",
       "tlsVerifyMode",
       "updatedAt",
@@ -3815,6 +3872,9 @@ export const SCHEMAS: Record<string, unknown> = {
   },
   "ProbeResultUI": {
     "properties": {
+      "coreType": {
+        "type": "string"
+      },
       "cpuPct": {
         "example": 12.5,
         "type": "number"
@@ -3832,6 +3892,24 @@ export const SCHEMAS: Record<string, unknown> = {
       },
       "panelVersion": {
         "example": "v3.x.x",
+        "type": "string"
+      },
+      "runningCore": {
+        "type": "string"
+      },
+      "singboxError": {
+        "type": "string"
+      },
+      "singboxInstalled": {
+        "type": "boolean"
+      },
+      "singboxKnown": {
+        "type": "boolean"
+      },
+      "singboxState": {
+        "type": "string"
+      },
+      "singboxVersion": {
         "type": "string"
       },
       "status": {
@@ -3856,11 +3934,18 @@ export const SCHEMAS: Record<string, unknown> = {
       }
     },
     "required": [
+      "coreType",
       "cpuPct",
       "error",
       "latencyMs",
       "memPct",
       "panelVersion",
+      "runningCore",
+      "singboxError",
+      "singboxInstalled",
+      "singboxKnown",
+      "singboxState",
+      "singboxVersion",
       "status",
       "uptimeSecs",
       "xrayError",

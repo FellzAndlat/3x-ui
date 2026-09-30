@@ -18,7 +18,7 @@ function sampleNodes(): NodeRecord[] {
 describe('NodeList desktop table row keys', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('gives transitive sub-node rows distinct keys instead of colliding on id 0', () => {
+  it('keeps transitive rows and status cells free of React key collisions', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     renderWithProviders(
@@ -42,6 +42,14 @@ describe('NodeList desktop table row keys', () => {
     const duplicateKeyWarning = errorSpy.mock.calls.some((call) =>
       call.some((arg) => typeof arg === 'string' && arg.includes('same key')),
     );
+    const spreadKeyWarning = errorSpy.mock.calls.some((call) =>
+      call.some(
+        (arg) =>
+          typeof arg === 'string' && arg.includes('key') && arg.includes('being spread into JSX'),
+      ),
+    );
+
     expect(duplicateKeyWarning).toBe(false);
+    expect(spreadKeyWarning).toBe(false);
   });
 });
