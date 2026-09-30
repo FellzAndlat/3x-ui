@@ -71,7 +71,7 @@ func (s *FirewallService) SetAutoSyncPreference(ctx context.Context, enabled boo
 	firewallMu.Lock()
 	defer firewallMu.Unlock()
 
-	settings := &SettingService{}
+	settings := SettingService{}
 	if !enabled {
 		if err := settings.setBool(firewallAutoSyncKey, false); err != nil {
 			return FirewallStatus{}, err
@@ -119,9 +119,21 @@ func (s *FirewallService) StartAutoSync() {
 				if err != nil {
 					return
 				}
+				desiredEnabled, err := firewallManagedEnabledPreference()
+				if err != nil {
+					logger.Debug("firewall desired state read failed:", err)
+					return
+				}
 				on, err := backend.enabled(ctx)
 				if err != nil {
 					return
+				}
+				if shouldRestoreManagedNativeFirewall(backend.name, on, desiredEnabled) {
+					if err := s.syncManagedSafeLocked(ctx, backend, rememberedFirewallSafetyPort()); err != nil {
+						logger.Debug("firewall native restore failed:", err)
+						return
+					}
+					on = true
 				}
 				if err := s.reconcileManagedPingStateLocked(on); err != nil {
 					logger.Debug("firewall ping reconcile failed:", err)
