@@ -23,6 +23,26 @@ type Status struct {
 	Active    bool    `json:"active"`
 }
 
+type commandRunner interface {
+	LookPath(file string) (string, error)
+	CombinedOutput(ctx context.Context, path string, args ...string) ([]byte, error)
+	Run(ctx context.Context, path string, args ...string) error
+}
+
+type osCommandRunner struct{}
+
+func (osCommandRunner) LookPath(file string) (string, error) {
+	return exec.LookPath(file)
+}
+
+func (osCommandRunner) CombinedOutput(ctx context.Context, path string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, path, args...).CombinedOutput()
+}
+
+func (osCommandRunner) Run(ctx context.Context, path string, args ...string) error {
+	return exec.CommandContext(ctx, path, args...).Run()
+}
+
 type candidate struct {
 	backend Backend
 	binary  string
@@ -67,16 +87,19 @@ func Detect(ctx context.Context) Status {
 	if runtime.GOOS != "linux" {
 		return Status{Backend: BackendNone}
 	}
+	return detect(ctx, osCommandRunner{})
+}
 
+func detect(ctx context.Context, runner commandRunner) Status {
 	installed := make([]candidate, 0, len(candidates))
 	for _, item := range candidates {
-		path, err := exec.LookPath(item.binary)
+		path, err := runner.LookPath(item.binary)
 		if err != nil {
 			continue
 		}
 
 		installed = append(installed, item)
-		output, err := exec.CommandContext(ctx, path, item.args...).CombinedOutput()
+		output, err := runner.CombinedOutput(ctx, path, item.args...)
 		if err == nil && item.active(string(output)) {
 			return Status{Backend: item.backend, Installed: true, Active: true}
 		}
