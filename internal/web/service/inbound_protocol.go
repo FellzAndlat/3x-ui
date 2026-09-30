@@ -53,17 +53,33 @@ func inboundCanEnableTlsFlow(protocol, streamSettings, settings string) bool {
 	}
 }
 
-// nodeEligibleProtocols mirrors the frontend's NODE_ELIGIBLE_PROTOCOLS. The
-// sidecar-managed protocols are absent because their reconcile loops only query
-// NodeID IS NULL rows, so a node-assigned one would never be reconciled at all.
-// A new protocol defaults to ineligible until added here, as on the frontend.
+// nodeEligibleProtocols mirrors the frontend's NODE_ELIGIBLE_PROTOCOLS. These
+// are the inbound protocols the panel can manage through the remote panel
+// runtime. Core-specific support is validated separately by
+// coreSupportsInboundProtocol, so sidecar protocols remain assignable to either
+// core while Xray/sing-box-only listeners are rejected for the wrong core.
 var nodeEligibleProtocols = map[model.Protocol]bool{
 	model.VLESS:       true,
 	model.VMESS:       true,
 	model.Trojan:      true,
 	model.Shadowsocks: true,
-	model.Hysteria:    true,
 	model.WireGuard:   true,
+	model.Hysteria:    true,
+	model.HTTP:        true,
+	model.Mixed:       true,
+	model.Tunnel:      true,
+	model.Tun:         true,
+	model.MTProto:     true,
+	model.AmneziaWG:   true,
+	model.TUIC:        true,
+	model.Pingtunnel:  true,
+	model.TrustTunnel: true,
+	model.NaiveProxy:  true,
+	model.AnyTLS:      true,
+	model.ShadowTLS:   true,
+	model.Mieru:       true,
+	model.VKTurnProxy: true,
+	model.Sudoku:      true,
 }
 
 // isNodeEligibleProtocol reports whether protocol may be assigned to a node.

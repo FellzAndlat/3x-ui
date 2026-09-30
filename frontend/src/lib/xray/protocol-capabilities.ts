@@ -87,7 +87,6 @@ export function canEnableSniffing(values: { protocol: string }): boolean {
     values.protocol !== 'trusttunnel' &&
     values.protocol !== 'vk-turn-proxy' &&
     values.protocol !== 'naive' &&
-    values.protocol !== 'psiphon' &&
     values.protocol !== 'mieru' &&
     values.protocol !== 'sudoku' &&
     values.protocol !== 'anytls' &&

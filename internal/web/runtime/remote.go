@@ -93,9 +93,9 @@ type Remote struct {
 
 	// Per-node client honoring the TLS verify mode, built once and reused; a
 	// node config change drops the cached Remote so the next one rebuilds it.
-	clientOnce sync.Once
-	client     *http.Client
-	clientErr  error
+	clientMu       sync.Mutex
+	client         *http.Client
+	clientProxyURL string
 
 	egressResolver NodeEgressResolver
 }
@@ -141,14 +141,32 @@ func (r *Remote) recordCaps(h http.Header) {
 // httpClient lazily builds and caches the per-node client honoring the TLS
 // verify mode, so Remote ops don't fall back to system CA on skip/pin (#5264).
 func (r *Remote) httpClient() (*http.Client, error) {
-	r.clientOnce.Do(func() {
-		proxyURL := ""
-		if r.node.OutboundTag != "" && r.egressResolver != nil {
-			proxyURL = r.egressResolver.NodeEgressProxyURL(r.node.Id)
+	proxyURL := ""
+	if outboundTag := strings.TrimSpace(r.node.OutboundTag); outboundTag != "" {
+		if r.egressResolver == nil {
+			return nil, fmt.Errorf("node %q requires outbound %q, but no egress resolver is configured; refusing direct connection", r.node.Name, outboundTag)
 		}
-		r.client, r.clientErr = HTTPClientForNode(r.node, proxyURL)
-	})
-	return r.client, r.clientErr
+		proxyURL = strings.TrimSpace(r.egressResolver.NodeEgressProxyURL(r.node.Id))
+		if proxyURL == "" {
+			return nil, fmt.Errorf("node %q requires outbound %q, but its egress bridge is unavailable; refusing direct connection", r.node.Name, outboundTag)
+		}
+	}
+
+	r.clientMu.Lock()
+	defer r.clientMu.Unlock()
+	if r.client != nil && r.clientProxyURL == proxyURL {
+		return r.client, nil
+	}
+	client, err := HTTPClientForNode(r.node, proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	if r.client != nil {
+		r.client.CloseIdleConnections()
+	}
+	r.client = client
+	r.clientProxyURL = proxyURL
+	return r.client, nil
 }
 
 func (r *Remote) baseURL() (string, error) {
@@ -642,7 +660,18 @@ func (r *Remote) RestartXray(ctx context.Context) error {
 	// restart whichever core the node has selected. Newer nodes expose the
 	// core-aware endpoint and route it to Xray or sing-box as appropriate.
 	_, err := r.do(ctx, http.MethodPost, "panel/api/server/restartCoreService", nil)
-	return err
+	if err == nil {
+		return nil
+	}
+	// Older nodes predate restartCoreService and only expose restartXrayService.
+	// Fall back only when the endpoint itself is missing; a real 5xx/core error
+	// from a new node must be surfaced rather than hidden by a second restart.
+	msg := err.Error()
+	if !strings.Contains(msg, "HTTP 404") && !strings.Contains(msg, "HTTP 405") {
+		return err
+	}
+	_, legacyErr := r.do(ctx, http.MethodPost, "panel/api/server/restartXrayService", nil)
+	return legacyErr
 }
 
 // UpdatePanel asks the node to run its own official self-updater (update.sh)
@@ -710,7 +739,11 @@ func (r *Remote) ResetAllTraffics(ctx context.Context) error {
 }
 
 func (r *Remote) ResetInboundTraffic(ctx context.Context, ib *model.Inbound) error {
-	_, err := r.do(ctx, http.MethodPost, fmt.Sprintf("panel/api/inbounds/%d/resetTraffic", ib.Id), nil)
+	id, err := r.resolveRemoteID(ctx, ib.Tag)
+	if err != nil {
+		return fmt.Errorf("remote ResetInboundTraffic: resolve tag %q: %w", ib.Tag, err)
+	}
+	_, err = r.do(ctx, http.MethodPost, fmt.Sprintf("panel/api/inbounds/%d/resetTraffic", id), nil)
 	return err
 }
 

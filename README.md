@@ -81,8 +81,8 @@ x-ui update
 
 - Управление **Xray-core** и **sing-box**, включая переключение активного ядра.
 - Создание и управление inbound'ами и клиентами.
-- Поддержка **VMess, VLESS, Trojan, Shadowsocks, WireGuard, Hysteria, HTTP, Mixed, Tunnel, TUN, MTProto, AmneziaWG, TUIC, Naive, Psiphon, Mieru** и **vk-turn-proxy**.
-- Локальное управление отдельными sidecar-сервисами **Mieru** и **Psiphon**; их конфигурации и процессы синхронизируются с активными inbound'ами.
+- Поддержка **VMess, VLESS, Trojan, Shadowsocks, WireGuard, Hysteria, HTTP, Mixed, Tunnel, TUN, MTProto, AmneziaWG, TUIC, Naive, Mieru** и **vk-turn-proxy**.
+- Локальное управление отдельным sidecar-сервисом **Mieru**; его конфигурация и процесс синхронизируются с активными inbound'ами.
 - MTProto через встроенный **mtg** и отдельный **Telemt**.
 - Лимиты трафика, срок действия, IP/HWID-лимиты и статистика.
 - Поддержка клиентских подписок, JSON/Clash-экспорта и внешних ссылок/удалённых подписок, привязанных к клиенту.

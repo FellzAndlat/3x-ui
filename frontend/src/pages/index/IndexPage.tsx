@@ -106,6 +106,18 @@ export default function IndexPage() {
   const portBindError = corePortBindError(displayCoreError);
   const displayCoreColor = coreType === 'sing-box' ? coreColor : status.xray.color;
 
+  const refreshSingBoxStatus = useCallback(async () => {
+    const msg = await HttpUtil.get<{
+      running?: boolean;
+      version?: string;
+      error?: string;
+    }>('/panel/api/setting/singbox/status', undefined, { silent: true });
+    setCoreRunning(!!msg?.success && !!msg.obj?.running);
+    setCoreVersion(msg?.success && msg.obj?.version ? msg.obj.version : '');
+    setCoreError(msg?.success && msg.obj?.error ? msg.obj.error : '');
+    setCoreColor(msg?.success && msg.obj?.running ? 'green' : 'red');
+  }, []);
+
   useEffect(() => {
     if (coreType !== 'sing-box') return;
 
@@ -113,16 +125,7 @@ export default function IndexPage() {
     let timer: number | undefined;
     const syncSingBoxStatus = async () => {
       if (!document.hidden) {
-        const msg = await HttpUtil.get<{
-          running?: boolean;
-          version?: string;
-          error?: string;
-        }>('/panel/api/setting/singbox/status', undefined, { silent: true });
-        if (cancelled) return;
-        setCoreRunning(!!msg?.success && !!msg.obj?.running);
-        setCoreVersion(msg?.success && msg.obj?.version ? msg.obj.version : '');
-        setCoreError(msg?.success && msg.obj?.error ? msg.obj.error : '');
-        setCoreColor(msg?.success && msg.obj?.running ? 'green' : 'red');
+        await refreshSingBoxStatus();
       }
       if (!cancelled) timer = window.setTimeout(syncSingBoxStatus, 10000);
     };
@@ -132,7 +135,7 @@ export default function IndexPage() {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [coreType]);
+  }, [coreType, refreshSingBoxStatus]);
   useEffect(() => {
     HttpUtil.post<{ accessLogEnable?: boolean; devChannelEnable?: boolean }>(
       '/panel/api/setting/defaultSettings',
@@ -160,12 +163,14 @@ export default function IndexPage() {
   const stopXray = useCallback(async () => {
     await HttpUtil.post('/panel/api/server/stopCoreService');
     await refresh();
-  }, [refresh]);
+    if (coreType === 'sing-box') await refreshSingBoxStatus();
+  }, [coreType, refresh, refreshSingBoxStatus]);
 
   const restartXray = useCallback(async () => {
     await HttpUtil.post('/panel/api/server/restartCoreService');
     await refresh();
-  }, [refresh]);
+    if (coreType === 'sing-box') await refreshSingBoxStatus();
+  }, [coreType, refresh, refreshSingBoxStatus]);
 
   async function handleChannelChange(dev: boolean) {
     const res = await HttpUtil.post('/panel/api/server/setUpdateChannel', { dev });

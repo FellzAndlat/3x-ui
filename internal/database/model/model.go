@@ -40,7 +40,6 @@ const (
 	NaiveProxy  Protocol = "naive"
 	AnyTLS      Protocol = "anytls"
 	ShadowTLS   Protocol = "shadowtls"
-	Psiphon     Protocol = "psiphon"
 	Mieru       Protocol = "mieru"
 	VKTurnProxy Protocol = "vk-turn-proxy"
 	Sudoku      Protocol = "sudoku"
@@ -814,23 +813,30 @@ type Node struct {
 	// Heartbeat-updated fields. UpdatedAt advances on every probe even when
 	// the row is otherwise unchanged so the UI's "last seen" tooltip is
 	// truthful without us having to read LastHeartbeat separately.
-	Status        string  `json:"status" gorm:"default:unknown" example:"online"` // online|offline|unknown
-	LastHeartbeat int64   `json:"lastHeartbeat" example:"1700000000"`             // unix seconds, 0 = never
-	LatencyMs     int     `json:"latencyMs" example:"42"`
-	XrayVersion   string  `json:"xrayVersion" example:"25.10.31"`
-	PanelVersion  string  `json:"panelVersion" gorm:"column:panel_version" example:"v3.x.x"`
-	CpuPct        float64 `json:"cpuPct" example:"23.5"`
-	MemPct        float64 `json:"memPct" example:"45.1"`
-	UptimeSecs    uint64  `json:"uptimeSecs" example:"86400"`
-	NetUp         uint64  `json:"netUp" gorm:"column:net_up" example:"1048576"`
-	NetDown       uint64  `json:"netDown" gorm:"column:net_down" example:"2097152"`
-	LastError     string  `json:"lastError"`
+	Status           string  `json:"status" gorm:"default:unknown" example:"online"` // online|offline|unknown
+	LastHeartbeat    int64   `json:"lastHeartbeat" example:"1700000000"`             // unix seconds, 0 = never
+	LatencyMs        int     `json:"latencyMs" example:"42"`
+	XrayVersion      string  `json:"xrayVersion" example:"25.10.31"`
+	SingBoxVersion   string  `json:"singboxVersion" gorm:"column:singbox_version"`
+	SingBoxInstalled bool    `json:"singboxInstalled" gorm:"column:singbox_installed;default:false"`
+	SingBoxKnown     bool    `json:"singboxKnown" gorm:"column:singbox_known;default:false"`
+	CoreType         string  `json:"coreType" gorm:"column:core_type"`
+	RunningCore      string  `json:"runningCore" gorm:"column:running_core"`
+	PanelVersion     string  `json:"panelVersion" gorm:"column:panel_version" example:"v3.x.x"`
+	CpuPct           float64 `json:"cpuPct" example:"23.5"`
+	MemPct           float64 `json:"memPct" example:"45.1"`
+	UptimeSecs       uint64  `json:"uptimeSecs" example:"86400"`
+	NetUp            uint64  `json:"netUp" gorm:"column:net_up" example:"1048576"`
+	NetDown          uint64  `json:"netDown" gorm:"column:net_down" example:"2097152"`
+	LastError        string  `json:"lastError"`
 
 	// XrayState and XrayError are captured from the remote node's /panel/api/server/status
 	// during heartbeats. They let the central panel distinguish "panel API reachable"
 	// (status=online) from "Xray core itself has failed on the node" for monitoring.
-	XrayState string `json:"xrayState" gorm:"column:xray_state"`
-	XrayError string `json:"xrayError" gorm:"column:xray_error"`
+	XrayState    string `json:"xrayState" gorm:"column:xray_state"`
+	XrayError    string `json:"xrayError" gorm:"column:xray_error"`
+	SingBoxState string `json:"singboxState" gorm:"column:singbox_state"`
+	SingBoxError string `json:"singboxError" gorm:"column:singbox_error"`
 
 	ConfigDirty   bool  `json:"configDirty" gorm:"default:false"`
 	ConfigDirtyAt int64 `json:"configDirtyAt"`
@@ -863,20 +869,27 @@ type Node struct {
 // computed by the consuming master from its own per-GUID data, never trusted
 // from the child, so this carries identity/health only.
 type NodeSummary struct {
-	Guid          string `json:"guid"`
-	ParentGuid    string `json:"parentGuid"`
-	Name          string `json:"name"`
-	Address       string `json:"address"`
-	Scheme        string `json:"scheme"`
-	Port          int    `json:"port"`
-	Status        string `json:"status"`
-	LastHeartbeat int64  `json:"lastHeartbeat"`
-	LatencyMs     int    `json:"latencyMs"`
-	PanelVersion  string `json:"panelVersion"`
-	XrayVersion   string `json:"xrayVersion"`
-	// XrayState/XrayError forwarded so masters can surface xray failure on transitive sub-nodes too.
-	XrayState string `json:"xrayState"`
-	XrayError string `json:"xrayError,omitempty"`
+	Guid             string `json:"guid"`
+	ParentGuid       string `json:"parentGuid"`
+	Name             string `json:"name"`
+	Address          string `json:"address"`
+	Scheme           string `json:"scheme"`
+	Port             int    `json:"port"`
+	Status           string `json:"status"`
+	LastHeartbeat    int64  `json:"lastHeartbeat"`
+	LatencyMs        int    `json:"latencyMs"`
+	PanelVersion     string `json:"panelVersion"`
+	XrayVersion      string `json:"xrayVersion"`
+	SingBoxVersion   string `json:"singboxVersion"`
+	SingBoxInstalled bool   `json:"singboxInstalled"`
+	SingBoxKnown     bool   `json:"singboxKnown"`
+	CoreType         string `json:"coreType"`
+	RunningCore      string `json:"runningCore"`
+	// Core states/errors are forwarded so masters can surface failures on transitive sub-nodes too.
+	XrayState    string `json:"xrayState"`
+	XrayError    string `json:"xrayError,omitempty"`
+	SingBoxState string `json:"singboxState"`
+	SingBoxError string `json:"singboxError,omitempty"`
 }
 
 type ClientReverse struct {

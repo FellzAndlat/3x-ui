@@ -111,7 +111,7 @@ func singBoxTUICInbound(ib *model.Inbound, clients []any) (map[string]any, error
 	return map[string]any{
 		"type": "tuic", "tag": ib.Tag, "listen": listen, "listen_port": inst.Port,
 		"users": users, "congestion_control": inst.CongestionControl,
-		"auth_timeout": fmt.Sprintf("%ds", inst.AuthenticationTimeout),
+		"auth_timeout":       fmt.Sprintf("%ds", inst.AuthenticationTimeout),
 		"zero_rtt_handshake": inst.ZeroRTTHandshake,
 		"tls": map[string]any{"enabled": true, "certificate_path": inst.Certificate,
 			"key_path": inst.PrivateKey, "alpn": inst.ALPN},
@@ -447,6 +447,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 	if err := s.applyNativeTemplate(cfg); err != nil {
 		return nil, err
 	}
+	applySingBoxInfrastructureEgress(cfg)
 	return cfg, nil
 }
 
@@ -664,6 +665,7 @@ func singBoxConfigDir() string {
 }
 
 func (s *SingBoxService) Restart(ctx context.Context) error {
+	markSingBoxStarted()
 	if _, err := singBoxProcess.Version(ctx); err != nil {
 		singBoxProcess.SetError(err)
 		return err
@@ -680,6 +682,7 @@ func (s *SingBoxService) Restart(ctx context.Context) error {
 }
 
 func (s *SingBoxService) Start(ctx context.Context) error {
+	markSingBoxStarted()
 	if _, err := singBoxProcess.Version(ctx); err != nil {
 		singBoxProcess.SetError(err)
 		return err
@@ -696,6 +699,7 @@ func (s *SingBoxService) Start(ctx context.Context) error {
 }
 
 func (s *SingBoxService) Stop(ctx context.Context) error {
+	markSingBoxStopped()
 	return singBoxProcess.Stop()
 }
 
@@ -736,16 +740,26 @@ func (s *SingBoxService) ConnectionCount(ctx context.Context) (int, error) {
 	return len(clashConnections), nil
 }
 
-func (s *SingBoxService) OnlineClientIPs(ctx context.Context) (map[string]map[string]struct{}, error) {
+// OnlinePresence returns the current sing-box users/IPs and active inbound
+// tags from one native API snapshot. Keeping them in the same snapshot makes
+// the node's online user and inbound indicators describe the same instant.
+func (s *SingBoxService) OnlinePresence(ctx context.Context) (map[string]map[string]struct{}, []string, error) {
 	api := singbox.NewConnectionAPIClient()
 	defer api.Close()
 	connections, err := api.Snapshot(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	online := make(map[string]map[string]struct{})
+	activeSet := make(map[string]struct{})
 	for _, connection := range connections {
-		if connection == nil || connection.User == "" || connection.Source == "" {
+		if connection == nil {
+			continue
+		}
+		if connection.Inbound != "" {
+			activeSet[connection.Inbound] = struct{}{}
+		}
+		if connection.User == "" || connection.Source == "" {
 			continue
 		}
 		ip := connection.Source
@@ -760,7 +774,17 @@ func (s *SingBoxService) OnlineClientIPs(ctx context.Context) (map[string]map[st
 		}
 		online[connection.User][ip] = struct{}{}
 	}
-	return online, nil
+	active := make([]string, 0, len(activeSet))
+	for tag := range activeSet {
+		active = append(active, tag)
+	}
+	sort.Strings(active)
+	return online, active, nil
+}
+
+func (s *SingBoxService) OnlineClientIPs(ctx context.Context) (map[string]map[string]struct{}, error) {
+	online, _, err := s.OnlinePresence(ctx)
+	return online, err
 }
 
 func (s *SingBoxService) DisconnectClientIPs(ctx context.Context, email string, ips []string) error {

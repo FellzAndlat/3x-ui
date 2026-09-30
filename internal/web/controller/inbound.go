@@ -21,6 +21,8 @@ type InboundController struct {
 	inboundService  service.InboundService
 	clientService   service.ClientService
 	xrayService     service.XrayService
+	singBoxService  service.SingBoxService
+	settingService  service.SettingService
 	fallbackService service.FallbackService
 }
 
@@ -181,7 +183,7 @@ func (a *InboundController) addInbound(c *gin.Context) {
 	}
 	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundCreateSuccess"), inbound, nil)
 	if needRestart {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	a.broadcastInboundsUpdate(user.Id)
 	notifyClientsChanged()
@@ -201,7 +203,7 @@ func (a *InboundController) delInbound(c *gin.Context) {
 	}
 	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundDeleteSuccess"), id, nil)
 	if needRestart {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	user := session.GetLoginUser(c)
 	a.broadcastInboundsUpdate(user.Id)
@@ -227,7 +229,7 @@ func (a *InboundController) bulkDelInbounds(c *gin.Context) {
 	}
 	jsonObj(c, result, nil)
 	if needRestart {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	user := session.GetLoginUser(c)
 	a.broadcastInboundsUpdate(user.Id)
@@ -261,7 +263,7 @@ func (a *InboundController) updateInbound(c *gin.Context) {
 	}
 	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), inbound, nil)
 	if needRestart {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	user := session.GetLoginUser(c)
 	a.broadcastInboundsUpdate(user.Id)
@@ -313,7 +315,7 @@ func (a *InboundController) setInboundEnable(c *gin.Context) {
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), nil)
 	if needRestart {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	// Cross-admin sync: lightweight invalidate signal (a few hundred bytes)
 	// instead of fetching + serialising the whole inbound list. Other open
@@ -335,7 +337,7 @@ func (a *InboundController) resetInboundTraffic(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	} else {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.resetInboundTrafficSuccess"), nil)
 }
@@ -367,7 +369,7 @@ func (a *InboundController) delAllInboundClients(c *gin.Context) {
 	}
 	jsonObj(c, result, nil)
 	if needRestart {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	user := session.GetLoginUser(c)
 	a.broadcastInboundsUpdate(user.Id)
@@ -381,7 +383,7 @@ func (a *InboundController) resetAllTraffics(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	} else {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.resetAllTrafficSuccess"), nil)
 }
@@ -439,7 +441,7 @@ func (a *InboundController) importInbound(c *gin.Context) {
 	}
 	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundCreateSuccess"), inbound, nil)
 	if needRestart {
-		a.xrayService.SetToNeedRestart()
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
 	a.broadcastInboundsUpdate(user.Id)
 	notifyClientsChanged()
@@ -506,7 +508,7 @@ func (a *InboundController) setFallbacks(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
-	a.xrayService.SetToNeedRestart()
+	markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), nil)
 }
 

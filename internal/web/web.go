@@ -340,8 +340,13 @@ func (s *Server) startTask(restartXray bool, loc *time.Location) {
 			}
 		}
 	} else if restartXray {
-		if err := (&service.SingBoxService{}).Restart(s.ctx); err != nil {
-			logger.Warning("start sing-box failed:", err)
+		singBoxService := &service.SingBoxService{}
+		if singBoxService.Installed() {
+			if err := singBoxService.Restart(s.ctx); err != nil {
+				logger.Warning("start sing-box failed:", err)
+			}
+		} else {
+			logger.Warning("sing-box is selected but not installed; leaving core stopped")
 		}
 	}
 	// Keep the scheduler core-agnostic: the operator can switch engines
@@ -349,23 +354,18 @@ func (s *Server) startTask(restartXray bool, loc *time.Location) {
 	// every tick, while each traffic collector cheaply no-ops when unselected.
 	_, _ = s.cron.AddJob(cadenceXrayRunning, job.NewCheckXrayRunningJob())
 
+	// XrayTrafficJob is core-aware: it polls Xray when Xray is selected and
+	// sing-box (including online presence) when sing-box is selected. Keep a
+	// single consumer of sing-box delta events so traffic cannot be split
+	// between two same-cadence cron callbacks.
 	_, _ = s.cron.AddJob(cadenceXrayTraffic, job.NewXrayTrafficJob())
-	_, _ = s.cron.AddFunc(cadenceXrayTraffic, func() {
-		singTraffic := &service.SingBoxService{}
-		ctx, cancel := context.WithTimeout(s.ctx, 4*time.Second)
-		defer cancel()
-		if core, err := s.settingService.GetCoreType(); err == nil && core == service.CoreTypeSingBox {
-			if err := singTraffic.PollTraffic(ctx); err != nil {
-				logger.Debug("sing-box traffic poll failed:", err)
-			}
-		}
-	})
 
 	// Xray has a separate pending-restart flag used by hot-apply paths.
 	// This can remain scheduled even while sing-box is selected: ApplyPendingRestart
 	// is inert unless an Xray mutation has explicitly armed the flag.
 	_, _ = s.cron.AddFunc(cadenceXrayRestart, func() {
 		s.xrayService.ApplyPendingRestart()
+		(&service.SingBoxService{}).ApplyPendingRestart(s.ctx)
 	})
 
 	// Reconcile mtproto (mtg) sidecars and scrape their traffic
@@ -482,7 +482,7 @@ func (s *Server) startTask(restartXray bool, loc *time.Location) {
 		}
 		logger.Infof("Discord notify enabled, run at %s", runtime)
 		if entryID, err := s.cron.AddJob(runtime, job.NewDiscordNotifyJob(s.discordService)); err != nil {
-			logger.Warningf("Add NewDiscordNotifyJob: failed to schedule runtime %q: %v", runtime, err)
+			logger.Warningf("Reload Discord notify: failed to schedule runtime %q: %v", runtime, err)
 		} else {
 			s.discordNotifyEntryID = entryID
 		}
@@ -639,12 +639,20 @@ func (s *Server) start(restartXray bool, startTgBot bool) (err error) {
 				return err
 			}
 			if core == service.CoreTypeSingBox {
-				return (&service.SingBoxService{}).Restart(ctx)
+				(&service.SingBoxService{}).SetToNeedRestart()
+				return nil
 			}
 			s.xrayService.SetToNeedRestart()
 			return nil
 		},
-		SetNeedRestart: func() { s.xrayService.SetToNeedRestart() },
+		SetNeedRestart: func() {
+			core, err := s.settingService.GetCoreType()
+			if err == nil && core == service.CoreTypeSingBox {
+				(&service.SingBoxService{}).SetToNeedRestart()
+				return
+			}
+			s.xrayService.SetToNeedRestart()
+		},
 	}))
 	runtime.GetManager().SetNodeEgressResolver(&s.settingService)
 	// Supply the master client certificate for nodes in mtls mode. Issued lazily

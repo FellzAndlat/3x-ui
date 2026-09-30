@@ -525,7 +525,7 @@ func rawBool(m map[string]any, key string) bool {
 
 func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 	protocol := strings.ToLower(strings.TrimSpace(rawString(raw, "protocol")))
-	if protocol == "tunnel" || protocol == "wireguard" || protocol == "mtproto" || protocol == "amneziawg" || protocol == "tuic" || protocol == "psiphon" || protocol == "mieru" || protocol == "pingtunnel" || protocol == "trusttunnel" {
+	if protocol == "tunnel" || protocol == "wireguard" || protocol == "mtproto" || protocol == "amneziawg" || protocol == "tuic" || protocol == "mieru" || protocol == "pingtunnel" || protocol == "trusttunnel" {
 		return nil, fmt.Errorf("sing-box does not support Xray inbound protocol %q", protocol)
 	}
 	out := map[string]any{"tag": rawString(raw, "tag")}

@@ -41,7 +41,7 @@ import { Protocols, TRAFFIC_RESETS } from '@/schemas/primitives';
 import { SockoptStreamSettingsSchema } from '@/schemas/protocols/stream/sockopt';
 import { HysteriaStreamSettingsSchema } from '@/schemas/protocols/stream/hysteria';
 import { createHysteriaTlsSettingsWithDefaultCert } from '@/lib/xray/inbound-tls-defaults';
-import { NODE_ELIGIBLE_PROTOCOLS } from '@/lib/xray/node-protocols';
+import { NODE_ELIGIBLE_PROTOCOLS, nodeSupportsProtocol } from '@/lib/xray/node-protocols';
 import { VLESS_AUTH_LABEL_KEYS, vlessEncryptionAuthKind } from '@/lib/xray/vless-encryption';
 import { SniffingSchema } from '@/schemas/primitives/sniffing';
 import { TcpStreamSettingsSchema } from '@/schemas/protocols/stream/tcp';
@@ -272,8 +272,10 @@ export default function InboundFormModal({
     addAllFallbacks,
   } = useInboundFallbacks(dbInbound, dbInbounds);
 
-  const selectableNodes = (availableNodes || []).filter((n) => n.enable);
   const protocol = (useWatch({ control, name: 'protocol' }) ?? '') as string;
+  const selectableNodes = (availableNodes || []).filter(
+    (n) => n.enable && nodeSupportsProtocol(n, protocol),
+  );
   const [sudokuInstalled, setSudokuInstalled] = useState(false);
 
   useEffect(() => {
@@ -619,7 +621,15 @@ export default function InboundFormModal({
       const next = getV('protocol') as string;
       const settings = createDefaultInboundSettings(next) ?? undefined;
       setV('settings', settings);
-      if (!NODE_ELIGIBLE_PROTOCOLS[next]) {
+      const selectedNodeId = getV('nodeId');
+      const selectedNode =
+        typeof selectedNodeId === 'number'
+          ? (availableNodes || []).find((node) => node.id === selectedNodeId)
+          : undefined;
+      if (
+        !NODE_ELIGIBLE_PROTOCOLS[next] ||
+        (selectedNode != null && !nodeSupportsProtocol(selectedNode, next))
+      ) {
         setV('nodeId', null);
       }
       if (next !== Protocols.VLESS) {

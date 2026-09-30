@@ -122,7 +122,6 @@ describe('protocol capability predicates', () => {
       'trusttunnel',
       'vk-turn-proxy',
       'naive',
-      'psiphon',
       'mieru',
       'sudoku',
       'anytls',

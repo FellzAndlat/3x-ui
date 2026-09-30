@@ -118,6 +118,19 @@ func cleanField(name, value string, inline bool) EmbedField {
 	}
 }
 
+func appendNodeCoreFields(fields []EmbedField, data *eventbus.NodeHealthData) []EmbedField {
+	if data == nil {
+		return fields
+	}
+	if core := data.EffectiveCore(); core != "" {
+		fields = append(fields, cleanField("Core", core, true))
+	}
+	if state := data.EffectiveCoreState(); state != "" {
+		fields = append(fields, cleanField("State", state, true))
+	}
+	return fields
+}
+
 // FormatEmbed converts an eventbus.Event into a Discord Embed.
 // Returns false if the event should not produce a message (e.g. thresholds not exceeded).
 func (s *Subscriber) FormatEmbed(e eventbus.Event) (Embed, bool) {
@@ -198,8 +211,11 @@ func (s *Subscriber) FormatEmbed(e eventbus.Event) (Embed, bool) {
 		case eventbus.NodeHealthData:
 			data = &d
 		}
-		if data != nil && data.XrayError != "" {
-			fields = append(fields, cleanField(tr("discord.fields.error"), data.XrayError, false))
+		fields = appendNodeCoreFields(fields, data)
+		if data != nil {
+			if coreErr := data.EffectiveCoreError(); coreErr != "" {
+				fields = append(fields, cleanField(tr("discord.fields.error"), coreErr, false))
+			}
 		}
 		return Embed{
 			Title:     tr("discord.alerts.nodeDown"),
@@ -220,6 +236,7 @@ func (s *Subscriber) FormatEmbed(e eventbus.Event) (Embed, bool) {
 		case eventbus.NodeHealthData:
 			data = &d
 		}
+		fields = appendNodeCoreFields(fields, data)
 		if data != nil && data.LatencyMs > 0 {
 			fields = append(fields, cleanField(tr("discord.fields.delay"), fmt.Sprintf("%dms", data.LatencyMs), true))
 		}

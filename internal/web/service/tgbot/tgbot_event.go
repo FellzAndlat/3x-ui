@@ -57,6 +57,19 @@ func (t *Tgbot) isEventEnabled(eventType eventbus.EventType) bool {
 	return false
 }
 
+func appendNodeCoreDetails(msg string, data *eventbus.NodeHealthData) string {
+	if data == nil {
+		return msg
+	}
+	if core := data.EffectiveCore(); core != "" {
+		msg += "\n<b>Core:</b> " + core
+	}
+	if state := data.EffectiveCoreState(); state != "" {
+		msg += "\n<b>State:</b> " + state
+	}
+	return msg
+}
+
 func (t *Tgbot) formatEventMessage(e eventbus.Event) string {
 	host := getHostname()
 	header := fmt.Sprintf("<b>📡 %s</b>\n", host)
@@ -99,15 +112,21 @@ func (t *Tgbot) formatEventMessage(e eventbus.Event) string {
 
 	case eventbus.EventNodeDown:
 		msg := header + "🔴 " + t.I18nBot("tgbot.messages.eventNodeDown", "Name=="+e.Source)
-		if data, ok := e.Data.(*eventbus.NodeHealthData); ok && data.XrayError != "" {
-			msg += "\n" + t.I18nBot("tgbot.messages.eventErrorDetail", "Error=="+data.XrayError)
+		if data, ok := e.Data.(*eventbus.NodeHealthData); ok {
+			msg = appendNodeCoreDetails(msg, data)
+			if coreErr := data.EffectiveCoreError(); coreErr != "" {
+				msg += "\n" + t.I18nBot("tgbot.messages.eventErrorDetail", "Error=="+coreErr)
+			}
 		}
 		return msg
 
 	case eventbus.EventNodeUp:
 		msg := header + "🟢 " + t.I18nBot("tgbot.messages.eventNodeUp", "Name=="+e.Source)
-		if data, ok := e.Data.(*eventbus.NodeHealthData); ok && data.LatencyMs > 0 {
-			msg += "\n" + t.I18nBot("tgbot.messages.eventDelayDetail", "Delay=="+fmt.Sprintf("%d", data.LatencyMs))
+		if data, ok := e.Data.(*eventbus.NodeHealthData); ok {
+			msg = appendNodeCoreDetails(msg, data)
+			if data.LatencyMs > 0 {
+				msg += "\n" + t.I18nBot("tgbot.messages.eventDelayDetail", "Delay=="+fmt.Sprintf("%d", data.LatencyMs))
+			}
 		}
 		return msg
 

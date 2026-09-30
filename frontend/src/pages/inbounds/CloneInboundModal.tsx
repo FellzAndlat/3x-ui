@@ -5,6 +5,7 @@ import { Modal, Select, Typography, message } from 'antd';
 import { HttpUtil } from '@/utils';
 import { SelectAllClearButtons } from '@/components/form';
 import { buildClonePayload, pickClonePort } from '@/lib/xray/inbound-clone';
+import { nodeSupportsProtocol } from '@/lib/xray/node-protocols';
 import type { NodeRecord } from '@/api/queries/useNodesQuery';
 import type { DBInbound } from '@/models/dbinbound';
 
@@ -38,7 +39,7 @@ export default function CloneInboundModal({
     () => [
       { value: LOCAL_PANEL, label: t('pages.inbounds.localPanel'), disabled: false },
       ...(nodes || [])
-        .filter((n) => n.enable)
+        .filter((n) => n.enable && !!dbInbound && nodeSupportsProtocol(n, dbInbound.protocol))
         .map((n) => ({
           value: n.id,
           // Only online nodes are deployable targets: nodes report `unknown`
@@ -48,19 +49,19 @@ export default function CloneInboundModal({
           disabled: n.status !== 'online',
         })),
     ],
-    [nodes, t],
+    [dbInbound, nodes, t],
   );
 
   // "Select all" must not pick targets the user can't pick manually —
-  // offline nodes are disabled options in the dropdown.
+  // offline or core-incompatible nodes never become selectable options.
   const selectableOptions = useMemo(
     () => targetOptions.filter((o) => !o.disabled),
     [targetOptions],
   );
 
   // Reset the selection when the dialog OPENS: pre-select the source
-  // inbound's own node when it is a selectable target, otherwise the local
-  // panel (the only destination the clone action had before this picker).
+  // inbound's own node when it is a selectable compatible target, otherwise
+  // the local panel (the only destination the clone action had before this picker).
   // Deps are deliberately `[open]` only — `nodes` gets a new identity on every
   // background refetch (heartbeats bump latency/status), and keying the reset
   // on it would clobber the user's selection mid-dialog.
@@ -68,7 +69,11 @@ export default function CloneInboundModal({
     if (!open || !dbInbound) return;
     const src = dbInbound.nodeId ?? LOCAL_PANEL;
     const srcNode = (nodes || []).find((n) => n.id === src);
-    const selectable = !!srcNode && !!srcNode.enable && srcNode.status === 'online';
+    const selectable =
+      !!srcNode &&
+      !!srcNode.enable &&
+      srcNode.status === 'online' &&
+      nodeSupportsProtocol(srcNode, dbInbound.protocol);
     setTargets([selectable ? src : LOCAL_PANEL]);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [open]);

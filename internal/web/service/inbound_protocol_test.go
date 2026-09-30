@@ -89,17 +89,42 @@ func TestInboundCanHostFallbacks_StaysTcpOnly(t *testing.T) {
 	}
 }
 
-// Mirrors NODE_ELIGIBLE_PROTOCOLS in
-// frontend/src/pages/inbounds/form/InboundFormModal.tsx -- keep both lists
-// in sync if a protocol's node-eligibility ever changes.
+// Mirrors frontend/src/lib/xray/node-protocols.ts. Node eligibility means the
+// remote panel can own/manage the inbound; selected-core compatibility is a
+// separate gate (coreSupportsInboundProtocol).
 func TestIsNodeEligibleProtocol(t *testing.T) {
-	eligible := []model.Protocol{model.VLESS, model.VMESS, model.Trojan, model.Shadowsocks, model.Hysteria, model.WireGuard}
+	eligible := []model.Protocol{
+		model.VLESS,
+		model.VMESS,
+		model.Trojan,
+		model.Shadowsocks,
+		model.WireGuard,
+		model.Hysteria,
+		model.HTTP,
+		model.Mixed,
+		model.Tunnel,
+		model.Tun,
+		model.MTProto,
+		model.AmneziaWG,
+		model.TUIC,
+		model.Pingtunnel,
+		model.TrustTunnel,
+		model.NaiveProxy,
+		model.AnyTLS,
+		model.ShadowTLS,
+		model.Mieru,
+		model.VKTurnProxy,
+		model.Sudoku,
+	}
 	for _, p := range eligible {
 		if !isNodeEligibleProtocol(p) {
 			t.Errorf("isNodeEligibleProtocol(%q) = false, want true", p)
 		}
 	}
-	ineligible := []model.Protocol{model.MTProto, model.AmneziaWG, model.Mixed, model.HTTP, model.Tunnel}
+
+	ineligible := []model.Protocol{
+		model.Protocol("unknown"),
+	}
 	for _, p := range ineligible {
 		if isNodeEligibleProtocol(p) {
 			t.Errorf("isNodeEligibleProtocol(%q) = true, want false", p)

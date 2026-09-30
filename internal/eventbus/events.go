@@ -1,6 +1,9 @@
 package eventbus
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // EventType identifies the kind of event flowing through the bus.
 type EventType string
@@ -40,13 +43,75 @@ type OutboundHealthData struct {
 }
 
 // NodeHealthData carries heartbeat details for node events.
+// CoreType/RunningCore/CoreState/CoreError are the core-agnostic view used by
+// new consumers. The Xray fields remain for backwards compatibility with
+// existing notifiers and integrations.
 type NodeHealthData struct {
-	NodeId    int
-	LatencyMs int
-	CpuPct    float64
-	MemPct    float64
-	XrayState string // "running", "stopped", etc.
-	XrayError string
+	NodeId       int
+	LatencyMs    int
+	CpuPct       float64
+	MemPct       float64
+	CoreType     string
+	RunningCore  string
+	CoreState    string
+	CoreError    string
+	XrayState    string // "running", "stopped", etc.
+	XrayError    string
+	SingBoxState string
+	SingBoxError string
+}
+
+// EffectiveCore returns the core that is actually running when known, falling
+// back to the node's configured core. This keeps old nodes useful while newer
+// nodes can report a runtime that differs from configuration during recovery.
+func (d *NodeHealthData) EffectiveCore() string {
+	if d == nil {
+		return ""
+	}
+	if running := strings.TrimSpace(d.RunningCore); running != "" && !strings.EqualFold(running, "none") {
+		return running
+	}
+	return strings.TrimSpace(d.CoreType)
+}
+
+// EffectiveCoreState returns the state for the selected/effective runtime.
+func (d *NodeHealthData) EffectiveCoreState() string {
+	if d == nil {
+		return ""
+	}
+	if state := strings.TrimSpace(d.CoreState); state != "" {
+		return state
+	}
+	switch strings.ToLower(strings.ReplaceAll(d.EffectiveCore(), "-", "")) {
+	case "singbox":
+		return strings.TrimSpace(d.SingBoxState)
+	case "xray":
+		return strings.TrimSpace(d.XrayState)
+	}
+	if state := strings.TrimSpace(d.SingBoxState); state != "" && strings.TrimSpace(d.XrayState) == "" {
+		return state
+	}
+	return strings.TrimSpace(d.XrayState)
+}
+
+// EffectiveCoreError returns the error emitted by the selected/effective core.
+func (d *NodeHealthData) EffectiveCoreError() string {
+	if d == nil {
+		return ""
+	}
+	if coreErr := strings.TrimSpace(d.CoreError); coreErr != "" {
+		return coreErr
+	}
+	switch strings.ToLower(strings.ReplaceAll(d.EffectiveCore(), "-", "")) {
+	case "singbox":
+		return strings.TrimSpace(d.SingBoxError)
+	case "xray":
+		return strings.TrimSpace(d.XrayError)
+	}
+	if coreErr := strings.TrimSpace(d.SingBoxError); coreErr != "" && strings.TrimSpace(d.XrayError) == "" {
+		return coreErr
+	}
+	return strings.TrimSpace(d.XrayError)
 }
 
 // LoginEventData carries login attempt details.

@@ -33,18 +33,18 @@ func (j *CheckXrayRunningJob) Run() {
 		coreType = service.CoreTypeXray
 	}
 	if coreType == service.CoreTypeSingBox {
-		if !j.singBox.IsRunning() {
-			j.checkTime++
-			if j.checkTime > 1 {
-				err := j.singBox.Restart(context.Background())
-				j.checkTime = 0
-				if err != nil {
-					logger.Error("Restart sing-box failed:", err)
-				}
-			}
+		if !j.singBox.DidCrash() {
+			j.checkTime = 0
 			return
 		}
-		j.checkTime = 0
+		j.checkTime++
+		if j.checkTime > 1 {
+			err := j.singBox.Restart(context.Background())
+			j.checkTime = 0
+			if err != nil {
+				logger.Error("Restart sing-box failed:", err)
+			}
+		}
 		return
 	}
 	if !j.xrayService.DidXrayCrash() {

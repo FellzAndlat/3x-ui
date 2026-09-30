@@ -129,14 +129,14 @@ func TestCheckAPIAuth_AcceptsVerifiedClientCert(t *testing.T) {
 		t.Fatalf("body = %s, want node-sync scope", got)
 	}
 
-	forbidden := httptest.NewRequest(http.MethodPost, "/panel/api/server/updatePanel", nil)
+	forbidden := httptest.NewRequest(http.MethodGet, "/panel/api/ping", nil)
 	forbidden.TLS = &tls.ConnectionState{
 		VerifiedChains: [][]*x509.Certificate{{&x509.Certificate{}}},
 	}
 	w = httptest.NewRecorder()
 	engine.ServeHTTP(w, forbidden)
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("updatePanel status = %d, want 403; body=%s", w.Code, w.Body.String())
+		t.Fatalf("admin-only ping status = %d, want 403; body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -147,11 +147,14 @@ func TestNodeSyncScopeAllowlistMatchesRemoteInventory(t *testing.T) {
 		"/inbounds/add":                {http.MethodPost: {}},
 		"/inbounds/del/:id":            {http.MethodPost: {}},
 		"/inbounds/update/:id":         {http.MethodPost: {}},
+		"/inbounds/:id/subSortIndex":   {http.MethodPost: {}},
 		"/clients/add":                 {http.MethodPost: {}},
 		"/clients/del/:email":          {http.MethodPost: {}},
 		"/clients/:email/detach":       {http.MethodPost: {}},
 		"/clients/update/:email":       {http.MethodPost: {}},
 		"/server/restartXrayService":   {http.MethodPost: {}},
+		"/server/restartCoreService":   {http.MethodPost: {}},
+		"/server/updatePanel":          {http.MethodPost: {}},
 		"/server/getWebCertFiles":      {http.MethodGet: {}},
 		"/server/descendants":          {http.MethodGet: {}},
 		"/clients/resetTraffic/:email": {http.MethodPost: {}},
@@ -160,6 +163,7 @@ func TestNodeSyncScopeAllowlistMatchesRemoteInventory(t *testing.T) {
 		"/clients/onlinesByGuid":       {http.MethodPost: {}},
 		"/clients/onlines":             {http.MethodPost: {}},
 		"/clients/lastOnline":          {http.MethodPost: {}},
+		"/clients/activeInbounds":      {http.MethodPost: {}},
 		"/inbounds/pushClientTraffics": {http.MethodPost: {}},
 		"/server/clientIps":            {http.MethodGet: {}, http.MethodPost: {}},
 		"/clients/clientIpsByGuid":     {http.MethodPost: {}},
@@ -168,8 +172,8 @@ func TestNodeSyncScopeAllowlistMatchesRemoteInventory(t *testing.T) {
 	if !reflect.DeepEqual(nodeSyncScopeAllow, expected) {
 		t.Fatalf("node-sync allowlist drift:\n got: %#v\nwant: %#v", nodeSyncScopeAllow, expected)
 	}
-	if _, ok := nodeSyncScopeAllow["/server/updatePanel"]; ok {
-		t.Fatal("node-sync must not include /server/updatePanel")
+	if _, ok := nodeSyncScopeAllow["/ping"]; ok {
+		t.Fatal("node-sync must not include admin-only /ping")
 	}
 }
 
@@ -184,7 +188,8 @@ func TestNodeSyncScopeUsesFullPathPatterns(t *testing.T) {
 		{"detach email parameter", http.MethodPost, "/panel/api/clients/alice@example.com/detach", http.StatusOK},
 		{"reset inbound id parameter", http.MethodPost, "/panel/api/inbounds/42/resetTraffic", http.StatusOK},
 		{"client IP by guid endpoint", http.MethodPost, "/panel/api/clients/clientIpsByGuid", http.StatusOK},
-		{"update panel forbidden", http.MethodPost, "/panel/api/server/updatePanel", http.StatusForbidden},
+		{"update panel sync endpoint", http.MethodPost, "/panel/api/server/updatePanel", http.StatusOK},
+		{"admin ping forbidden", http.MethodGet, "/panel/api/ping", http.StatusForbidden},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

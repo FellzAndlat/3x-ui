@@ -222,9 +222,9 @@ func (a *ServerController) startTask() {
 	}()
 }
 
-// status returns the current server status information. For compatibility with
-// older masters, the legacy `xray` object mirrors the selected core. New callers
-// can use the explicit `core` object to distinguish Xray from sing-box.
+// status returns the current server status information. The legacy `xray`
+// object remains the actual Xray state; newer callers can use the explicit
+// `singbox` and `core` objects to distinguish installed, selected and running cores.
 func (a *ServerController) status(c *gin.Context) {
 	status := a.serverService.CurrentStatus()
 	if status == nil {
@@ -238,18 +238,42 @@ func (a *ServerController) status(c *gin.Context) {
 	if err != nil || coreType == "" {
 		coreType = service.CoreTypeXray
 	}
-	if coreType == service.CoreTypeSingBox {
-		status.Xray.State = service.Stop
-		status.Xray.ErrorMsg = ""
-		if a.singBoxService.IsRunning() {
-			status.Xray.State = service.Running
-		} else if coreErr := a.singBoxService.LastError(); coreErr != nil {
-			status.Xray.State = service.Error
-			status.Xray.ErrorMsg = coreErr.Error()
+
+	singBoxState := service.Stop
+	singBoxError := ""
+	singBoxVersion := ""
+	singBoxInstalled := a.singBoxService.Installed()
+	if singBoxInstalled {
+		if version, versionErr := a.singBoxService.CachedVersion(c.Request.Context()); versionErr == nil && version != "" {
+			singBoxVersion = version
 		}
-		if version, versionErr := a.singBoxService.CachedVersion(c.Request.Context()); versionErr == nil {
-			status.Xray.Version = version
+	}
+	switch {
+	case a.singBoxService.IsRunning():
+		singBoxState = service.Running
+	case !singBoxInstalled && coreType == service.CoreTypeSingBox:
+		// The panel itself is healthy, but its configured runtime cannot start.
+		// Report this explicitly so an upstream master can distinguish a
+		// deliberately stopped core from a node missing the selected binary.
+		singBoxState = service.Error
+		singBoxError = "sing-box is selected but not installed"
+	case singBoxInstalled:
+		if coreErr := a.singBoxService.LastError(); coreErr != nil {
+			singBoxState = service.Error
+			singBoxError = coreErr.Error()
 		}
+	}
+
+	runningCore := ""
+	switch {
+	case coreType == service.CoreTypeSingBox && a.singBoxService.IsRunning():
+		runningCore = service.CoreTypeSingBox
+	case coreType == service.CoreTypeXray && status.Xray.State == service.Running:
+		runningCore = service.CoreTypeXray
+	case a.singBoxService.IsRunning():
+		runningCore = service.CoreTypeSingBox
+	case status.Xray.State == service.Running:
+		runningCore = service.CoreTypeXray
 	}
 
 	raw, err := json.Marshal(status)
@@ -262,11 +286,28 @@ func (a *ServerController) status(c *gin.Context) {
 		jsonObj(c, status, nil)
 		return
 	}
+
+	obj["singbox"] = gin.H{
+		"installed": singBoxInstalled,
+		"state":     singBoxState,
+		"errorMsg":  singBoxError,
+		"version":   singBoxVersion,
+	}
+
+	selectedState := status.Xray.State
+	selectedError := status.Xray.ErrorMsg
+	selectedVersion := status.Xray.Version
+	if coreType == service.CoreTypeSingBox {
+		selectedState = singBoxState
+		selectedError = singBoxError
+		selectedVersion = singBoxVersion
+	}
 	obj["core"] = gin.H{
 		"type":     coreType,
-		"state":    status.Xray.State,
-		"errorMsg": status.Xray.ErrorMsg,
-		"version":  status.Xray.Version,
+		"running":  runningCore,
+		"state":    selectedState,
+		"errorMsg": selectedError,
+		"version":  selectedVersion,
 	}
 	jsonObj(c, obj, nil)
 }
@@ -450,6 +491,10 @@ func (a *ServerController) restartCoreService(c *gin.Context) {
 		return
 	}
 	if coreType == service.CoreTypeSingBox {
+		if !a.singBoxService.Installed() {
+			jsonMsg(c, "", fmt.Errorf("sing-box is selected but not installed"))
+			return
+		}
 		err = a.singBoxService.Restart(c.Request.Context())
 	} else {
 		err = a.serverService.RestartXrayService()

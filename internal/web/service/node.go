@@ -32,15 +32,20 @@ import (
 )
 
 type HeartbeatPatch struct {
-	Status        string
-	LastHeartbeat int64
-	LatencyMs     int
-	XrayVersion   string
-	PanelVersion  string
-	Guid          string
-	CpuPct        float64
-	MemPct        float64
-	UptimeSecs    uint64
+	Status           string
+	LastHeartbeat    int64
+	LatencyMs        int
+	XrayVersion      string
+	SingBoxVersion   string
+	SingBoxInstalled bool
+	SingBoxKnown     bool
+	CoreType         string
+	RunningCore      string
+	PanelVersion     string
+	Guid             string
+	CpuPct           float64
+	MemPct           float64
+	UptimeSecs       uint64
 	// NetUp/NetDown are the node's current interface throughput (bytes/sec),
 	// summed over non-virtual interfaces, read from its status response.
 	NetUp     uint64
@@ -49,8 +54,23 @@ type HeartbeatPatch struct {
 	// XrayState and XrayError come from the remote /panel/api/server/status when the
 	// panel API is reachable. They allow distinguishing panel connectivity from
 	// Xray core health on the node.
-	XrayState string
-	XrayError string
+	XrayState    string
+	XrayError    string
+	SingBoxState string
+	SingBoxError string
+}
+
+func normalizeNodeCoreType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "-", "")
+	switch value {
+	case "xray":
+		return CoreTypeXray
+	case "singbox":
+		return CoreTypeSingBox
+	default:
+		return ""
+	}
 }
 
 type NodeService struct{}
@@ -727,14 +747,15 @@ func (s *NodeService) GetRemoteInboundOptions(ctx context.Context, n *model.Node
 	if n.OutboundTag == "" {
 		return runtime.NewRemote(n, nil).ListInboundOptions(ctx)
 	}
-	// Mirror ProbeWithOutbound: a node being added/edited has no persistent
-	// egress bridge yet, so route the list call through a temporary one or the
-	// remote panel stays unreachable and the request times out.
+	// Mirror ProbeWithOutbound. Existing nodes reuse their persistent bridge;
+	// a new/changed outbound uses Xray's temporary API bridge when available.
 	var options []runtime.RemoteInboundOption
 	var err error
-	s.withOutboundBridge(n.Id, n.OutboundTag, func(proxyURL string) {
+	if bridgeErr := s.withOutboundBridge(n.Id, n.OutboundTag, func(proxyURL string) {
 		options, err = runtime.NewRemote(n, staticEgressResolver(proxyURL)).ListInboundOptions(ctx)
-	})
+	}); bridgeErr != nil {
+		return nil, bridgeErr
+	}
 	return options, err
 }
 
@@ -982,8 +1003,9 @@ func (s *NodeService) UpdateHeartbeat(id int, p HeartbeatPatch) error {
 		"status":         p.Status,
 		"last_heartbeat": p.LastHeartbeat,
 		"latency_ms":     p.LatencyMs,
-		"xray_version":   p.XrayVersion,
 		"panel_version":  p.PanelVersion,
+		"core_type":      p.CoreType,
+		"running_core":   p.RunningCore,
 		"cpu_pct":        p.CpuPct,
 		"mem_pct":        p.MemPct,
 		"uptime_secs":    p.UptimeSecs,
@@ -992,6 +1014,18 @@ func (s *NodeService) UpdateHeartbeat(id int, p HeartbeatPatch) error {
 		"last_error":     p.LastError,
 		"xray_state":     p.XrayState,
 		"xray_error":     p.XrayError,
+	}
+	// Older node builds overload xray with the selected core. Never erase a
+	// previously known Xray version when probing such a sing-box node.
+	if p.XrayVersion != "" {
+		updates["xray_version"] = p.XrayVersion
+	}
+	if p.SingBoxKnown {
+		updates["singbox_known"] = true
+		updates["singbox_version"] = p.SingBoxVersion
+		updates["singbox_installed"] = p.SingBoxInstalled
+		updates["singbox_state"] = p.SingBoxState
+		updates["singbox_error"] = p.SingBoxError
 	}
 	// Only learn the GUID; never clear a known one if an old-build node (or a
 	// failed probe) reports none, so the stable identity survives blips.
@@ -1118,9 +1152,17 @@ func (s *NodeService) AggregateNodeMetric(id int, metric string, bucketSeconds i
 
 func (s *NodeService) Probe(ctx context.Context, n *model.Node) (HeartbeatPatch, error) {
 	proxyURL := ""
-	if n.OutboundTag != "" {
+	if outboundTag := strings.TrimSpace(n.OutboundTag); outboundTag != "" {
 		if mgr := runtime.GetManager(); mgr != nil {
-			proxyURL = mgr.NodeEgressProxyURL(n.Id)
+			proxyURL = strings.TrimSpace(mgr.NodeEgressProxyURL(n.Id))
+		}
+		if proxyURL == "" {
+			err := common.NewError("node outbound bridge is unavailable; refusing direct probe")
+			return HeartbeatPatch{
+				LastHeartbeat: time.Now().Unix(),
+				CoreType:      normalizeNodeCoreType(n.CoreType),
+				LastError:     err.Error(),
+			}, err
 		}
 	}
 	return s.probe(ctx, n, proxyURL)
@@ -1132,42 +1174,65 @@ func (s *NodeService) ProbeWithOutbound(ctx context.Context, n *model.Node, outb
 	}
 	var patch HeartbeatPatch
 	var err error
-	s.withOutboundBridge(n.Id, outboundTag, func(proxyURL string) {
-		if proxyURL == "" {
-			patch, err = s.Probe(ctx, n)
-			return
-		}
+	if bridgeErr := s.withOutboundBridge(n.Id, outboundTag, func(proxyURL string) {
 		patch, err = s.probe(ctx, n, proxyURL)
-	})
+	}); bridgeErr != nil {
+		patch.LastHeartbeat = time.Now().Unix()
+		patch.LastError = bridgeErr.Error()
+		return patch, bridgeErr
+	}
 	return patch, err
 }
 
-// withOutboundBridge stands up a temporary loopback SOCKS5 inbound in the
-// running Xray, routes it through outboundTag, and runs fn with the bridge's
-// proxy URL before tearing it down. It is used to reach a node through its
-// connection outbound before the persistent egress bridge has been injected
-// into the config (e.g. while the node is still being added or edited). When
-// Xray isn't running or the bridge can't be built, fn runs with an empty
-// proxyURL so callers fall back to a direct connection.
-func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func(proxyURL string)) {
+// withOutboundBridge routes one pre-save node request through outboundTag.
+// Existing nodes first reuse the exact persistent bridge from the running
+// selected core. A new or changed outbound can still use Xray's hot API bridge.
+// sing-box currently has no equivalent hot inbound/routing mutation endpoint,
+// so when no persistent bridge exists we fail explicitly rather than silently
+// probing the node directly and reporting a false-positive connection.
+func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func(proxyURL string)) error {
+	outboundTag = strings.TrimSpace(outboundTag)
+	if outboundTag == "" {
+		return common.NewError("node outbound tag is empty")
+	}
+
+	if nodeID > 0 {
+		var stored model.Node
+		err := database.GetDB().Model(&model.Node{}).
+			Select("outbound_tag").
+			Where("id = ?", nodeID).
+			First(&stored).Error
+		if err == nil && strings.TrimSpace(stored.OutboundTag) == outboundTag {
+			if mgr := runtime.GetManager(); mgr != nil {
+				if proxyURL := mgr.NodeEgressProxyURL(nodeID); proxyURL != "" {
+					fn(proxyURL)
+					return nil
+				}
+			}
+		}
+	}
+
 	proc := XrayProcess()
 	if proc == nil || !proc.IsRunning() {
-		fn("")
-		return
+		coreType, _ := (&SettingService{}).GetCoreType()
+		if coreType == CoreTypeSingBox {
+			return common.NewError("cannot create a temporary node outbound bridge while sing-box is selected; save the node first so its persistent bridge can be generated")
+		}
+		return common.NewError("cannot create node outbound bridge because Xray is not running")
 	}
 	apiPort := proc.GetAPIPort()
 	if apiPort <= 0 {
-		fn("")
-		return
+		return common.NewError("cannot create node outbound bridge because Xray API is unavailable")
 	}
 
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
-		fn("")
-		return
+		return fmt.Errorf("allocate temporary node outbound bridge: %w", err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
+	if err := listener.Close(); err != nil {
+		return fmt.Errorf("release temporary node outbound bridge port: %w", err)
+	}
 
 	tag := fmt.Sprintf("node-test-%d-%d", nodeID, time.Now().UnixNano())
 	proxyURL := fmt.Sprintf("socks5://127.0.0.1:%d", port)
@@ -1180,11 +1245,13 @@ func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func
 		Tag:      tag,
 	})
 	if err != nil {
-		fn("")
-		return
+		return fmt.Errorf("marshal temporary node outbound bridge: %w", err)
 	}
 
 	cfg := proc.GetConfig()
+	if cfg == nil {
+		return common.NewError("cannot create node outbound bridge because Xray config is unavailable")
+	}
 	routing := map[string]any{}
 	if len(cfg.RouterConfig) > 0 {
 		_ = json.Unmarshal(cfg.RouterConfig, &routing)
@@ -1202,21 +1269,18 @@ func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func
 	routing["rules"] = append([]any{rule}, rules...)
 	routingJSON, err := json.Marshal(routing)
 	if err != nil {
-		fn("")
-		return
+		return fmt.Errorf("marshal temporary node outbound routing: %w", err)
 	}
 	originalRoutingJSON := cfg.RouterConfig
 
 	api := xray.XrayAPI{}
 	if err := api.Init(apiPort); err != nil {
-		fn("")
-		return
+		return fmt.Errorf("connect to Xray API for node outbound bridge: %w", err)
 	}
 	defer api.Close()
 
 	if err := api.AddInbound(inboundJSON); err != nil {
-		fn("")
-		return
+		return fmt.Errorf("add temporary node outbound bridge: %w", err)
 	}
 	defer func() {
 		if err := api.DelInbound(tag); err != nil {
@@ -1225,8 +1289,7 @@ func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func
 	}()
 
 	if err := api.ApplyRoutingConfig(routingJSON); err != nil {
-		fn("")
-		return
+		return fmt.Errorf("apply temporary node outbound routing: %w", err)
 	}
 	defer func() {
 		restore := originalRoutingJSON
@@ -1239,6 +1302,7 @@ func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func
 	}()
 
 	fn(proxyURL)
+	return nil
 }
 
 // A status envelope holds a handful of scalars; the cap keeps a hostile or
@@ -1246,7 +1310,14 @@ func (s *NodeService) withOutboundBridge(nodeID int, outboundTag string, fn func
 const maxProbeBodyBytes = 1 << 20 // 1 MiB
 
 func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string) (HeartbeatPatch, error) {
-	patch := HeartbeatPatch{LastHeartbeat: time.Now().Unix()}
+	// Keep the last known configured core even when the HTTP probe fails.
+	// CoreType is a capability/configuration fact used by inbound validation,
+	// not a liveness field; clearing it on a transient outage makes a sing-box
+	// node look like a legacy Xray node until the next successful heartbeat.
+	patch := HeartbeatPatch{
+		LastHeartbeat: time.Now().Unix(),
+		CoreType:      normalizeNodeCoreType(n.CoreType),
+	}
 
 	addr, err := netsafe.NormalizeHost(n.Address)
 	if err != nil {
@@ -1318,6 +1389,19 @@ func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string)
 				State    string `json:"state"`
 				ErrorMsg string `json:"errorMsg"`
 			} `json:"xray"`
+			SingBox *struct {
+				Installed bool   `json:"installed"`
+				Version   string `json:"version"`
+				State     string `json:"state"`
+				ErrorMsg  string `json:"errorMsg"`
+			} `json:"singbox"`
+			Core struct {
+				Type     string `json:"type"`
+				Running  string `json:"running"`
+				State    string `json:"state"`
+				Version  string `json:"version"`
+				ErrorMsg string `json:"errorMsg"`
+			} `json:"core"`
 			PanelVersion string `json:"panelVersion"`
 			PanelGuid    string `json:"panelGuid"`
 			Uptime       uint64 `json:"uptime"`
@@ -1346,9 +1430,41 @@ func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string)
 	if o.Mem.Total > 0 {
 		patch.MemPct = float64(o.Mem.Current) * 100.0 / float64(o.Mem.Total)
 	}
-	patch.XrayVersion = o.Xray.Version
-	patch.XrayState = o.Xray.State
-	patch.XrayError = o.Xray.ErrorMsg
+	patch.CoreType = normalizeNodeCoreType(o.Core.Type)
+	patch.RunningCore = normalizeNodeCoreType(o.Core.Running)
+	if o.SingBox != nil {
+		patch.SingBoxKnown = true
+		patch.SingBoxInstalled = o.SingBox.Installed
+		patch.SingBoxVersion = o.SingBox.Version
+		patch.SingBoxState = o.SingBox.State
+		patch.SingBoxError = o.SingBox.ErrorMsg
+		patch.XrayVersion = o.Xray.Version
+	} else if patch.CoreType == CoreTypeSingBox {
+		// Compatibility with the first node-singbox-status implementation:
+		// it mirrored the selected sing-box into the legacy xray object. Do not
+		// expose that mirrored object as a simultaneously running Xray core.
+		patch.SingBoxKnown = true
+		patch.SingBoxVersion = o.Core.Version
+		if patch.SingBoxVersion == "" {
+			patch.SingBoxVersion = o.Xray.Version
+		}
+		patch.SingBoxInstalled = patch.SingBoxVersion != ""
+		patch.SingBoxState = o.Core.State
+		patch.SingBoxError = o.Core.ErrorMsg
+	} else {
+		patch.XrayVersion = o.Xray.Version
+	}
+	if o.SingBox != nil || patch.CoreType != CoreTypeSingBox {
+		patch.XrayState = o.Xray.State
+		patch.XrayError = o.Xray.ErrorMsg
+	}
+	if patch.RunningCore == "" && o.Core.State == string(Running) && patch.CoreType != "" {
+		patch.RunningCore = patch.CoreType
+	}
+	if patch.CoreType == "" && o.Xray.State == string(Running) {
+		patch.CoreType = CoreTypeXray
+		patch.RunningCore = CoreTypeXray
+	}
 	patch.PanelVersion = o.PanelVersion
 	patch.Guid = o.PanelGuid
 	patch.UptimeSecs = o.Uptime
@@ -1358,31 +1474,45 @@ func (s *NodeService) probe(ctx context.Context, n *model.Node, proxyURL string)
 }
 
 type ProbeResultUI struct {
-	Status       string  `json:"status" example:"online"`
-	LatencyMs    int     `json:"latencyMs" example:"42"`
-	XrayVersion  string  `json:"xrayVersion" example:"25.10.31"`
-	PanelVersion string  `json:"panelVersion" example:"v3.x.x"`
-	CpuPct       float64 `json:"cpuPct" example:"12.5"`
-	MemPct       float64 `json:"memPct" example:"45.2"`
-	UptimeSecs   uint64  `json:"uptimeSecs" example:"86400"`
-	Error        string  `json:"error"`
+	Status           string  `json:"status" example:"online"`
+	LatencyMs        int     `json:"latencyMs" example:"42"`
+	XrayVersion      string  `json:"xrayVersion" example:"25.10.31"`
+	SingBoxVersion   string  `json:"singboxVersion"`
+	SingBoxInstalled bool    `json:"singboxInstalled"`
+	SingBoxKnown     bool    `json:"singboxKnown"`
+	CoreType         string  `json:"coreType"`
+	RunningCore      string  `json:"runningCore"`
+	PanelVersion     string  `json:"panelVersion" example:"v3.x.x"`
+	CpuPct           float64 `json:"cpuPct" example:"12.5"`
+	MemPct           float64 `json:"memPct" example:"45.2"`
+	UptimeSecs       uint64  `json:"uptimeSecs" example:"86400"`
+	Error            string  `json:"error"`
 	// XrayState/XrayError are populated on successful probes even when the node's
 	// Xray core is not healthy. The UI uses them for a distinct "panel ok, xray failed" indicator.
-	XrayState string `json:"xrayState"`
-	XrayError string `json:"xrayError"`
+	XrayState    string `json:"xrayState"`
+	XrayError    string `json:"xrayError"`
+	SingBoxState string `json:"singboxState"`
+	SingBoxError string `json:"singboxError"`
 }
 
 func (p HeartbeatPatch) ToUI(ok bool) ProbeResultUI {
 	r := ProbeResultUI{
-		LatencyMs:    p.LatencyMs,
-		XrayVersion:  p.XrayVersion,
-		PanelVersion: p.PanelVersion,
-		CpuPct:       p.CpuPct,
-		MemPct:       p.MemPct,
-		UptimeSecs:   p.UptimeSecs,
-		Error:        FriendlyProbeError(p.LastError),
-		XrayState:    p.XrayState,
-		XrayError:    p.XrayError,
+		LatencyMs:        p.LatencyMs,
+		XrayVersion:      p.XrayVersion,
+		SingBoxVersion:   p.SingBoxVersion,
+		SingBoxInstalled: p.SingBoxInstalled,
+		SingBoxKnown:     p.SingBoxKnown,
+		CoreType:         p.CoreType,
+		RunningCore:      p.RunningCore,
+		PanelVersion:     p.PanelVersion,
+		CpuPct:           p.CpuPct,
+		MemPct:           p.MemPct,
+		UptimeSecs:       p.UptimeSecs,
+		Error:            FriendlyProbeError(p.LastError),
+		XrayState:        p.XrayState,
+		XrayError:        p.XrayError,
+		SingBoxState:     p.SingBoxState,
+		SingBoxError:     p.SingBoxError,
 	}
 	if ok {
 		r.Status = "online"

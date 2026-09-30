@@ -112,6 +112,24 @@ func (j *NodeHeartbeatJob) probeOne(n *model.Node) *eventbus.Event {
 	return nodeTransitionEvent(n, prevStatus, patch)
 }
 
+func selectedNodeCoreHealth(patch service.HeartbeatPatch) (string, string) {
+	core := strings.ToLower(strings.TrimSpace(patch.CoreType))
+	if core == "" {
+		core = strings.ToLower(strings.TrimSpace(patch.RunningCore))
+	}
+	switch core {
+	case service.CoreTypeSingBox:
+		return patch.SingBoxState, patch.SingBoxError
+	case service.CoreTypeXray:
+		return patch.XrayState, patch.XrayError
+	default:
+		if strings.EqualFold(strings.TrimSpace(patch.RunningCore), service.CoreTypeSingBox) {
+			return patch.SingBoxState, patch.SingBoxError
+		}
+		return patch.XrayState, patch.XrayError
+	}
+}
+
 // nodeTransitionEvent is node.down / node.up on a genuine state change only; an unknown
 // previous status (fresh start) counts as not-online, so it never yields node.down.
 func nodeTransitionEvent(n *model.Node, prevStatus string, patch service.HeartbeatPatch) *eventbus.Event {
@@ -128,16 +146,23 @@ func nodeTransitionEvent(n *model.Node, prevStatus string, patch service.Heartbe
 	if source == "" {
 		source = "node-" + strconv.Itoa(n.Id)
 	}
+	coreState, coreError := selectedNodeCoreHealth(patch)
 	return &eventbus.Event{
 		Type:   eventType,
 		Source: source,
 		Data: &eventbus.NodeHealthData{
-			NodeId:    n.Id,
-			LatencyMs: patch.LatencyMs,
-			CpuPct:    patch.CpuPct,
-			MemPct:    patch.MemPct,
-			XrayState: patch.XrayState,
-			XrayError: patch.XrayError,
+			NodeId:       n.Id,
+			LatencyMs:    patch.LatencyMs,
+			CpuPct:       patch.CpuPct,
+			MemPct:       patch.MemPct,
+			CoreType:     patch.CoreType,
+			RunningCore:  patch.RunningCore,
+			CoreState:    coreState,
+			CoreError:    coreError,
+			XrayState:    patch.XrayState,
+			XrayError:    patch.XrayError,
+			SingBoxState: patch.SingBoxState,
+			SingBoxError: patch.SingBoxError,
 		},
 	}
 }

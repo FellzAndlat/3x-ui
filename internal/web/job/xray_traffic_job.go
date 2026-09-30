@@ -81,25 +81,33 @@ func (j *XrayTrafficJob) runNonXrayTraffic() {
 		logger.Debug("get core type for traffic presence failed:", coreErr)
 	}
 	if coreErr == nil && core == service.CoreTypeSingBox {
-		service.EnsureOnlinePresenceTracker()
-		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-		online, err := (&service.SingBoxService{}).OnlineClientIPs(ctx)
-		cancel()
-		if err != nil {
-			logger.Debug("get online users from sing-box api failed:", err)
+		singBoxService := &service.SingBoxService{}
+		if !singBoxService.IsRunning() {
+			// A selected but missing/stopped sing-box has no live connections.
+			// Clear the previous snapshot instead of polling an unavailable API
+			// every five seconds and leaving stale clients shown as online.
+			j.inboundService.RefreshLocalOnlineClients(nil, nil)
 		} else {
-			emails := make([]string, 0, len(online))
-			for email := range online {
-				if email != "" {
-					emails = append(emails, email)
+			service.EnsureOnlinePresenceTracker()
+			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+			online, activeInbounds, err := singBoxService.OnlinePresence(ctx)
+			cancel()
+			if err != nil {
+				logger.Debug("get online users from sing-box api failed:", err)
+			} else {
+				emails := make([]string, 0, len(online))
+				for email := range online {
+					if email != "" {
+						emails = append(emails, email)
+					}
 				}
-			}
-			if len(emails) > 0 {
-				if err := j.inboundService.BumpClientsLastOnline(emails); err != nil {
-					logger.Warning("bump last online for sing-box clients failed:", err)
+				if len(emails) > 0 {
+					if err := j.inboundService.BumpClientsLastOnline(emails); err != nil {
+						logger.Warning("bump last online for sing-box clients failed:", err)
+					}
 				}
+				j.inboundService.RefreshLocalOnlineClients(emails, activeInbounds)
 			}
-			j.inboundService.RefreshLocalOnlineClients(emails, nil)
 		}
 	}
 
@@ -136,6 +144,14 @@ func (j *XrayTrafficJob) runNonXrayTraffic() {
 // real-time updates over WebSocket using compact delta payloads — no REST
 // fallback, scales to 10k–20k+ clients per inbound.
 func (j *XrayTrafficJob) Run() {
+	core, coreErr := j.settingService.GetCoreType()
+	if coreErr == nil && core == service.CoreTypeSingBox {
+		j.runNonXrayTraffic()
+		return
+	}
+	if coreErr != nil {
+		logger.Debug("get core type for traffic source failed:", coreErr)
+	}
 	if !j.xrayService.IsXrayRunning() {
 		j.runNonXrayTraffic()
 		return

@@ -93,15 +93,6 @@ func inboundTransports(protocol model.Protocol, streamSettings, settings string)
 		// Empty Naive network means sing-box accepts both transports.
 		return transportTCP | transportUDP
 	}
-	if protocol == model.Psiphon {
-		var st map[string]any
-		if json.Unmarshal([]byte(settings), &st) == nil {
-			if proto, _ := st["tunnelProtocol"].(string); strings.EqualFold(strings.TrimSpace(proto), "QUIC-OSSH") {
-				return transportUDP
-			}
-		}
-		return transportTCP
-	}
 
 	var bits transportBits
 

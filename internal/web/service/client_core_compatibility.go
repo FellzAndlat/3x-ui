@@ -175,14 +175,14 @@ func coreSupportsInboundProtocol(core string, protocol model.Protocol) bool {
 	switch core {
 	case CoreTypeXray:
 		switch protocol {
-		case model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.Psiphon:
+		case model.NaiveProxy, model.AnyTLS, model.ShadowTLS:
 			return false
 		default:
 			return true
 		}
 	case CoreTypeSingBox:
 		switch protocol {
-		case model.WireGuard, model.Tunnel, model.Psiphon:
+		case model.WireGuard, model.Tunnel:
 			return false
 		default:
 			return true

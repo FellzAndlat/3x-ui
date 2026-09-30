@@ -41,6 +41,7 @@ type NodeTrafficSyncJob struct {
 	inboundService service.InboundService
 	settingService service.SettingService
 	xrayService    service.XrayService
+	singBoxService service.SingBoxService
 	running        sync.Mutex
 	structural     atomicBool
 	ipSyncMu       sync.Mutex
@@ -163,7 +164,19 @@ func (j *NodeTrafficSyncJob) Run() {
 	}
 	if clientsDisabled {
 		if restartOnDisable, settingErr := j.settingService.GetRestartXrayOnClientDisable(); settingErr == nil && restartOnDisable {
-			if err := j.xrayService.RestartXray(true); err != nil {
+			coreType, coreErr := j.settingService.GetCoreType()
+			if coreErr != nil {
+				logger.Warning("node traffic sync: get selected core after disabling clients failed:", coreErr)
+			} else if coreType == service.CoreTypeSingBox {
+				// A stopped or absent sing-box has no live sessions to drop. The
+				// next explicit start writes the current client configuration.
+				if j.singBoxService.IsRunning() {
+					if err := j.singBoxService.Restart(context.Background()); err != nil {
+						logger.Warning("node traffic sync: restart sing-box after disabling clients failed:", err)
+						j.singBoxService.SetToNeedRestart()
+					}
+				}
+			} else if err := j.xrayService.RestartXray(true); err != nil {
 				logger.Warning("node traffic sync: restart xray after disabling clients failed:", err)
 				j.xrayService.SetToNeedRestart()
 			}

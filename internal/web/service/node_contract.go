@@ -30,6 +30,11 @@ type NodeView struct {
 	LastHeartbeat       int64    `json:"lastHeartbeat" example:"1700000000"`
 	LatencyMs           int      `json:"latencyMs" example:"42"`
 	XrayVersion         string   `json:"xrayVersion" example:"25.10.31"`
+	SingBoxVersion      string   `json:"singboxVersion"`
+	SingBoxInstalled    bool     `json:"singboxInstalled"`
+	SingBoxKnown        bool     `json:"singboxKnown"`
+	CoreType            string   `json:"coreType"`
+	RunningCore         string   `json:"runningCore"`
 	PanelVersion        string   `json:"panelVersion" example:"v3.x.x"`
 	CpuPct              float64  `json:"cpuPct" example:"12.5"`
 	MemPct              float64  `json:"memPct" example:"45.2"`
@@ -39,6 +44,8 @@ type NodeView struct {
 	LastError           string   `json:"lastError" example:""`
 	XrayState           string   `json:"xrayState" example:"running"`
 	XrayError           string   `json:"xrayError" example:""`
+	SingBoxState        string   `json:"singboxState" example:"running"`
+	SingBoxError        string   `json:"singboxError" example:""`
 	ConfigDirty         bool     `json:"configDirty" example:"false"`
 	ConfigDirtyAt       int64    `json:"configDirtyAt" example:"0"`
 	InboundCount        int      `json:"inboundCount" example:"3"`
@@ -78,6 +85,11 @@ func toNodeView(n *model.Node) *NodeView {
 		LastHeartbeat:       n.LastHeartbeat,
 		LatencyMs:           n.LatencyMs,
 		XrayVersion:         n.XrayVersion,
+		SingBoxVersion:      n.SingBoxVersion,
+		SingBoxInstalled:    n.SingBoxInstalled,
+		SingBoxKnown:        n.SingBoxKnown,
+		CoreType:            n.CoreType,
+		RunningCore:         n.RunningCore,
 		PanelVersion:        n.PanelVersion,
 		CpuPct:              n.CpuPct,
 		MemPct:              n.MemPct,
@@ -87,6 +99,8 @@ func toNodeView(n *model.Node) *NodeView {
 		LastError:           n.LastError,
 		XrayState:           n.XrayState,
 		XrayError:           n.XrayError,
+		SingBoxState:        n.SingBoxState,
+		SingBoxError:        n.SingBoxError,
 		ConfigDirty:         n.ConfigDirty,
 		ConfigDirtyAt:       n.ConfigDirtyAt,
 		InboundCount:        n.InboundCount,

@@ -42,8 +42,8 @@ func TestUpdateInbound_NodeMtprotoShareAddrIsEditable(t *testing.T) {
 	}
 }
 
-// Converting a node inbound to a protocol the master's sidecars only reconcile
-// for local rows is still refused: those loops query node_id IS NULL.
+// Unknown protocol values are not assignable to nodes. Keep this guard generic
+// so removed protocols do not survive as compatibility constants or test fixtures.
 func TestUpdateInbound_RejectsProtocolChangeToNodeIneligible(t *testing.T) {
 	setupConflictDB(t)
 	nodeID := 6
@@ -58,8 +58,8 @@ func TestUpdateInbound_RejectsProtocolChangeToNodeIneligible(t *testing.T) {
 	}
 
 	update := existing
-	update.Protocol = model.MTProto
-	update.Settings = `{"clients":[{"email":"vn-c","enable":true,"secret":"ee0123456789abcdef0123456789abcdef"}]}`
+	update.Protocol = model.Protocol("unknown")
+	update.Settings = `{}`
 	if _, _, err := (&InboundService{}).UpdateInbound(&update); err == nil ||
 		!strings.Contains(err.Error(), "cannot be assigned to a node") {
 		t.Fatalf("err = %v, want a node-eligibility refusal", err)

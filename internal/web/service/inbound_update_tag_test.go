@@ -51,6 +51,9 @@ func TestUpdateInbound_RegeneratesAutoTagOnPortChange(t *testing.T) {
 func TestUpdateInbound_NodeTagKeepsPrefixWhenNodeIdOmitted(t *testing.T) {
 	setupConflictDB(t)
 	seedInboundConflictNode(t, "n1-in-443-tcp", "0.0.0.0", 443, model.VLESS, `{"network":"tcp"}`, `{"clients":[]}`, new(1))
+	if err := database.GetDB().Create(&model.Node{Id: 1, Name: "tag-node", Enable: true, Status: "online", CoreType: CoreTypeXray}).Error; err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
 
 	var existing model.Inbound
 	if err := database.GetDB().Where("tag = ?", "n1-in-443-tcp").First(&existing).Error; err != nil {

@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/middleware"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
 
@@ -16,8 +15,10 @@ import (
 )
 
 type NodeController struct {
-	nodeService service.NodeService
-	xrayService service.XrayService
+	nodeService    service.NodeService
+	xrayService    service.XrayService
+	settingService service.SettingService
+	singBoxService service.SingBoxService
 }
 
 func NewNodeController(g *gin.RouterGroup) *NodeController {
@@ -127,17 +128,19 @@ func (a *NodeController) webCert(c *gin.Context) {
 	jsonObj(c, files, nil)
 }
 
-func (a *NodeController) ensureReachable(c *gin.Context, n *service.NodeMutationRequest, id int) error {
+func (a *NodeController) ensureReachable(c *gin.Context, n *service.NodeMutationRequest, id int) (service.HeartbeatPatch, error) {
 	runtimeNode, err := a.nodeService.RuntimeNodeFromRequest(id, n)
 	if err != nil {
-		return err
+		return service.HeartbeatPatch{}, err
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 6*time.Second)
 	defer cancel()
-	if _, err := a.nodeService.Probe(ctx, runtimeNode); err != nil {
-		return errors.New(service.FriendlyProbeError(err.Error()))
+	patch, err := a.nodeService.Probe(ctx, runtimeNode)
+	if err != nil {
+		return patch, errors.New(service.FriendlyProbeError(err.Error()))
 	}
-	return nil
+	patch.Status = "online"
+	return patch, nil
 }
 
 func (a *NodeController) add(c *gin.Context) {
@@ -145,11 +148,16 @@ func (a *NodeController) add(c *gin.Context) {
 	if !ok {
 		return
 	}
+	var initialPatch service.HeartbeatPatch
+	havePatch := false
 	if n.OutboundTag == "" {
-		if err := a.ensureReachable(c, n, 0); err != nil {
+		var err error
+		initialPatch, err = a.ensureReachable(c, n, 0)
+		if err != nil {
 			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.add"), err)
 			return
 		}
+		havePatch = true
 	}
 	view, err := a.nodeService.CreateFromRequest(n)
 	if err != nil {
@@ -157,10 +165,24 @@ func (a *NodeController) add(c *gin.Context) {
 		return
 	}
 	if n.OutboundTag != "" {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warning("apply node outbound bridge failed:", err)
+		if err := restartSelectedCoreNow(c.Request.Context(), &a.settingService, &a.xrayService, &a.singBoxService); err != nil {
+			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.add"), err)
+			return
 		}
-		if err := a.ensureReachable(c, n, view.Id); err != nil {
+		initialPatch, err = a.ensureReachable(c, n, view.Id)
+		if err != nil {
+			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.add"), err)
+			return
+		}
+		havePatch = true
+	}
+	if havePatch {
+		if err := a.nodeService.UpdateHeartbeat(view.Id, initialPatch); err != nil {
+			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.add"), err)
+			return
+		}
+		view, err = a.nodeService.GetViewById(view.Id)
+		if err != nil {
 			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.add"), err)
 			return
 		}
@@ -183,21 +205,34 @@ func (a *NodeController) update(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.obtain"), err)
 		return
 	}
+	var probePatch service.HeartbeatPatch
+	havePatch := false
 	if n.OutboundTag == "" && old.OutboundTag == "" && (!n.ClearApiToken || n.Enable) {
-		if err := a.ensureReachable(c, n, id); err != nil {
+		probePatch, err = a.ensureReachable(c, n, id)
+		if err != nil {
 			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
 			return
 		}
+		havePatch = true
 	}
 	if err := a.nodeService.UpdateFromRequest(id, n); err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
 		return
 	}
 	if n.OutboundTag != old.OutboundTag {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warning("apply node outbound bridge change failed:", err)
+		if err := restartSelectedCoreNow(c.Request.Context(), &a.settingService, &a.xrayService, &a.singBoxService); err != nil {
+			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
+			return
 		}
-		if err := a.ensureReachable(c, n, id); err != nil {
+		probePatch, err = a.ensureReachable(c, n, id)
+		if err != nil {
+			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
+			return
+		}
+		havePatch = true
+	}
+	if havePatch {
+		if err := a.nodeService.UpdateHeartbeat(id, probePatch); err != nil {
 			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
 			return
 		}
@@ -211,9 +246,16 @@ func (a *NodeController) del(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "get"), err)
 		return
 	}
+	n, _ := a.nodeService.GetById(id)
 	if err := a.nodeService.Delete(id); err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.delete"), err)
 		return
+	}
+	if n != nil && n.OutboundTag != "" {
+		if err := restartSelectedCoreNow(c.Request.Context(), &a.settingService, &a.xrayService, &a.singBoxService); err != nil {
+			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.delete"), err)
+			return
+		}
 	}
 	jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.delete"), nil)
 }
@@ -241,8 +283,9 @@ func (a *NodeController) setEnable(c *gin.Context) {
 		return
 	}
 	if n.OutboundTag != "" {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warning("apply node enable change failed:", err)
+		if err := restartSelectedCoreNow(c.Request.Context(), &a.settingService, &a.xrayService, &a.singBoxService); err != nil {
+			jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), err)
+			return
 		}
 	}
 	jsonMsg(c, I18nWeb(c, "pages.nodes.toasts.update"), nil)

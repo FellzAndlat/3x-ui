@@ -562,44 +562,22 @@ func (s *SettingService) SetPanelOutbound(tag string) error {
 // the bridge is not present in the running core yet.
 func (s *SettingService) PanelEgressProxyURL() string {
 	tag, err := s.GetPanelOutbound()
-	if err != nil || tag == "" {
+	if err != nil || strings.TrimSpace(tag) == "" {
 		return ""
 	}
-	proc := XrayProcess()
-	if proc == nil || !proc.IsRunning() {
-		logger.Warning("panel outbound [", tag, "] is set but Xray is not running, using a direct connection")
-		return ""
+	if proxyURL := coreEgressProxyURL(s, PanelEgressInboundTag); proxyURL != "" {
+		return proxyURL
 	}
-	cfg := proc.GetConfig()
-	if cfg == nil {
-		return ""
-	}
-	for i := range cfg.InboundConfigs {
-		if cfg.InboundConfigs[i].Tag == PanelEgressInboundTag {
-			return fmt.Sprintf("socks5://127.0.0.1:%d", cfg.InboundConfigs[i].Port)
-		}
-	}
-	logger.Warning("panel outbound [", tag, "] is set but the egress bridge is not in the running config, using a direct connection")
+	logger.Warning("panel outbound [", tag, "] is set but the egress bridge is not available in the running core, using a direct connection")
 	return ""
 }
 
 func (s *SettingService) NodeEgressProxyURL(nodeID int) string {
 	tag := NodeEgressInboundTag(nodeID)
-	proc := XrayProcess()
-	if proc == nil || !proc.IsRunning() {
-		logger.Warning("node outbound [", tag, "] is set but Xray is not running, using a direct connection")
-		return ""
+	if proxyURL := coreEgressProxyURL(s, tag); proxyURL != "" {
+		return proxyURL
 	}
-	cfg := proc.GetConfig()
-	if cfg == nil {
-		return ""
-	}
-	for i := range cfg.InboundConfigs {
-		if cfg.InboundConfigs[i].Tag == tag {
-			return fmt.Sprintf("socks5://127.0.0.1:%d", cfg.InboundConfigs[i].Port)
-		}
-	}
-	logger.Warning("node outbound [", tag, "] is set but the egress bridge is not in the running config, using a direct connection")
+	logger.Warning("node outbound [", tag, "] is set but the egress bridge is not available in the running core, using a direct connection")
 	return ""
 }
 

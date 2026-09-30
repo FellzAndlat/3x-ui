@@ -88,6 +88,19 @@ func (s *Subscriber) formatMessage(e eventbus.Event) (subject, body string) {
 		return fmt.Sprintf("<p><b>%s:</b> %s</p>", key, val)
 	}
 
+	appendNodeCore := func(content string, data *eventbus.NodeHealthData) string {
+		if data == nil {
+			return content
+		}
+		if core := data.EffectiveCore(); core != "" {
+			content += kv("Core", core)
+		}
+		if state := data.EffectiveCoreState(); state != "" {
+			content += kv("State", state)
+		}
+		return content
+	}
+
 	switch e.Type {
 	case eventbus.EventOutboundDown:
 		subject = host + " " + i18n("tgbot.messages.eventOutboundDown", "Tag=="+e.Source)
@@ -124,8 +137,11 @@ func (s *Subscriber) formatMessage(e eventbus.Event) (subject, body string) {
 		subject = host + " " + i18n("tgbot.messages.eventNodeDown", "Name=="+e.Source)
 		content := kv(i18n("email.labelStatus"), `<span style="color:red">`+i18n("email.statusDown")+`</span>`)
 		content += kv(i18n("email.labelNode"), e.Source)
-		if data, ok := e.Data.(*eventbus.NodeHealthData); ok && data.XrayError != "" {
-			content += kv(i18n("email.labelError"), data.XrayError)
+		if data, ok := e.Data.(*eventbus.NodeHealthData); ok {
+			content = appendNodeCore(content, data)
+			if coreErr := data.EffectiveCoreError(); coreErr != "" {
+				content += kv(i18n("email.labelError"), coreErr)
+			}
 		}
 		body = wrap(i18n("tgbot.messages.eventNodeDown", "Name=="+e.Source), content)
 
@@ -133,8 +149,11 @@ func (s *Subscriber) formatMessage(e eventbus.Event) (subject, body string) {
 		subject = host + " " + i18n("tgbot.messages.eventNodeUp", "Name=="+e.Source)
 		content := kv(i18n("email.labelStatus"), `<span style="color:green">`+i18n("email.statusUp")+`</span>`)
 		content += kv(i18n("email.labelNode"), e.Source)
-		if data, ok := e.Data.(*eventbus.NodeHealthData); ok && data.LatencyMs > 0 {
-			content += kv(i18n("email.labelDelay"), fmt.Sprintf("%dms", data.LatencyMs))
+		if data, ok := e.Data.(*eventbus.NodeHealthData); ok {
+			content = appendNodeCore(content, data)
+			if data.LatencyMs > 0 {
+				content += kv(i18n("email.labelDelay"), fmt.Sprintf("%dms", data.LatencyMs))
+			}
 		}
 		body = wrap(i18n("tgbot.messages.eventNodeUp", "Name=="+e.Source), content)
 

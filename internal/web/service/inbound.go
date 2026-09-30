@@ -39,6 +39,38 @@ type InboundService struct {
 	FromNodeSync bool
 }
 
+// coreTypeForInbound returns the core that owns an inbound at its execution
+// site. Local inbounds use this panel's setting; node-hosted inbounds use
+// the node's reported configured core. Nodes from older builds have no
+// core_type yet, so preserve their historical Xray behavior.
+func (s *InboundService) coreTypeForInbound(inbound *model.Inbound) (string, error) {
+	if inbound != nil && inbound.NodeID != nil {
+		var node model.Node
+		if err := database.GetDB().Model(&model.Node{}).
+			Select("core_type, running_core").Where("id = ?", *inbound.NodeID).First(&node).Error; err != nil {
+			return "", err
+		}
+		if core := normalizeNodeCoreType(node.CoreType); core != "" {
+			return core, nil
+		}
+		// Compatibility with nodes/status records that know which core is
+		// actually running but do not yet publish a configured core type.
+		if core := normalizeNodeCoreType(node.RunningCore); core != "" {
+			return core, nil
+		}
+		return CoreTypeXray, nil
+	}
+	core, err := (&SettingService{}).GetCoreType()
+	if err != nil {
+		return "", err
+	}
+	core = strings.ToLower(strings.TrimSpace(core))
+	if core == "" {
+		core = CoreTypeXray
+	}
+	return core, nil
+}
+
 func normalizeTrafficResetDay(day int) int {
 	if day < 1 {
 		return 1
@@ -1118,7 +1150,11 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	if shadowTLSErr != nil {
 		return inbound, false, shadowTLSErr
 	}
-	if err := validateInboundRuntimeProtocol(inbound.Protocol, nil); err != nil {
+	// Validate against the actual destination. For a centrally managed node
+	// inbound, NodeID selects that node's configured/running core; for a local
+	// inbound (including a payload received through node sync, where NodeID is
+	// stripped on the wire) this resolves to the local selected core.
+	if err := validateInboundRuntimeProtocol(inbound.Protocol, inbound); err != nil {
 		return inbound, false, err
 	}
 	if !s.FromNodeSync {
@@ -1448,7 +1484,7 @@ func (s *InboundService) delInbound(id int) (bool, func(), error) {
 	if loadErr == nil {
 		naiveSingBox := false
 		if ib.Protocol == model.NaiveProxy || ib.Protocol == model.AnyTLS || ib.Protocol == model.ShadowTLS {
-			if core, coreErr := (&SettingService{}).GetCoreType(); coreErr == nil {
+			if core, coreErr := s.coreTypeForInbound(&ib); coreErr == nil {
 				naiveSingBox = core == CoreTypeSingBox
 			}
 		}
@@ -1682,6 +1718,14 @@ func (s *InboundService) SetInboundEnable(id int, enable bool) (bool, error) {
 	if inbound.Enable == enable {
 		return false, nil
 	}
+	// Old/imported rows may predate the current core compatibility guards.
+	// Refuse to mark one enabled centrally when its actual runtime cannot run
+	// the protocol; disabling must always remain possible for recovery.
+	if enable {
+		if err := validateInboundRuntimeProtocol(inbound.Protocol, inbound); err != nil {
+			return false, err
+		}
+	}
 
 	db := database.GetDB()
 	// Enabling puts this row's ports into the running config, and the guards ran
@@ -1710,7 +1754,7 @@ func (s *InboundService) SetInboundEnable(id int, enable bool) (bool, error) {
 	inbound.Enable = enable
 
 	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS {
-		core, coreErr := (&SettingService{}).GetCoreType()
+		core, coreErr := s.coreTypeForInbound(inbound)
 		if coreErr != nil {
 			return false, coreErr
 		}
@@ -2027,7 +2071,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		if oldProtocol == model.NaiveProxy || oldInbound.Protocol == model.NaiveProxy ||
 			oldProtocol == model.AnyTLS || oldInbound.Protocol == model.AnyTLS ||
 			oldProtocol == model.ShadowTLS || oldInbound.Protocol == model.ShadowTLS {
-			core, coreErr := (&SettingService{}).GetCoreType()
+			core, coreErr := s.coreTypeForInbound(oldInbound)
 			if coreErr != nil {
 				return coreErr
 			}
