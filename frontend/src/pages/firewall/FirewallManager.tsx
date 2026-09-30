@@ -64,6 +64,7 @@ function useFirewallText() {
       ru
         ? {
             loading: 'Получение состояния файрволла…',
+            loadError: 'Не удалось получить состояние файрволла. Обновите страницу и проверьте журнал сервера.',
             unsupported:
               '3x-ui не может безопасно управлять обнаруженным файрволлом. Проверьте его конфигурацию и сообщение выше.',
             noFirewall: 'Поддерживаемый файрволл не найден.',
@@ -106,6 +107,7 @@ function useFirewallText() {
           }
         : {
             loading: 'Loading firewall status…',
+            loadError: 'Failed to load firewall status. Refresh the page and check the server log.',
             unsupported:
               '3x-ui cannot safely manage the detected firewall. Check its configuration and the message above.',
             noFirewall: 'No supported firewall was found.',
@@ -154,6 +156,7 @@ export function FirewallManager() {
   const text = useFirewallText();
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [action, setAction] = useState('');
   const [port, setPort] = useState<number | null>(null);
   const [protocol, setProtocol] = useState('both');
@@ -165,7 +168,15 @@ export function FirewallManager() {
     void (async () => {
       try {
         const msg = await HttpUtil.get<FirewallStatus>('/panel/api/server/firewall/status');
-        if (!cancelled && msg.success && msg.obj) setStatus(msg.obj);
+        if (cancelled) return;
+        if (msg.success && msg.obj) {
+          setStatus(msg.obj);
+          setLoadError(false);
+        } else {
+          setLoadError(true);
+        }
+      } catch {
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -280,6 +291,9 @@ export function FirewallManager() {
   const supported = status?.supported ?? false;
 
   if (!status) {
+    if (loadError) {
+      return <Alert type="error" showIcon title={text.loadError} />;
+    }
     return <Typography.Text type="secondary">{text.loading}</Typography.Text>;
   }
 
