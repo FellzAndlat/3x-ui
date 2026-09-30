@@ -578,6 +578,400 @@ run_speedtest() {
     fi
 }
 
+XUI_GATEWAY_NFT_TABLE="xui_gateway"
+XUI_GATEWAY_NAT_TABLE="xui_gateway_nat"
+XUI_GATEWAY_ROUTING_SERVICE="/etc/systemd/system/xui-gateway-routing.service"
+XUI_GATEWAY_STATE="/etc/x-ui/gateway.env"
+
+XUI_GATEWAY_MARK="0x40/0xc0"
+XUI_GATEWAY_TABLE="100"
+XUI_GATEWAY_TPROXY_PORT="52345"
+
+gateway_routing_enable() {
+    cat > "${XUI_GATEWAY_ROUTING_SERVICE}" <<'EOF'
+[Unit]
+Description=3X-UI Gateway Mode Policy Routing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip rule add fwmark 0x40/0xc0 table 100
+ExecStart=/usr/sbin/ip route add local default dev lo table 100
+RemainAfterExit=yes
+
+ExecStop=/usr/sbin/ip rule del fwmark 0x40/0xc0 table 100
+ExecStop=/usr/sbin/ip route del local default dev lo table 100
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now xui-gateway-routing.service
+}
+
+gateway_routing_disable() {
+    if systemctl is-active --quiet xui-gateway-routing.service; then
+        systemctl stop xui-gateway-routing.service
+    fi
+
+    systemctl disable xui-gateway-routing.service 2>/dev/null || true
+
+    rm -f "${XUI_GATEWAY_ROUTING_SERVICE}"
+
+    systemctl daemon-reload
+
+    ip rule del fwmark 0x40/0xc0 table 100 2>/dev/null || true
+    ip route del local default dev lo table 100 2>/dev/null || true
+}
+
+gateway_save_sysctl() {
+    local value
+
+    value="$(sysctl -n net.ipv4.ip_forward)"
+
+    cat > "${XUI_GATEWAY_STATE}" <<EOF
+IP_FORWARD_OLD=${value}
+EOF
+}
+
+gateway_restore_sysctl() {
+    if [[ -f "${XUI_GATEWAY_STATE}" ]]; then
+        source "${XUI_GATEWAY_STATE}"
+
+        if [[ -n "${IP_FORWARD_OLD}" ]]; then
+            sysctl -w net.ipv4.ip_forward="${IP_FORWARD_OLD}"
+        fi
+    fi
+}
+
+gateway_nft_enable() {
+    local lan_network="$1"
+
+    nft delete table inet xui_gateway 2>/dev/null || true
+
+    nft -f - <<EOF
+table inet xui_gateway {
+    set whitelist {
+        type ipv4_addr
+        flags interval
+        auto-merge
+        elements = {
+            0.0.0.0/8,
+            10.0.0.0/8,
+            100.64.0.0/10,
+            127.0.0.0/8,
+            169.254.0.0/16,
+            172.16.0.0/12,
+            192.0.0.0/24,
+            192.0.2.0/24,
+            192.88.99.0/24,
+            192.168.0.0/16,
+            198.51.100.0/24,
+            203.0.113.0/24,
+            224.0.0.0/3
+        }
+    }
+
+    set whitelist6 {
+        type ipv6_addr
+        flags interval
+        auto-merge
+        elements = {
+            ::/127,
+            fc00::/7,
+            fe80::/10,
+            ff00::/8
+        }
+    }
+
+    set interface {
+        type ipv4_addr
+        flags interval
+        auto-merge
+        elements = {
+            127.0.0.0/8,
+            ${lan_network}
+        }
+    }
+
+    set interface6 {
+        type ipv6_addr
+        flags interval
+        auto-merge
+        elements = {
+            ::1,
+            fe80::/64
+        }
+    }
+
+    chain tp_out {
+        meta mark & 0x00000080 == 0x00000080 return
+        meta l4proto { tcp, udp } fib saddr type local fib daddr type != local jump tp_rule
+    }
+
+    chain tp_pre {
+        iifname "lo" meta mark & 0x000000c0 != 0x00000040 return
+
+        meta l4proto { tcp, udp } \
+            fib saddr type != local \
+            fib daddr type != local \
+            jump tp_rule
+
+        meta l4proto { tcp, udp } \
+            meta mark & 0x000000c0 == 0x00000040 \
+            tproxy ip to 127.0.0.1:52345
+
+        meta l4proto { tcp, udp } \
+            meta mark & 0x000000c0 == 0x00000040 \
+            tproxy ip6 to [::1]:52345
+    }
+
+    chain output {
+        type route hook output priority mangle - 5;
+        policy accept;
+    }
+
+    chain prerouting {
+        type filter hook prerouting priority mangle - 5;
+        policy accept;
+
+        meta nfproto { ipv4, ipv6 } jump tp_pre
+    }
+
+    chain tp_rule {
+        meta mark set ct mark
+
+        meta mark & 0x000000c0 == 0x00000040 return
+
+        iifname "br-*" return
+        iifname "docker*" return
+        iifname "veth*" return
+        iifname "wg*" return
+        iifname "ppp*" return
+
+        ip daddr @interface return
+        ip daddr @whitelist return
+        ip6 daddr @whitelist6 return
+        ip6 daddr @interface6 return
+
+        jump tp_mark
+    }
+
+    chain tp_mark {
+        tcp flags syn / fin,syn,rst,ack \
+            meta mark set meta mark | 0x00000040
+
+        meta l4proto udp ct state new \
+            meta mark set meta mark | 0x00000040
+
+        ct mark set meta mark
+    }
+}
+EOF
+}
+
+gateway_nat_enable() {
+    local lan_network="$1"
+    local wan_if="$2"
+
+    nft delete table ip xui_gateway_nat 2>/dev/null || true
+
+    nft -f - <<EOF
+table ip xui_gateway_nat {
+    chain postrouting {
+        type nat hook postrouting priority srcnat;
+        policy accept;
+
+        ip saddr ${lan_network} oifname "${wan_if}" masquerade
+    }
+}
+EOF
+}
+
+gateway_nft_disable() {
+    nft delete table inet xui_gateway 2>/dev/null || true
+    nft delete table ip xui_gateway_nat 2>/dev/null || true
+}
+
+gateway_get_network() {
+    local ip="$1"
+    local prefix="$2"
+
+    python3 - "$ip" "$prefix" <<'PY'
+import ipaddress
+import sys
+
+ip = ipaddress.ip_interface(f"{sys.argv[1]}/{sys.argv[2]}")
+print(ip.network)
+PY
+}
+
+gateway_enable() {
+    local lan_if
+    local lan_ip
+    local prefix
+    local lan_network
+    local has_wan
+    local wan_if
+
+    if [[ -f "${XUI_GATEWAY_STATE}" ]]; then
+        LOGE "Gateway Mode is already enabled."
+        return 1
+    fi
+
+    echo ""
+    echo "=== Gateway Mode ==="
+    echo ""
+
+    read -rp "LAN interface: " lan_if
+
+    if [[ -z "${lan_if}" ]] || ! ip link show "${lan_if}" >/dev/null 2>&1; then
+        LOGE "Invalid LAN interface."
+        return 1
+    fi
+
+    read -rp "LAN IP: " lan_ip
+    read -rp "Prefix [24]: " prefix
+    prefix="${prefix:-24}"
+
+    lan_network="$(gateway_get_network "${lan_ip}" "${prefix}")"
+
+    if [[ -z "${lan_network}" ]]; then
+        LOGE "Could not determine LAN network."
+        return 1
+    fi
+
+    read -rp "Does this host have a WAN interface? [y/N]: " has_wan
+
+    if [[ "${has_wan}" =~ ^[Yy]$ ]]; then
+        read -rp "WAN interface: " wan_if
+
+        if [[ -z "${wan_if}" ]] || ! ip link show "${wan_if}" >/dev/null 2>&1; then
+            LOGE "Invalid WAN interface."
+            return 1
+        fi
+    else
+        wan_if=""
+    fi
+
+    echo ""
+    LOGI "LAN interface: ${lan_if}"
+    LOGI "LAN network:   ${lan_network}"
+    LOGI "WAN interface: ${wan_if:-none}"
+    echo ""
+
+    gateway_save_sysctl
+
+    cat >> "${XUI_GATEWAY_STATE}" <<EOF
+LAN_IF=${lan_if}
+LAN_IP=${lan_ip}
+LAN_PREFIX=${prefix}
+LAN_NETWORK=${lan_network}
+WAN_IF=${wan_if}
+EOF
+
+    sysctl -w net.ipv4.ip_forward=1
+
+    gateway_routing_enable
+
+    gateway_nft_enable "${lan_network}"
+
+    if [[ -n "${wan_if}" ]]; then
+        gateway_nat_enable "${lan_network}" "${wan_if}"
+    fi
+
+    if ! "${xui_folder}/x-ui" gateway enable; then
+        LOGE "Failed to configure Xray Gateway Mode."
+
+        gateway_nft_disable
+        gateway_routing_disable
+        gateway_restore_sysctl
+        rm -f "${XUI_GATEWAY_STATE}"
+
+        return 1
+    fi
+
+    restart_xray 0
+
+    echo ""
+    LOGI "Gateway Mode enabled successfully."
+}
+
+gateway_status() {
+    echo ""
+    echo "=== Gateway Mode ==="
+    echo ""
+
+    if [[ ! -f "${XUI_GATEWAY_STATE}" ]]; then
+        echo "Status: disabled"
+        return 0
+    fi
+
+    source "${XUI_GATEWAY_STATE}"
+
+    echo "Status:         enabled"
+    echo "LAN interface:  ${LAN_IF}"
+    echo "LAN IP:         ${LAN_IP}/${LAN_PREFIX}"
+    echo "LAN network:    ${LAN_NETWORK}"
+    echo "WAN interface:  ${WAN_IF:-none}"
+    echo "TPROXY port:    52345"
+    echo "Inbound tag:    in-tproxy"
+    echo "Routing mark:   0x40/0xc0"
+    echo "Routing table:  100"
+    echo ""
+
+    echo "Policy routing:"
+    ip rule | grep -F "fwmark 0x40/0xc0" || echo "  NOT FOUND"
+
+    echo ""
+    echo "Routing table 100:"
+    ip route show table 100
+
+    echo ""
+    echo "nftables:"
+    nft list table inet xui_gateway 2>/dev/null || echo "  xui_gateway table not found"
+
+    if [[ -n "${WAN_IF}" ]]; then
+        echo ""
+        echo "NAT:"
+        nft list table ip xui_gateway_nat 2>/dev/null || echo "  xui_gateway_nat table not found"
+    fi
+}
+
+gateway_menu() {
+    echo ""
+    echo -e "${green}\t1.${plain} Enable Gateway Mode"
+    echo -e "${green}\t2.${plain} Disable Gateway Mode"
+    echo -e "${green}\t3.${plain} Gateway Status"
+    echo -e "${green}\t0.${plain} Back to Main Menu"
+
+    read -rp "Choose an option: " choice
+
+    case "${choice}" in
+        0)
+            show_menu
+            ;;
+        1)
+            gateway_enable
+            gateway_menu
+            ;;
+        2)
+            gateway_disable
+            gateway_menu
+            ;;
+        3)
+            gateway_status
+            gateway_menu
+            ;;
+        *)
+            LOGE "Invalid option."
+            gateway_menu
+            ;;
+    esac
+}
+
 show_usage() {
     echo -e "┌────────────────────────────────────────────────────────────────┐
 │  ${blue}x-ui control menu usages (subcommands):${plain}                       │
@@ -645,11 +1039,12 @@ show_menu() {
 │  ${green}26.${plain} Enable BBR                               │
 │  ${green}27.${plain} Update Geo Files                         │
 │  ${green}28.${plain} Speedtest                                │
+│  ${green}29.${plain} Gateway Mode                               │
 ╚────────────────────────────────────────────────╝
 "
         show_status
         echo
-        read -rp "Please enter your selection [0-28]: " num
+        read -rp "Please enter your selection [0-29]: " num
         case "${num}" in
             0) exit 0 ;;
             1) check_uninstall && install ;;
@@ -680,7 +1075,8 @@ show_menu() {
             26) bbr_menu ;;
             27) check_install && update_geo ;;
             28) run_speedtest ;;
-            *) LOGE "Please enter the correct number [0-28]" ;;
+            29) check_install && gateway_menu ;;
+            *) LOGE "Please enter the correct number [0-29]" ;;
         esac
     done
 }
@@ -712,6 +1108,24 @@ if [[ $# -gt 0 ]]; then
             ;;
         migrateDB) migrate_db "$2" "$3" ;;
         pgclient) pg_upgrade_client "$2" ;;
+        gateway)
+    check_install 0 || exit 1
+
+    case "$2" in
+        enable)
+            "${xui_folder}/x-ui" gateway enable
+            ;;
+        disable)
+            "${xui_folder}/x-ui" gateway disable
+            ;;
+        status)
+            "${xui_folder}/x-ui" gateway status
+            ;;
+        *)
+            echo "Usage: x-ui gateway <enable|disable|status>"
+            ;;
+    esac
+    ;;
         *) show_usage ;;
     esac
 else
