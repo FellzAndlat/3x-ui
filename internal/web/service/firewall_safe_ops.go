@@ -147,8 +147,18 @@ func (s *FirewallService) SetManagedEnabledSafe(ctx context.Context, enabled boo
 				return FirewallManagedStatus{}, err
 			}
 		}
-	} else if err := disableManagedBackend(ctx, backend); err != nil {
-		return FirewallManagedStatus{}, err
+		if err := setFirewallManagedEnabledPreference(true); err != nil {
+			return FirewallManagedStatus{}, err
+		}
+	} else {
+		// Persist the disabled intent before removing runtime-only native rules so
+		// a reboot cannot unexpectedly recreate them if the removal later fails.
+		if err := setFirewallManagedEnabledPreference(false); err != nil {
+			return FirewallManagedStatus{}, err
+		}
+		if err := disableManagedBackend(ctx, backend); err != nil {
+			return FirewallManagedStatus{}, err
+		}
 	}
 	return s.managedStatusSafeLocked(ctx, safetyPort)
 }
