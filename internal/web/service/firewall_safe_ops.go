@@ -75,7 +75,7 @@ func (s *FirewallService) syncManagedSafeLocked(ctx context.Context, backend fir
 			return err
 		}
 	case "iptables":
-		if err := applyManagedIPTables(ctx, backend.binary, desired); err != nil {
+		if err := applyManagedIPTablesSafe(ctx, backend.binary, desired); err != nil {
 			// IPv4 may already have been installed when ip6tables fails. Remove
 			// both owned chains so a failed operation never leaves a half-enabled
 			// firewall behind.
