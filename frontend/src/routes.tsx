@@ -4,6 +4,7 @@ import { Spin } from 'antd';
 
 import PanelLayout from '@/layouts/PanelLayout';
 import { importWithChunkRecovery } from '@/lib/chunk-load-recovery';
+import TelemtSubscriptionToggle from '@/pages/telemt/TelemtSubscriptionToggle';
 
 const IndexPage = lazy(() => importWithChunkRecovery(() => import('@/pages/index/IndexPage')));
 const InboundsPage = lazy(() =>
@@ -69,7 +70,15 @@ const routes: RouteObject[] = [
       { path: 'outbound', element: withSuspense(<XrayPage />) },
       { path: 'routing', element: withSuspense(<XrayPage />) },
       { path: 'api-docs', element: withSuspense(<ApiDocsPage />) },
-      { path: 'telemt', element: withSuspense(<TelemtPage />) },
+      {
+        path: 'telemt',
+        element: withSuspense(
+          <>
+            <TelemtPage />
+            <TelemtSubscriptionToggle />
+          </>,
+        ),
+      },
     ],
   },
 ];

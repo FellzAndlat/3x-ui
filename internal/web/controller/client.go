@@ -185,6 +185,32 @@ func (a *ClientController) getByTgId(c *gin.Context) {
 	jsonObj(c, results, nil)
 }
 
+func (a *ClientController) provisionTelemtSubscription(c *gin.Context, email string) {
+	enabled, err := a.settingService.GetTelemtSubscriptionProxyEnable()
+	if err != nil || !enabled {
+		return
+	}
+	host := publicHostFromRequest(c)
+	if host == "" {
+		return
+	}
+	record, err := a.clientService.GetRecordByEmail(nil, email)
+	if err != nil || record == nil || strings.TrimSpace(record.SubID) == "" {
+		return
+	}
+	// Provisioning is best-effort by design. Creating a VPN client must not fail
+	// just because Telemt is not installed, stopped, or temporarily unavailable.
+	_, _ = (service.TelemtService{}).EnsureSubscriptionProxy(record.SubID, host)
+}
+
+func (a *ClientController) provisionTelemtSubscriptions(c *gin.Context, payloads []service.ClientCreatePayload) {
+	for i := range payloads {
+		if email := strings.TrimSpace(payloads[i].Client.Email); email != "" {
+			a.provisionTelemtSubscription(c, email)
+		}
+	}
+}
+
 func (a *ClientController) create(c *gin.Context) {
 	var payload service.ClientCreatePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -206,6 +232,7 @@ func (a *ClientController) create(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
+	a.provisionTelemtSubscription(c, payload.Client.Email)
 	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundClientAddSuccess"), pendingNodeObj(a.inboundService.AnyNodePending(payload.InboundIds)), nil)
 }
 
@@ -455,6 +482,7 @@ func (a *ClientController) bulkCreate(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
+	a.provisionTelemtSubscriptions(c, payloads)
 	jsonObj(c, result, nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()
@@ -510,6 +538,7 @@ func (a *ClientController) importClients(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
+	a.provisionTelemtSubscriptions(c, items)
 	jsonObj(c, result, nil)
 	if needRestart {
 		a.xrayService.SetToNeedRestart()

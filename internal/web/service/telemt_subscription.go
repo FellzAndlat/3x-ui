@@ -44,8 +44,8 @@ func isTelemtSubscriptionUsername(username string) bool {
 
 // EnsureSubscriptionProxy returns the stable Telemt proxy assigned to subID,
 // creating it on first use. Repeated calls keep the same username and secret.
-// It never starts a stopped Telemt service: opening a public subscription page
-// must not override the administrator's explicit service state.
+// It never starts a stopped Telemt service. When Telemt is installed but stopped,
+// the user is persisted to telemt.toml and becomes active on the next normal start.
 func (TelemtService) EnsureSubscriptionProxy(subID, host string) (TelemtProxy, error) {
 	subID = strings.TrimSpace(subID)
 	host = strings.TrimSpace(host)
@@ -62,9 +62,7 @@ func (TelemtService) EnsureSubscriptionProxy(subID, host string) (TelemtProxy, e
 	telemtSubscriptionProfileMu.Lock()
 	defer telemtSubscriptionProfileMu.Unlock()
 
-	if systemctl("is-active", "--quiet", telemtServiceName) != nil {
-		return TelemtProxy{}, errors.New("telemt: service is not active")
-	}
+	active := systemctl("is-active", "--quiet", telemtServiceName) == nil
 	if err := ensureTelemtConfig(); err != nil {
 		return TelemtProxy{}, err
 	}
@@ -99,14 +97,31 @@ func (TelemtService) EnsureSubscriptionProxy(subID, host string) (TelemtProxy, e
 		}
 		secret = hex.EncodeToString(buf)
 
-		if err := createTelemtSubscriptionUser(username, secret); err != nil {
-			if !errors.Is(err, errTelemtSubscriptionAPIUnsupported) {
-				return TelemtProxy{}, err
+		if active {
+			if err := createTelemtSubscriptionUser(username, secret); err != nil {
+				if !errors.Is(err, errTelemtSubscriptionAPIUnsupported) {
+					return TelemtProxy{}, err
+				}
+				if err := createTelemtSubscriptionUserLegacy(original, username, secret); err != nil {
+					return TelemtProxy{}, err
+				}
 			}
-			if err := createTelemtSubscriptionUserLegacy(original, username, secret); err != nil {
-				return TelemtProxy{}, err
-			}
+		} else if err := createTelemtSubscriptionUserConfigOnly(original, username, secret); err != nil {
+			return TelemtProxy{}, err
 		}
+	}
+
+	if !active {
+		// Persisting the account is the requested outcome during client creation.
+		// Return the prepared credentials as success without trying to start Telemt
+		// or manufacture a runtime-generated link that is unavailable while stopped.
+		return TelemtProxy{
+			Name:   username,
+			Secret: secret,
+			Host:   host,
+			Port:   raw.Server.Port,
+			TLS:    raw.General.Modes.TLS,
+		}, nil
 	}
 
 	link, err := telemtGeneratedLink(username, raw.General.Modes.TLS)
@@ -231,6 +246,28 @@ func deleteTelemtSubscriptionUser(username string) error {
 		return fmt.Errorf("telemt: delete subscription user: HTTP %d: %s", resp.StatusCode, detail)
 	}
 	return fmt.Errorf("telemt: delete subscription user: HTTP %d", resp.StatusCode)
+}
+
+// createTelemtSubscriptionUserConfigOnly persists a deterministic subscription
+// account while Telemt is stopped. It deliberately does not start or restart the
+// service; the next administrator-controlled start will load the new account.
+func createTelemtSubscriptionUserConfigOnly(original []byte, username, secret string) error {
+	text := string(original)
+	section := "[access.users]"
+	idx := strings.Index(text, section)
+	if idx < 0 {
+		return errors.New("telemt: access.users section is missing")
+	}
+	insertAt := len(text)
+	if next := strings.Index(text[idx+len(section):], "\n["); next >= 0 {
+		insertAt = idx + len(section) + next + 1
+	}
+	entry := fmt.Sprintf("%s = \"%s\"\n", username, secret)
+	text = text[:insertAt] + entry + text[insertAt:]
+	if err := os.WriteFile(telemtConfigPath, []byte(text), 0o600); err != nil {
+		return fmt.Errorf("telemt: persist subscription user: %w", err)
+	}
+	return nil
 }
 
 // createTelemtSubscriptionUserLegacy keeps compatibility with Telemt builds

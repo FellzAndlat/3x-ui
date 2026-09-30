@@ -66,6 +66,22 @@ func serveTelemtSubscription(c *gin.Context) {
 		return
 	}
 
+	settings := service.SettingService{}
+	featureEnabled, err := settings.GetTelemtSubscriptionProxyEnable()
+	if err != nil {
+		logger.Warning("sub: failed to read Telemt subscription proxy setting:", err)
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+	if !featureEnabled {
+		// Do not expose existing personal Telemt credentials while the feature is
+		// disabled. Existing Telemt users are intentionally left untouched so the
+		// administrator can re-enable the feature without destructive migration.
+		c.Header("Cache-Control", "private, no-store")
+		c.JSON(http.StatusOK, telemtSubscriptionPayload{Enabled: false})
+		return
+	}
+
 	telemt := service.TelemtService{}
 	payload := telemtSubscriptionPayload{Enabled: telemt.IsEnabled()}
 	if !payload.Enabled {
@@ -74,9 +90,9 @@ func serveTelemtSubscription(c *gin.Context) {
 		return
 	}
 
-	// Loading the subscription page is also the lifecycle hook for its personal
-	// Telemt profile. EnsureSubscriptionProxy is idempotent: it reuses an
-	// existing profile or creates one when this subscription is seen first.
+	// EnsureSubscriptionProxy is idempotent and also provides backwards
+	// compatibility for subscriptions created before eager Telemt provisioning
+	// was introduced. Normally the profile is already present by this point.
 	if personal, err := telemt.EnsureSubscriptionProxy(subID, host); err == nil {
 		payload.Personal = &telemtSubscriptionProfile{
 			Host: personal.Host,
@@ -88,7 +104,6 @@ func serveTelemtSubscription(c *gin.Context) {
 		logger.Debug("sub: Telemt personal profile unavailable:", err)
 	}
 
-	settings := service.SettingService{}
 	defaultDomain, _ := settings.GetWebDomain()
 	if strings.TrimSpace(defaultDomain) == "" {
 		defaultDomain = host
