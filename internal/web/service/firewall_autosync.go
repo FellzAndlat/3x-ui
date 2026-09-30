@@ -119,9 +119,40 @@ func (s *FirewallService) StartAutoSync() {
 				if err != nil {
 					return
 				}
+				desiredEnabled, configured, err := firewallManagedEnabledPreference()
+				if err != nil {
+					logger.Debug("firewall desired state read failed:", err)
+					return
+				}
 				on, err := backend.enabled(ctx)
 				if err != nil {
 					return
+				}
+				if !configured && on && isManagedNativeFirewall(backend.name) {
+					if err := setFirewallManagedEnabledPreference(true); err != nil {
+						logger.Debug("firewall desired state migration failed:", err)
+						return
+					}
+					desiredEnabled = true
+					configured = true
+				}
+
+				// Once the panel toggle has an explicit value, a disabled managed
+				// firewall must stay disabled even if UFW/firewalld themselves are
+				// still running for administrator-owned rules.
+				if configured && !desiredEnabled {
+					if err := s.reconcileManagedPingStateLocked(false); err != nil {
+						logger.Debug("firewall ping reconcile failed:", err)
+					}
+					return
+				}
+
+				if shouldRestoreManagedNativeFirewall(backend.name, on, desiredEnabled) {
+					if err := s.syncManagedSafeLocked(ctx, backend, rememberedFirewallSafetyPort()); err != nil {
+						logger.Debug("firewall native restore failed:", err)
+						return
+					}
+					on = true
 				}
 				if err := s.reconcileManagedPingStateLocked(on); err != nil {
 					logger.Debug("firewall ping reconcile failed:", err)

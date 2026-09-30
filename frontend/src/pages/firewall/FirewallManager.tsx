@@ -39,6 +39,7 @@ type FirewallStatus = {
   enabled: boolean;
   autoSync: boolean;
   pingEnabled: boolean;
+  canInstallUfw?: boolean;
   rules: FirewallRule[];
   manualRules: FirewallManualRule[];
   message?: string;
@@ -63,8 +64,13 @@ function useFirewallText() {
       ru
         ? {
             loading: 'Получение состояния файрволла…',
+            loadError: 'Не удалось получить состояние файрволла. Обновите страницу и проверьте журнал сервера.',
             unsupported:
-              'Поддерживаемый файрволл не найден. Установите UFW, firewalld, nftables или iptables.',
+              '3x-ui не может безопасно управлять обнаруженным файрволлом. Проверьте его конфигурацию и сообщение выше.',
+            noFirewall: 'Поддерживаемый файрволл не найден.',
+            installUfw: 'Установить UFW',
+            installUfwHint:
+              'UFW будет установлен через пакетный менеджер системы, но не будет включён автоматически. После установки включите его переключателем выше, когда будете готовы.',
             enabled: 'Файрволл включён',
             disabled: 'Файрволл выключен',
             auto: 'Автоматически открывать и закрывать порты подключений',
@@ -101,8 +107,13 @@ function useFirewallText() {
           }
         : {
             loading: 'Loading firewall status…',
+            loadError: 'Failed to load firewall status. Refresh the page and check the server log.',
             unsupported:
-              'No supported firewall found. Install UFW, firewalld, nftables, or iptables.',
+              '3x-ui cannot safely manage the detected firewall. Check its configuration and the message above.',
+            noFirewall: 'No supported firewall was found.',
+            installUfw: 'Install UFW',
+            installUfwHint:
+              'UFW will be installed with the system package manager, but it will not be enabled automatically. Enable it with the switch above when you are ready.',
             enabled: 'Firewall enabled',
             disabled: 'Firewall disabled',
             auto: 'Automatically open and close inbound ports',
@@ -145,6 +156,7 @@ export function FirewallManager() {
   const text = useFirewallText();
   const [status, setStatus] = useState<FirewallStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [action, setAction] = useState('');
   const [port, setPort] = useState<number | null>(null);
   const [protocol, setProtocol] = useState('both');
@@ -156,7 +168,15 @@ export function FirewallManager() {
     void (async () => {
       try {
         const msg = await HttpUtil.get<FirewallStatus>('/panel/api/server/firewall/status');
-        if (!cancelled && msg.success && msg.obj) setStatus(msg.obj);
+        if (cancelled) return;
+        if (msg.success && msg.obj) {
+          setStatus(msg.obj);
+          setLoadError(false);
+        } else {
+          setLoadError(true);
+        }
+      } catch {
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -271,16 +291,37 @@ export function FirewallManager() {
   const supported = status?.supported ?? false;
 
   if (!status) {
+    if (loadError) {
+      return <Alert type="error" showIcon title={text.loadError} />;
+    }
     return <Typography.Text type="secondary">{text.loading}</Typography.Text>;
   }
 
   if (!supported) {
+    const canInstallUfw = Boolean(status.canInstallUfw);
     return (
       <Alert
         type="warning"
         showIcon
-        title={status.message || text.unsupported}
-        description={text.unsupported}
+        title={canInstallUfw ? text.noFirewall : status.message || text.unsupported}
+        description={
+          canInstallUfw ? (
+            <Space direction="vertical" size="small">
+              <Typography.Text>{text.installUfwHint}</Typography.Text>
+              <Button
+                type="primary"
+                loading={action === 'install-ufw'}
+                onClick={() =>
+                  void post('/panel/api/server/firewall/install-ufw', undefined, 'install-ufw')
+                }
+              >
+                {text.installUfw}
+              </Button>
+            </Space>
+          ) : (
+            text.unsupported
+          )
+        }
       />
     );
   }

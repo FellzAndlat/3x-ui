@@ -3,9 +3,11 @@ package controller
 import (
 	"net"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 
+	"github.com/SawaMEN/3x-ui/v3/internal/firewall"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
 
 	"github.com/gin-gonic/gin"
@@ -20,7 +22,8 @@ type FirewallController struct {
 
 type firewallStatusResponse struct {
 	service.FirewallManagedStatus
-	PingEnabled bool `json:"pingEnabled"`
+	PingEnabled  bool `json:"pingEnabled"`
+	CanInstallUFW bool `json:"canInstallUfw"`
 }
 
 func NewFirewallController(g *gin.RouterGroup) *FirewallController {
@@ -36,6 +39,7 @@ func (a *FirewallController) initRouter(g *gin.RouterGroup) {
 	g.POST("/auto-sync", a.setAutoSync)
 	g.POST("/ping", a.setPing)
 	g.POST("/sync", a.sync)
+	g.POST("/install-ufw", a.installUFW)
 	g.POST("/rules/add", a.addRule)
 	g.POST("/rules/delete", a.deleteRule)
 }
@@ -50,7 +54,13 @@ func (a *FirewallController) jsonStatus(c *gin.Context, status service.FirewallM
 		jsonObj(c, status, err)
 		return
 	}
-	jsonObj(c, firewallStatusResponse{FirewallManagedStatus: status, PingEnabled: pingEnabled}, nil)
+	detected := firewall.Detect(c.Request.Context())
+	canInstallUFW := runtime.GOOS == "linux" && !detected.Installed && detected.Backend == firewall.BackendNone
+	jsonObj(c, firewallStatusResponse{
+		FirewallManagedStatus: status,
+		PingEnabled:           pingEnabled,
+		CanInstallUFW:         canInstallUFW,
+	}, nil)
 }
 
 func (a *FirewallController) status(c *gin.Context) {
@@ -131,6 +141,22 @@ func (a *FirewallController) sync(c *gin.Context) {
 		return
 	}
 	status, err := a.firewallService.SyncManagedSafe(c.Request.Context(), firewallSafetyPort(c))
+	a.jsonStatus(c, status, err)
+}
+
+func (a *FirewallController) installUFW(c *gin.Context) {
+	ctx := c.Request.Context()
+	detected := firewall.Detect(ctx)
+	if detected.Installed || detected.Backend != firewall.BackendNone {
+		status, err := a.firewallService.GetManagedStatusSafe(ctx, firewallSafetyPort(c))
+		a.jsonStatus(c, status, err)
+		return
+	}
+	if _, err := firewall.InstallUFW(ctx); err != nil {
+		jsonMsg(c, "failed to install UFW", err)
+		return
+	}
+	status, err := a.firewallService.GetManagedStatusSafe(ctx, firewallSafetyPort(c))
 	a.jsonStatus(c, status, err)
 }
 
