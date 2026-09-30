@@ -39,6 +39,7 @@ type FirewallStatus = {
   enabled: boolean;
   autoSync: boolean;
   pingEnabled: boolean;
+  canInstallUfw?: boolean;
   rules: FirewallRule[];
   manualRules: FirewallManualRule[];
   message?: string;
@@ -64,7 +65,11 @@ function useFirewallText() {
         ? {
             loading: 'Получение состояния файрволла…',
             unsupported:
-              'Поддерживаемый файрволл не найден. Установите UFW, firewalld, nftables или iptables.',
+              '3x-ui не может безопасно управлять обнаруженным файрволлом. Проверьте его конфигурацию и сообщение выше.',
+            noFirewall: 'Поддерживаемый файрволл не найден.',
+            installUfw: 'Установить UFW',
+            installUfwHint:
+              'UFW будет установлен через пакетный менеджер системы, но не будет включён автоматически. После установки включите его переключателем выше, когда будете готовы.',
             enabled: 'Файрволл включён',
             disabled: 'Файрволл выключен',
             auto: 'Автоматически открывать и закрывать порты подключений',
@@ -102,7 +107,11 @@ function useFirewallText() {
         : {
             loading: 'Loading firewall status…',
             unsupported:
-              'No supported firewall found. Install UFW, firewalld, nftables, or iptables.',
+              '3x-ui cannot safely manage the detected firewall. Check its configuration and the message above.',
+            noFirewall: 'No supported firewall was found.',
+            installUfw: 'Install UFW',
+            installUfwHint:
+              'UFW will be installed with the system package manager, but it will not be enabled automatically. Enable it with the switch above when you are ready.',
             enabled: 'Firewall enabled',
             disabled: 'Firewall disabled',
             auto: 'Automatically open and close inbound ports',
@@ -275,12 +284,30 @@ export function FirewallManager() {
   }
 
   if (!supported) {
+    const canInstallUfw = Boolean(status.canInstallUfw);
     return (
       <Alert
         type="warning"
         showIcon
-        title={status.message || text.unsupported}
-        description={text.unsupported}
+        title={canInstallUfw ? text.noFirewall : status.message || text.unsupported}
+        description={
+          canInstallUfw ? (
+            <Space direction="vertical" size="small">
+              <Typography.Text>{text.installUfwHint}</Typography.Text>
+              <Button
+                type="primary"
+                loading={action === 'install-ufw'}
+                onClick={() =>
+                  void post('/panel/api/server/firewall/install-ufw', undefined, 'install-ufw')
+                }
+              >
+                {text.installUfw}
+              </Button>
+            </Space>
+          ) : (
+            text.unsupported
+          )
+        }
       />
     );
   }
