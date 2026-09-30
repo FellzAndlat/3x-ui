@@ -71,7 +71,7 @@ func (s *FirewallService) SetAutoSyncPreference(ctx context.Context, enabled boo
 	firewallMu.Lock()
 	defer firewallMu.Unlock()
 
-	settings := SettingService{}
+	settings := &SettingService{}
 	if !enabled {
 		if err := settings.setBool(firewallAutoSyncKey, false); err != nil {
 			return FirewallStatus{}, err
@@ -119,7 +119,7 @@ func (s *FirewallService) StartAutoSync() {
 				if err != nil {
 					return
 				}
-				desiredEnabled, err := firewallManagedEnabledPreference()
+				desiredEnabled, configured, err := firewallManagedEnabledPreference()
 				if err != nil {
 					logger.Debug("firewall desired state read failed:", err)
 					return
@@ -127,6 +127,13 @@ func (s *FirewallService) StartAutoSync() {
 				on, err := backend.enabled(ctx)
 				if err != nil {
 					return
+				}
+				if !configured && on && isManagedNativeFirewall(backend.name) {
+					if err := setFirewallManagedEnabledPreference(true); err != nil {
+						logger.Debug("firewall desired state migration failed:", err)
+						return
+					}
+					desiredEnabled = true
 				}
 				if shouldRestoreManagedNativeFirewall(backend.name, on, desiredEnabled) {
 					if err := s.syncManagedSafeLocked(ctx, backend, rememberedFirewallSafetyPort()); err != nil {
