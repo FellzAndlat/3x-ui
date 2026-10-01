@@ -17,6 +17,15 @@ func singBoxOutboundSupportsTLS(protocol string) bool {
 	}
 }
 
+func singBoxOutboundRequiresTLS(protocol string) bool {
+	switch protocol {
+	case "hysteria", "hysteria2", "tuic":
+		return true
+	default:
+		return false
+	}
+}
+
 func singBoxOutboundSupportsReality(protocol string) bool {
 	switch protocol {
 	case "http", "vmess", "vless", "trojan":
@@ -35,19 +44,79 @@ func singBoxOutboundSupportsV2RayTransport(protocol string) bool {
 	}
 }
 
+func validateSingBoxServer(outbound map[string]any, protocol, tag string) error {
+	if rawString(outbound, "server") == "" {
+		return fmt.Errorf("sing-box outbound %q protocol %s requires a server", tag, protocol)
+	}
+	if protocol == "hysteria2" {
+		if ports, ok := outbound["server_ports"].([]string); ok && len(ports) > 0 {
+			return nil
+		}
+		if ports, ok := outbound["server_ports"].([]any); ok && len(ports) > 0 {
+			return nil
+		}
+	}
+	port := rawInt(outbound, "server_port")
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("sing-box outbound %q protocol %s has an invalid server port", tag, protocol)
+	}
+	return nil
+}
+
+func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string) error {
+	switch protocol {
+	case "socks", "http", "shadowsocks", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic":
+		if err := validateSingBoxServer(outbound, protocol, tag); err != nil {
+			return err
+		}
+	}
+
+	switch protocol {
+	case "shadowsocks":
+		if rawString(outbound, "method") == "" || rawString(outbound, "password") == "" {
+			return fmt.Errorf("sing-box outbound %q Shadowsocks requires method and password", tag)
+		}
+	case "vmess", "vless":
+		if rawString(outbound, "uuid") == "" {
+			return fmt.Errorf("sing-box outbound %q %s requires UUID", tag, protocol)
+		}
+	case "trojan":
+		if rawString(outbound, "password") == "" {
+			return fmt.Errorf("sing-box outbound %q Trojan requires password", tag)
+		}
+	case "hysteria":
+		if rawInt(outbound, "up_mbps") <= 0 || rawInt(outbound, "down_mbps") <= 0 {
+			return fmt.Errorf("sing-box outbound %q Hysteria requires positive up_mbps and down_mbps", tag)
+		}
+	case "tuic":
+		if rawString(outbound, "uuid") == "" {
+			return fmt.Errorf("sing-box outbound %q TUIC requires UUID", tag)
+		}
+	}
+	return nil
+}
+
 func validateSingBoxOutbound(outbound map[string]any) error {
 	protocol := rawString(outbound, "type")
 	tag := rawString(outbound, "tag")
+	if err := validateSingBoxRequiredFields(outbound, protocol, tag); err != nil {
+		return err
+	}
 
-	if tls, ok := outbound["tls"].(map[string]any); ok && len(tls) > 0 {
+	tls, hasTLS := outbound["tls"].(map[string]any)
+	if hasTLS && len(tls) > 0 {
 		if !singBoxOutboundSupportsTLS(protocol) {
 			return fmt.Errorf("sing-box outbound %q protocol %s does not support TLS settings", tag, protocol)
 		}
 		if reality, ok := tls["reality"].(map[string]any); ok && len(reality) > 0 && !singBoxOutboundSupportsReality(protocol) {
 			return fmt.Errorf("sing-box outbound %q protocol %s does not support REALITY", tag, protocol)
 		}
-	} else if protocol == "tuic" {
-		return fmt.Errorf("sing-box outbound %q TUIC requires TLS", tag)
+	}
+	if singBoxOutboundRequiresTLS(protocol) {
+		enabled, _ := tls["enabled"].(bool)
+		if !hasTLS || !enabled {
+			return fmt.Errorf("sing-box outbound %q %s requires TLS", tag, protocol)
+		}
 	}
 
 	transport, ok := outbound["transport"].(map[string]any)
