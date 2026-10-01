@@ -370,7 +370,7 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 	if privateKey == "" {
 		return nil, fmt.Errorf("wireguard outbound %q has no private key", tag)
 	}
-	addresses, err := normalizeWireGuardAddresses(compatStringSlice(settings["address"]))
+	addresses, err := normalizeWireGuardLocalAddresses(compatStringSlice(settings["address"]))
 	if err != nil {
 		return nil, fmt.Errorf("wireguard outbound %q: %w", tag, err)
 	}
@@ -408,7 +408,11 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 			"public_key":  publicKey,
 			"allowed_ips": allowed,
 		}
-		if psk := strings.TrimSpace(rawString(peer, "psk")); psk != "" {
+		psk := strings.TrimSpace(rawString(peer, "preSharedKey"))
+		if psk == "" {
+			psk = strings.TrimSpace(rawString(peer, "psk"))
+		}
+		if psk != "" {
 			p["pre_shared_key"] = psk
 		}
 		if keepAlive := rawInt(peer, "keepAlive"); keepAlive > 0 {
@@ -419,8 +423,6 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 	endpoint := map[string]any{
 		"type":        "wireguard",
 		"tag":         tag,
-		"system":      !rawBool(settings, "noKernelTun"),
-		"name":        tag,
 		"address":     addresses,
 		"private_key": privateKey,
 		"peers":       peers,
@@ -428,8 +430,11 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 	if mtu := rawInt(settings, "mtu"); mtu > 0 {
 		endpoint["mtu"] = mtu
 	}
-	if reserved := compatIntSlice(settings["reserved"]); len(reserved) > 0 {
-		endpoint["reserved"] = reserved
+	reserved, err := normalizeWireGuardReserved(settings["reserved"])
+	if err != nil {
+		return nil, fmt.Errorf("wireguard outbound %q: %w", tag, err)
+	}
+	if len(reserved) > 0 {
 		for _, peer := range peers {
 			peer["reserved"] = reserved
 		}
@@ -464,6 +469,35 @@ func parseWireGuardEndpoint(value string) (string, int, error) {
 	return host, port, nil
 }
 
+func normalizeWireGuardLocalAddresses(values []string) ([]string, error) {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if ip, network, err := net.ParseCIDR(value); err == nil {
+			ones, _ := network.Mask.Size()
+			value = ip.String() + "/" + strconv.Itoa(ones)
+		} else if ip := net.ParseIP(value); ip != nil {
+			if ip.To4() != nil {
+				value = ip.String() + "/32"
+			} else {
+				value = ip.String() + "/128"
+			}
+		} else {
+			return nil, fmt.Errorf("invalid address %q", value)
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
 func normalizeWireGuardAddresses(values []string) ([]string, error) {
 	out := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
@@ -490,6 +524,22 @@ func normalizeWireGuardAddresses(values []string) ([]string, error) {
 		out = append(out, value)
 	}
 	return out, nil
+}
+
+func normalizeWireGuardReserved(v any) ([]int, error) {
+	reserved := compatIntSlice(v)
+	if len(reserved) == 0 {
+		return nil, nil
+	}
+	if len(reserved) != 3 {
+		return nil, fmt.Errorf("reserved must contain exactly 3 bytes")
+	}
+	for _, value := range reserved {
+		if value < 0 || value > 255 {
+			return nil, fmt.Errorf("reserved byte %d is outside 0..255", value)
+		}
+	}
+	return reserved, nil
 }
 
 func compatIntSlice(v any) []int {
