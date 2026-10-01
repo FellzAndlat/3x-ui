@@ -1,10 +1,8 @@
-// Package mtproto manages mtg-multi (github.com/mhsanaei/mtg-multi) sidecar
-// processes that serve MTProto FakeTLS proxies. Xray-core has no mtproto
-// protocol, so mtproto inbounds are run as standalone mtg processes — one
-// process per inbound, each serving every active client's secret through the
-// mtg-multi [secrets] section — entirely outside the Xray config and lifecycle.
-// A client edit is hot-applied via the fork's POST /reload endpoint so live
-// connections survive; the manager falls back to a restart on older binaries.
+// Package mtproto manages Telemt (github.com/telemt/telemt) sidecar processes
+// that serve MTProto proxies. Xray-core has no MTProto inbound, so each panel
+// MTProto inbound is run as a standalone Telemt process outside Xray's process
+// lifecycle. The manager keeps one Telemt process per inbound and uses Telemt's
+// loopback Control API for hot reload, statistics and quota reset.
 package mtproto
 
 import (
@@ -24,18 +22,16 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 )
 
-// GetBinaryName returns the mtg binary filename for the current OS and arch,
-// matching the naming scheme used for the Xray binary. On Windows the ".exe"
-// extension is appended so a natural "mtg-windows-amd64.exe" is found.
+// GetBinaryName returns the panel-managed Telemt binary name. Release/container
+// packaging installs the upstream binary under this stable OS/arch-qualified
+// name so multiple architectures use the same runtime lookup convention.
 func GetBinaryName() string {
-	name := fmt.Sprintf("mtg-%s-%s", runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {
-		name += ".exe"
+		return "telemt.exe"
 	}
-	return name
+	return "telemt"
 }
 
-// GetBinaryPath returns the full path to the mtg binary, alongside the Xray binary.
 func GetBinaryPath() string {
 	return config.GetBinFolderPath() + "/" + GetBinaryName()
 }
@@ -45,7 +41,7 @@ func configDir() string {
 }
 
 func configPathForID(id int) string {
-	return fmt.Sprintf("%s/mtg-%d.toml", configDir(), id)
+	return fmt.Sprintf("%s/telemt-%d.toml", configDir(), id)
 }
 
 var (
@@ -53,10 +49,6 @@ var (
 	forceStopTimeout    = 2 * time.Second
 )
 
-// procLogWriter consumes the mtg child process's stdout/stderr. It splits the
-// stream into lines, forwards each one to the x-ui log — so mtg's own messages,
-// including why it cannot reach Telegram, become visible in the panel log viewer
-// and journald — and remembers the most recent line for GetResult.
 type procLogWriter struct {
 	mu       sync.Mutex
 	label    string
@@ -80,8 +72,6 @@ func (w *procLogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Flush emits any buffered partial line; called once the process exits so a
-// final un-terminated error line is not lost.
 func (w *procLogWriter) Flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -98,7 +88,7 @@ func (w *procLogWriter) emitLocked(line string) {
 		return
 	}
 	w.lastLine = trimmed
-	logger.Infof("mtproto: mtg %s | %s", w.label, trimmed)
+	logger.Infof("mtproto: telemt %s | %s", w.label, trimmed)
 }
 
 func (w *procLogWriter) LastLine() string {
@@ -107,7 +97,6 @@ func (w *procLogWriter) LastLine() string {
 	return w.lastLine
 }
 
-// Process wraps a single mtg process invocation for one mtproto inbound.
 type Process struct {
 	mu              sync.RWMutex
 	cmd             *exec.Cmd
@@ -119,13 +108,9 @@ type Process struct {
 }
 
 func newProcess(configPath, label string) *Process {
-	return &Process{
-		configPath: configPath,
-		logWriter:  &procLogWriter{label: label},
-	}
+	return &Process{configPath: configPath, logWriter: &procLogWriter{label: label}}
 }
 
-// IsRunning reports whether the mtg process is currently running.
 func (p *Process) IsRunning() bool {
 	p.mu.RLock()
 	cmd, done := p.cmd, p.done
@@ -143,7 +128,6 @@ func (p *Process) IsRunning() bool {
 	return true
 }
 
-// GetResult returns the last log line or the exit error from the mtg process.
 func (p *Process) GetResult() string {
 	if line := p.logWriter.LastLine(); line != "" {
 		return line
@@ -157,10 +141,9 @@ func (p *Process) GetResult() string {
 	return ""
 }
 
-// Start launches the mtg process against its generated config file.
 func (p *Process) Start() error {
 	if p.IsRunning() {
-		return errors.New("mtg is already running")
+		return errors.New("telemt is already running")
 	}
 	cmd := exec.CommandContext(context.Background(), GetBinaryPath(), "run", p.configPath)
 	cmd.Stdout = p.logWriter
@@ -191,13 +174,11 @@ func (p *Process) wait(cmd *exec.Cmd, done chan struct{}) {
 	if err == nil || p.intentionalStop.Load() {
 		return
 	}
-	if runtime.GOOS == "windows" {
-		if strings.Contains(strings.ToLower(err.Error()), "exit status 1") {
-			p.setExitErr(err)
-			return
-		}
+	if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(err.Error()), "exit status 1") {
+		p.setExitErr(err)
+		return
 	}
-	logger.Errorf("mtproto: mtg process exited: %v", err)
+	logger.Errorf("mtproto: Telemt process exited: %v", err)
 	p.setExitErr(err)
 }
 
@@ -207,17 +188,16 @@ func (p *Process) setExitErr(err error) {
 	p.mu.Unlock()
 }
 
-// Stop terminates the running mtg process gracefully, falling back to a kill.
 func (p *Process) Stop() error {
 	if !p.IsRunning() {
-		return errors.New("mtg is not running")
+		return errors.New("telemt is not running")
 	}
 	p.intentionalStop.Store(true)
 	p.mu.RLock()
 	cmd, done := p.cmd, p.done
 	p.mu.RUnlock()
 	if cmd == nil || cmd.Process == nil {
-		return errors.New("mtg is not running")
+		return errors.New("telemt is not running")
 	}
 
 	if runtime.GOOS == "windows" {
@@ -233,12 +213,10 @@ func (p *Process) Stop() error {
 		}
 		return err
 	}
-
 	if err := waitForExit(done, gracefulStopTimeout); err == nil {
 		return nil
 	}
-
-	logger.Warning("mtproto: mtg did not stop after SIGTERM, killing process")
+	logger.Warning("mtproto: Telemt did not stop after SIGTERM, killing process")
 	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		return err
 	}
@@ -255,6 +233,6 @@ func waitForExit(done <-chan struct{}, timeout time.Duration) error {
 	case <-done:
 		return nil
 	case <-timer.C:
-		return fmt.Errorf("timed out waiting for mtg process to stop after %s", timeout)
+		return fmt.Errorf("timed out waiting for Telemt process to stop after %s", timeout)
 	}
 }
