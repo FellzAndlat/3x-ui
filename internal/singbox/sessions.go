@@ -70,8 +70,28 @@ func (c *ConnectionAPIClient) DisconnectUser(ctx context.Context, inbound, user 
 	if user == "" {
 		return 0, nil
 	}
+	return c.DisconnectUsers(ctx, inbound, []string{user})
+}
+
+// DisconnectUsers closes all currently visible connections for the supplied
+// authenticated users using one snapshot. An empty inbound matches across all
+// inbounds; empty user names are ignored.
+func (c *ConnectionAPIClient) DisconnectUsers(ctx context.Context, inbound string, users []string) (int, error) {
+	wanted := make(map[string]struct{}, len(users))
+	for _, user := range users {
+		if user != "" {
+			wanted[user] = struct{}{}
+		}
+	}
+	if len(wanted) == 0 {
+		return 0, nil
+	}
 	return c.disconnectMatching(ctx, func(connection *singBoxConnection) bool {
-		return connection.User == user && (inbound == "" || connection.Inbound == inbound)
+		if inbound != "" && connection.Inbound != inbound {
+			return false
+		}
+		_, ok := wanted[connection.User]
+		return ok
 	})
 }
 
