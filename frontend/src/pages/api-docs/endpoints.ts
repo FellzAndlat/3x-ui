@@ -6,10 +6,10 @@ export type {
   Endpoint,
   SubscriptionHeader,
   Section,
-} from './endpoints.base';
+} from './endpoints.base.ts';
 
-import { sections as baseSections } from './endpoints.base';
-import type { Section } from './endpoints.base';
+import { sections as baseSections } from './endpoints.base.ts';
+import type { Section } from './endpoints.base.ts';
 
 const singBoxOutboundDiagnostics: Section = {
   id: 'singbox-outbound-diagnostics',
