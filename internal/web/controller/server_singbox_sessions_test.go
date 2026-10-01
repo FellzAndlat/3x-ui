@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"reflect"
 	"testing"
 )
 
@@ -45,6 +46,14 @@ func TestNormalizeSingBoxSessionNodeID(t *testing.T) {
 				t.Fatalf("got %v, want %d", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeSingBoxSessionUsers(t *testing.T) {
+	got := normalizeSingBoxSessionUsers([]string{" alice ", "", "bob", "alice", "  bob  ", "carol"})
+	want := []string{"alice", "bob", "carol"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeSingBoxSessionUsers() = %v, want %v", got, want)
 	}
 }
 
