@@ -104,9 +104,7 @@ export default function GatewayModeControl() {
         return;
       }
 
-      messageApi.success(
-        action === 'enable' ? 'Режим шлюза включён' : 'Режим шлюза выключен',
-      );
+      messageApi.success(action === 'enable' ? 'Режим шлюза включён' : 'Режим шлюза выключен');
     } catch (error) {
       messageApi.error(error instanceof Error ? error.message : 'Не удалось изменить режим шлюза');
     } finally {
@@ -119,8 +117,7 @@ export default function GatewayModeControl() {
   const configured = status?.configured === true;
   const coreMismatch = status?.coreMismatch === true;
   const conflict = status?.conflict === true;
-  const recoveryOnly =
-    enabled && !configured && !coreMismatch && status?.recoveryBackup === true;
+  const recoveryOnly = enabled && !configured && !coreMismatch && status?.recoveryBackup === true;
   const canEnable = status?.canEnable === true;
   const selectedCore = coreLabel(status?.coreType);
   const ownerCore = coreLabel(status?.gatewayCoreType);
@@ -139,7 +136,15 @@ export default function GatewayModeControl() {
         </div>
 
         <Alert
-          type={conflict ? 'error' : recoveryOnly || coreMismatch ? 'warning' : enabled ? 'success' : 'info'}
+          type={
+            conflict
+              ? 'error'
+              : recoveryOnly || coreMismatch
+                ? 'warning'
+                : enabled
+                  ? 'success'
+                  : 'info'
+          }
           showIcon
           title={
             conflict
@@ -169,9 +174,7 @@ export default function GatewayModeControl() {
           <Typography.Text strong>Выбранное ядро:</Typography.Text>
           <Tag color={status?.coreType === 'sing-box' ? 'gold' : 'blue'}>{selectedCore}</Tag>
           {enabled && (
-            <Tag color={coreMismatch || conflict ? 'warning' : 'success'}>
-              Шлюз: {ownerCore}
-            </Tag>
+            <Tag color={coreMismatch || conflict ? 'warning' : 'success'}>Шлюз: {ownerCore}</Tag>
           )}
           <Tag>TPROXY: {status?.port ?? 52345}</Tag>
         </Space>
