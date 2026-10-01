@@ -134,6 +134,84 @@ func validateSingBoxOutbound(outbound map[string]any) error {
 	}
 }
 
+func stringSliceLength(value any) int {
+	switch values := value.(type) {
+	case []string:
+		return len(values)
+	case []any:
+		return len(values)
+	default:
+		return 0
+	}
+}
+
+func validateWireGuardReserved(peer map[string]any, tag string, index int) error {
+	value, exists := peer["reserved"]
+	if !exists {
+		return nil
+	}
+	reserved := compatIntSlice(value)
+	if len(reserved) != 3 {
+		return fmt.Errorf("sing-box WireGuard endpoint %q peer %d reserved must contain exactly 3 bytes", tag, index+1)
+	}
+	for _, part := range reserved {
+		if part < 0 || part > 255 {
+			return fmt.Errorf("sing-box WireGuard endpoint %q peer %d has invalid reserved byte %d", tag, index+1, part)
+		}
+	}
+	return nil
+}
+
+func validateSingBoxEndpoint(endpoint map[string]any) error {
+	if rawString(endpoint, "type") != "wireguard" {
+		return nil
+	}
+	tag := rawString(endpoint, "tag")
+	if stringSliceLength(endpoint["address"]) == 0 {
+		return fmt.Errorf("sing-box WireGuard endpoint %q requires an interface address", tag)
+	}
+	if rawString(endpoint, "private_key") == "" {
+		return fmt.Errorf("sing-box WireGuard endpoint %q requires a private key", tag)
+	}
+	peers, ok := endpoint["peers"].([]map[string]any)
+	if !ok {
+		rawPeers, rawOK := endpoint["peers"].([]any)
+		if !rawOK || len(rawPeers) == 0 {
+			return fmt.Errorf("sing-box WireGuard endpoint %q requires at least one peer", tag)
+		}
+		peers = make([]map[string]any, 0, len(rawPeers))
+		for _, item := range rawPeers {
+			peer, peerOK := item.(map[string]any)
+			if !peerOK {
+				return fmt.Errorf("sing-box WireGuard endpoint %q contains an invalid peer", tag)
+			}
+			peers = append(peers, peer)
+		}
+	}
+	if len(peers) == 0 {
+		return fmt.Errorf("sing-box WireGuard endpoint %q requires at least one peer", tag)
+	}
+	for i, peer := range peers {
+		if rawString(peer, "address") == "" {
+			return fmt.Errorf("sing-box WireGuard endpoint %q peer %d requires an address", tag, i+1)
+		}
+		port := rawInt(peer, "port")
+		if port < 1 || port > 65535 {
+			return fmt.Errorf("sing-box WireGuard endpoint %q peer %d has an invalid port", tag, i+1)
+		}
+		if rawString(peer, "public_key") == "" {
+			return fmt.Errorf("sing-box WireGuard endpoint %q peer %d requires a public key", tag, i+1)
+		}
+		if stringSliceLength(peer["allowed_ips"]) == 0 {
+			return fmt.Errorf("sing-box WireGuard endpoint %q peer %d requires allowed IPs", tag, i+1)
+		}
+		if err := validateWireGuardReserved(peer, tag, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Config) MarshalJSON() ([]byte, error) {
 	if c == nil {
 		return []byte("null"), nil
@@ -161,6 +239,9 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 
 	for _, source := range c.Endpoints {
 		endpoint := maps.Clone(source)
+		if err := validateSingBoxEndpoint(endpoint); err != nil {
+			return nil, err
+		}
 		tag := rawString(endpoint, "tag")
 		if tag != "" {
 			if previous, exists := seen[tag]; exists {
@@ -168,7 +249,6 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 			}
 			seen[tag] = "endpoint"
 		}
-
 		if rawString(endpoint, "type") == "wireguard" {
 			delete(endpoint, "reserved")
 		}
