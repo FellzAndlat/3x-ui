@@ -42,6 +42,7 @@ var contractExtraRoutes = map[string]bool{
 // them out of OpenAPI until they have a stable compatibility contract.
 func isInternalUIAPI(path string) bool {
 	return strings.HasPrefix(path, "/panel/api/server/firewall/") ||
+		strings.HasPrefix(path, "/panel/api/gateway/") ||
 		path == "/panel/api/telemt/subscription-proxy"
 }
 

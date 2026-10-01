@@ -41,6 +41,7 @@ import SubscriptionFormatsTab from './SubscriptionFormatsTab';
 import SubscriptionBalancersTab from './SubscriptionBalancersTab';
 import SwapSettingsTab from './SwapSettingsTab';
 import SystemUpdateModal from './SystemUpdateModal';
+import GatewayModeControl from './GatewayModeControl';
 import './SettingsPage.css';
 
 interface ApiMsg {
@@ -341,7 +342,7 @@ export default function SettingsPage() {
                       <Card hoverable>
                         <Row className="header-row">
                           <Col xs={24} sm={10} className="header-actions">
-                            <Space>
+                            <Space wrap>
                               <Button type="primary" disabled={saveDisabled} onClick={onSave}>
                                 {t('pages.settings.save')}
                               </Button>
@@ -353,6 +354,7 @@ export default function SettingsPage() {
                               >
                                 {t('pages.settings.restartPanel')}
                               </Button>
+                              <GatewayModeControl />
                             </Space>
                           </Col>
                           <Col xs={24} sm={14} className="header-info">

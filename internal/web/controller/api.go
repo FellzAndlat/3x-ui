@@ -216,11 +216,12 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 	routingPresets := api.Group("/xray/routingPresets")
 	NewRoutingPresetController(routingPresets)
 
-	// Settings + Xray config management live under the API surface too, so the
-	// same API token drives them. Paths are /panel/api/setting/* and
-	// /panel/api/xray/*.
+	// Settings + core config management live under the API surface too, so the
+	// same authenticated panel session drives them. Gateway routes are kept as
+	// an internal UI surface because they directly mutate the local Xray template.
 	a.settingController = NewSettingController(api)
 	a.xraySettingController = NewXraySettingController(api)
+	NewGatewayController(api)
 
 	// Subscription balancers — client-side balancers for the JSON sub output
 	NewSubBalancerController(api)
