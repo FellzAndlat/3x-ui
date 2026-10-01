@@ -11,21 +11,10 @@ import (
 	"syscall"
 )
 
-// killStrayMtgProcesses terminates orphaned mtg sidecars left over from a
-// previous x-ui run and returns how many were killed.
-//
-// x-ui starts one mtg process per mtproto inbound outside its own lifecycle, and
-// on Linux a child is not guaranteed to die with the panel (there is no
-// kill-on-exit, unlike the Windows job object). A survivor keeps holding the
-// inbound port with a now-stale secret, so new clients are silently
-// domain-fronted to the FakeTLS domain instead of proxied to Telegram. x-ui is
-// the sole owner of mtg, so any process matching our binary name at startup is
-// an orphan and is safe to kill before we start our own.
-//
-// binaryPath is the configured mtg path (e.g. "bin/mtg-linux-amd64"); matching
-// is done on the executable's base name so it is independent of the bin folder
-// and still works after an update has deleted the binary (the running process's
-// /proc/<pid>/exe then reads as "<path> (deleted)", so argv[0] is used too).
+// killStrayMtgProcesses keeps its historical name for compatibility with the
+// manager/tests, but now targets only panel-owned Telemt MTProto sidecars. The
+// standalone Telemt service managed by the /telemt page uses the same binary
+// with /etc/x-ui/telemt.toml and must never be killed here.
 func killStrayMtgProcesses(binaryPath string) int {
 	base := filepath.Base(binaryPath)
 	if base == "" || base == "." || base == string(filepath.Separator) {
@@ -36,6 +25,7 @@ func killStrayMtgProcesses(binaryPath string) int {
 	if err != nil {
 		return 0
 	}
+	ownedDir, _ := filepath.Abs(configDir())
 	killed := 0
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
@@ -45,6 +35,10 @@ func killStrayMtgProcesses(binaryPath string) int {
 		if procExeBase(pid) != base && cmdlineArgv0Base(pid) != base {
 			continue
 		}
+		args := procCmdline(pid)
+		if !isPanelTelemtSidecar(args, ownedDir) {
+			continue
+		}
 		if err := syscall.Kill(pid, syscall.SIGKILL); err == nil {
 			killed++
 		}
@@ -52,28 +46,49 @@ func killStrayMtgProcesses(binaryPath string) int {
 	return killed
 }
 
-// procExeBase returns the base name of /proc/<pid>/exe, or "" if unreadable.
+func isPanelTelemtSidecar(args []string, ownedDir string) bool {
+	for _, arg := range args[1:] {
+		if !strings.HasSuffix(arg, ".toml") {
+			continue
+		}
+		abs, err := filepath.Abs(arg)
+		if err != nil {
+			continue
+		}
+		if filepath.Dir(abs) == ownedDir && strings.HasPrefix(filepath.Base(abs), "telemt-") {
+			return true
+		}
+	}
+	return false
+}
+
 func procExeBase(pid int) string {
 	exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
 	if err != nil {
 		return ""
 	}
-	return filepath.Base(exe)
+	return filepath.Base(strings.TrimSuffix(exe, " (deleted)"))
 }
 
-// cmdlineArgv0Base returns the base name of argv[0] from /proc/<pid>/cmdline,
-// the reliable fallback when the binary has been replaced or exe is unreadable.
 func cmdlineArgv0Base(pid int) string {
+	args := procCmdline(pid)
+	if len(args) == 0 {
+		return ""
+	}
+	return filepath.Base(args[0])
+}
+
+func procCmdline(pid int) []string {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err != nil || len(data) == 0 {
-		return ""
+		return nil
 	}
-	argv0 := data
-	if i := strings.IndexByte(string(data), 0); i >= 0 {
-		argv0 = data[:i]
+	parts := strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			out = append(out, part)
+		}
 	}
-	if len(argv0) == 0 {
-		return ""
-	}
-	return filepath.Base(string(argv0))
+	return out
 }
