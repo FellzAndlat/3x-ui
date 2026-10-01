@@ -20,11 +20,33 @@ export interface NodeTotals {
   depleted: number;
 }
 
+function normalizeNodeCoreVersions(node: NodeRecord): NodeRecord {
+  const selectedCore = node.coreType?.trim().toLowerCase();
+  const runningCore = node.runningCore?.trim().toLowerCase();
+  const xrayVersion = node.xrayVersion?.trim();
+  const singboxVersion = node.singboxVersion?.trim();
+
+  // Legacy node builds mirrored the selected sing-box version into the Xray
+  // field. If the node reports sing-box as selected/running and both fields are
+  // identical, the Xray value is not trustworthy. Do not present it as an
+  // installed Xray version; modern nodes report both versions independently.
+  if (
+    (selectedCore === 'sing-box' || runningCore === 'sing-box') &&
+    xrayVersion &&
+    singboxVersion &&
+    xrayVersion === singboxVersion
+  ) {
+    return { ...node, xrayVersion: '' };
+  }
+
+  return node;
+}
+
 async function fetchNodes(): Promise<NodeRecord[]> {
   const msg = await HttpUtil.get('/panel/api/nodes/list', undefined, { silent: true });
   if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch nodes');
   const validated = parseMsg(msg, NodeListSchema, 'nodes/list');
-  return Array.isArray(validated.obj) ? validated.obj : [];
+  return Array.isArray(validated.obj) ? validated.obj.map(normalizeNodeCoreVersions) : [];
 }
 
 export function useNodesQuery() {
