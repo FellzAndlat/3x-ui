@@ -212,6 +212,24 @@ func (a *ClientController) provisionTelemtSubscriptions(c *gin.Context, payloads
 	}
 }
 
+// disconnectSingBoxUsersBestEffort immediately closes active sing-box
+// sessions after an identity is disabled or removed. The config mutation is
+// authoritative, so runtime API failures must not roll it back; the existing
+// deferred core restart remains the fallback for unsupported/sticky sessions.
+func (a *ClientController) disconnectSingBoxUsersBestEffort(c *gin.Context, emails ...string) {
+	coreType, err := a.settingService.GetCoreType()
+	if err != nil || coreType != service.CoreTypeSingBox {
+		return
+	}
+	for _, email := range emails {
+		email = strings.TrimSpace(email)
+		if email == "" {
+			continue
+		}
+		_, _ = a.singBoxService.DisconnectUserSessions(c.Request.Context(), "", email)
+	}
+}
+
 func (a *ClientController) create(c *gin.Context) {
 	var payload service.ClientCreatePayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -257,6 +275,10 @@ func (a *ClientController) update(c *gin.Context) {
 	// A partly-applied call committed real changes; a rejected one touched
 	// nothing, and broadcasting those would refetch every panel for nothing.
 	if needRestart || err == nil {
+		newEmail := strings.TrimSpace(req.Client.Email)
+		if !req.Client.Enable || (newEmail != "" && newEmail != email) {
+			a.disconnectSingBoxUsersBestEffort(c, email)
+		}
 		notifyClientsChanged()
 	}
 	if err != nil {
@@ -278,6 +300,7 @@ func (a *ClientController) delete(c *gin.Context) {
 	// A partly-applied call committed real removals; a rejected one touched
 	// nothing, and broadcasting those would refetch every panel for nothing.
 	if needRestart || err == nil {
+		a.disconnectSingBoxUsersBestEffort(c, email)
 		notifyClientsChanged()
 	}
 	if err != nil {
@@ -439,6 +462,7 @@ func (a *ClientController) bulkDelete(c *gin.Context) {
 	if needRestart {
 		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
 	}
+	a.disconnectSingBoxUsersBestEffort(c, req.Emails...)
 	notifyClientsChanged()
 }
 
@@ -468,6 +492,9 @@ func (a *ClientController) bulkSetEnable(c *gin.Context, enable bool) {
 	jsonObj(c, result, nil)
 	if needRestart {
 		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
+	}
+	if !enable {
+		a.disconnectSingBoxUsersBestEffort(c, req.Emails...)
 	}
 	notifyClientsChanged()
 }
