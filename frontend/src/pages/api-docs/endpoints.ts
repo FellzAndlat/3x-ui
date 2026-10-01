@@ -11,12 +11,19 @@ export type {
 import { sections as baseSections } from './endpoints.base.ts';
 import type { Section } from './endpoints.base.ts';
 
-const singBoxOutboundDiagnostics: Section = {
-  id: 'singbox-outbound-diagnostics',
-  title: 'sing-box Outbound Diagnostics',
+const coreDiagnostics: Section = {
+  id: 'core-diagnostics',
+  title: 'Core Capabilities and Diagnostics',
   description:
-    'Measure reachability and latency of an outbound in the running sing-box instance through its loopback-only Clash API.',
+    'Inspect panel-supported capabilities for the selected proxy core and run core-specific diagnostics.',
   endpoints: [
+    {
+      method: 'GET',
+      path: '/panel/api/server/core/capabilities',
+      summary: 'Return the selected core and the optional capabilities implemented by 3X-UI.',
+      response:
+        '{\n  "success": true,\n  "obj": {\n    "core": "sing-box",\n    "capabilities": {\n      "ruleSets": true,\n      "outboundDelayProbe": true,\n      "connectionStats": true,\n      "hotInboundReload": false,\n      "clashApi": true,\n      "geoIp": false,\n      "geoSite": false,\n      "shadowTls": true\n    }\n  }\n}',
+    },
     {
       method: 'POST',
       path: '/panel/api/server/singbox/outbound/check',
@@ -48,9 +55,9 @@ const singBoxOutboundDiagnostics: Section = {
       response:
         '{\n  "success": true,\n  "obj": {\n    "tag": "proxy",\n    "url": "https://www.gstatic.com/generate_204",\n    "delay": 82,\n    "delay2": 0,\n    "timeout": 5000\n  }\n}',
       errorResponse:
-        '{\n  "success": false,\n  "msg": "sing-box is not running | outbound tag is required | timeout must be between 1 and 30000 milliseconds | <Clash API error>"\n}',
+        '{\n  "success": false,\n  "msg": "selected core does not support outbound delay probes | sing-box is not running | outbound tag is required | timeout must be between 1 and 30000 milliseconds | <Clash API error>"\n}',
     },
   ],
 };
 
-export const sections: readonly Section[] = [...baseSections, singBoxOutboundDiagnostics];
+export const sections: readonly Section[] = [...baseSections, coreDiagnostics];
