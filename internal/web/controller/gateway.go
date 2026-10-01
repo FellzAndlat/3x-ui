@@ -11,8 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const xrayGatewayCoreType = "xray"
-
 // GatewayController exposes the transparent gateway controls used by the panel
 // UI. The active core decides which config template receives the Gateway
 // inbound, while the gateway package owns the core-specific config mutation.
@@ -36,29 +34,41 @@ func (a *GatewayController) initRouter(g *gin.RouterGroup) {
 }
 
 func gatewayStateForCore(coreType string) (gateway.State, error) {
-	if coreType == service.CoreTypeSingBox {
+	switch coreType {
+	case service.CoreTypeXray:
+		return gateway.GetState()
+	case service.CoreTypeSingBox:
 		return gateway.GetSingBoxState()
+	default:
+		return gateway.State{}, fmt.Errorf("unsupported core type %q", coreType)
 	}
-	return gateway.GetState()
 }
 
 func enableGatewayForCore(coreType string) error {
-	if coreType == service.CoreTypeSingBox {
+	switch coreType {
+	case service.CoreTypeXray:
+		return gateway.Enable()
+	case service.CoreTypeSingBox:
 		return gateway.EnableSingBox()
+	default:
+		return fmt.Errorf("unsupported core type %q", coreType)
 	}
-	return gateway.Enable()
 }
 
 func disableGatewayForCore(coreType string) error {
-	if coreType == service.CoreTypeSingBox {
+	switch coreType {
+	case service.CoreTypeXray:
+		return gateway.Disable()
+	case service.CoreTypeSingBox:
 		return gateway.DisableSingBox()
+	default:
+		return fmt.Errorf("unsupported core type %q", coreType)
 	}
-	return gateway.Disable()
 }
 
 func otherGatewayCore(coreType string) string {
 	if coreType == service.CoreTypeSingBox {
-		return xrayGatewayCoreType
+		return service.CoreTypeXray
 	}
 	return service.CoreTypeSingBox
 }

@@ -23,15 +23,23 @@ func decodeSingBoxTemplate(raw string) (map[string]any, error) {
 	return cfg, nil
 }
 
-func loadSingBoxTemplate() (map[string]any, string, error) {
+func loadSingBoxTemplateRaw() (string, error) {
 	if err := database.InitDB(config.GetDBPath()); err != nil {
-		return nil, "", fmt.Errorf("initialize database: %w", err)
+		return "", fmt.Errorf("initialize database: %w", err)
 	}
 
 	settings := &service.SettingService{}
 	raw, err := settings.GetSingBoxConfigTemplate()
 	if err != nil {
-		return nil, "", fmt.Errorf("get sing-box template: %w", err)
+		return "", fmt.Errorf("get sing-box template: %w", err)
+	}
+	return raw, nil
+}
+
+func loadSingBoxTemplate() (map[string]any, string, error) {
+	raw, err := loadSingBoxTemplateRaw()
+	if err != nil {
+		return nil, "", err
 	}
 	if raw == "" {
 		return nil, "", fmt.Errorf("sing-box template is empty")
@@ -104,11 +112,28 @@ func removeSingBoxBackup() error {
 }
 
 func getSingBoxStateUnlocked() (State, error) {
-	cfg, _, err := loadSingBoxTemplate()
+	raw, err := loadSingBoxTemplateRaw()
 	if err != nil {
 		return State{}, err
 	}
 	backup, err := singBoxBackupExists()
+	if err != nil {
+		return State{}, err
+	}
+
+	// Reading Gateway status must stay available before sing-box has ever been
+	// configured. An empty template means the selected core has no Gateway
+	// objects yet; it is not an operational error. Enable/Disable still use the
+	// strict loader above and therefore continue to require a real template.
+	if raw == "" {
+		return State{
+			Enabled:      backup,
+			Configured:   false,
+			BackupExists: backup,
+		}, nil
+	}
+
+	cfg, err := decodeSingBoxTemplate(raw)
 	if err != nil {
 		return State{}, err
 	}
