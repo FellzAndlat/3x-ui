@@ -5,20 +5,36 @@ export const singBoxSessionSections: readonly Section[] = [
     id: 'singbox-sessions',
     title: 'Sing-box sessions',
     description:
-      'Inspect active sing-box connections and revoke sessions without replacing the existing traffic collector.',
+      'Inspect active sing-box connections and revoke sessions without replacing the existing traffic collector. Omit nodeId (or use 0) for the local panel; provide a positive nodeId to dispatch through the multi-node runtime.',
     endpoints: [
       {
         method: 'GET',
         path: '/panel/api/server/singbox/sessions',
         summary:
           'List active sing-box sessions with inbound, user, outbound, destination, and traffic metadata.',
+        params: [
+          {
+            name: 'nodeId',
+            in: 'query',
+            type: 'number',
+            desc: 'Optional remote node ID. Omit or use 0 for the local panel.',
+            optional: true,
+          },
+        ],
       },
       {
         method: 'POST',
         path: '/panel/api/server/singbox/sessions/disconnect-user',
         summary:
-          'Disconnect active sing-box sessions for a user, optionally scoped to one inbound.',
+          'Disconnect active sing-box sessions for a user, optionally scoped to one inbound and/or remote node.',
         params: [
+          {
+            name: 'nodeId',
+            in: 'body',
+            type: 'number',
+            desc: 'Optional remote node ID. Omit or use 0 for the local panel.',
+            optional: true,
+          },
           {
             name: 'inbound',
             in: 'body',
@@ -33,13 +49,20 @@ export const singBoxSessionSections: readonly Section[] = [
             desc: 'Authenticated sing-box user identifier.',
           },
         ],
-        body: '{\n  "inbound": "in-443-tcp",\n  "user": "alice@example.com"\n}',
+        body: '{\n  "nodeId": 2,\n  "inbound": "in-443-tcp",\n  "user": "alice@example.com"\n}',
       },
       {
         method: 'POST',
         path: '/panel/api/server/singbox/sessions/disconnect-inbound',
-        summary: 'Disconnect all active sing-box sessions for an inbound.',
+        summary: 'Disconnect all active sing-box sessions for an inbound on the local panel or a selected remote node.',
         params: [
+          {
+            name: 'nodeId',
+            in: 'body',
+            type: 'number',
+            desc: 'Optional remote node ID. Omit or use 0 for the local panel.',
+            optional: true,
+          },
           {
             name: 'inbound',
             in: 'body',
@@ -47,7 +70,7 @@ export const singBoxSessionSections: readonly Section[] = [
             desc: 'Inbound tag whose active sing-box sessions should be closed.',
           },
         ],
-        body: '{\n  "inbound": "in-443-tcp"\n}',
+        body: '{\n  "nodeId": 2,\n  "inbound": "in-443-tcp"\n}',
       },
     ],
   },
