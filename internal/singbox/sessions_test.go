@@ -1,6 +1,9 @@
 package singbox
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestActiveSessionFromConnection(t *testing.T) {
 	connection := &singBoxConnection{
@@ -48,5 +51,53 @@ func TestActiveSessionFromNilConnection(t *testing.T) {
 	session := activeSessionFromConnection(nil)
 	if session.Core != "sing-box" {
 		t.Fatalf("core = %q, want sing-box", session.Core)
+	}
+}
+
+func TestMatchingConnectionIDs(t *testing.T) {
+	connections := []*singBoxConnection{
+		nil,
+		{ID: "", Inbound: "vless-443", User: "alice"},
+		{ID: "conn-1", Inbound: "vless-443", User: "alice"},
+		{ID: "conn-1", Inbound: "vless-443", User: "alice"},
+		{ID: "conn-2", Inbound: "vless-443", User: "bob"},
+		{ID: "conn-3", Inbound: "trojan-443", User: "alice"},
+	}
+
+	tests := []struct {
+		name  string
+		match func(*singBoxConnection) bool
+		want  []string
+	}{
+		{
+			name: "user across inbounds",
+			match: func(connection *singBoxConnection) bool {
+				return connection.User == "alice"
+			},
+			want: []string{"conn-1", "conn-3"},
+		},
+		{
+			name: "single inbound",
+			match: func(connection *singBoxConnection) bool {
+				return connection.Inbound == "vless-443"
+			},
+			want: []string{"conn-1", "conn-2"},
+		},
+		{
+			name: "user and inbound",
+			match: func(connection *singBoxConnection) bool {
+				return connection.User == "alice" && connection.Inbound == "vless-443"
+			},
+			want: []string{"conn-1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchingConnectionIDs(connections, tt.match)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("matchingConnectionIDs() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
