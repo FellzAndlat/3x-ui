@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Button, Modal, Popconfirm, Space, Tag, Tooltip, Typography, message } from 'antd';
-import { ApartmentOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Popconfirm, Space, Tag, Typography, message } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
 
 import { HttpUtil } from '@/utils';
 
@@ -16,12 +16,20 @@ type GatewayStatus = {
   recoveryBackup: boolean;
   canEnable: boolean;
   coreType: string;
-  xrayRunning: boolean;
+  gatewayCoreType?: string;
+  coreMismatch?: boolean;
+  conflict?: boolean;
   port: number;
 };
 
+function coreLabel(core?: string) {
+  if (core === 'sing-box') return 'sing-box';
+  if (core === 'xray') return 'Xray';
+  if (core === 'multiple') return 'Xray + sing-box';
+  return 'не определено';
+}
+
 export default function GatewayModeControl() {
-  const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<GatewayStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -35,7 +43,7 @@ export default function GatewayModeControl() {
         })) as ApiMsg<GatewayStatus>;
         if (!response?.success || !response.obj) {
           if (!quiet) {
-            messageApi.error(response?.msg || 'Не удалось получить состояние Gateway Mode');
+            messageApi.error(response?.msg || 'Не удалось получить состояние режима шлюза');
           }
           return null;
         }
@@ -43,7 +51,7 @@ export default function GatewayModeControl() {
       } catch (error) {
         if (!quiet) {
           messageApi.error(
-            error instanceof Error ? error.message : 'Не удалось получить состояние Gateway Mode',
+            error instanceof Error ? error.message : 'Не удалось получить состояние режима шлюза',
           );
         }
         return null;
@@ -92,13 +100,15 @@ export default function GatewayModeControl() {
 
       if (response?.obj) setStatus(response.obj);
       if (!response?.success) {
-        messageApi.error(response?.msg || 'Не удалось изменить Gateway Mode');
+        messageApi.error(response?.msg || 'Не удалось изменить режим шлюза');
         return;
       }
 
-      messageApi.success(action === 'enable' ? 'Gateway Mode включён' : 'Gateway Mode выключен');
+      messageApi.success(
+        action === 'enable' ? 'Режим шлюза включён' : 'Режим шлюза выключен',
+      );
     } catch (error) {
-      messageApi.error(error instanceof Error ? error.message : 'Не удалось изменить Gateway Mode');
+      messageApi.error(error instanceof Error ? error.message : 'Не удалось изменить режим шлюза');
     } finally {
       await refresh(true);
       setBusy(false);
@@ -107,131 +117,127 @@ export default function GatewayModeControl() {
 
   const enabled = status?.enabled === true;
   const configured = status?.configured === true;
-  const recoveryOnly = enabled && !configured && status?.recoveryBackup === true;
-  const singBoxSelected = status?.coreType === 'sing-box';
+  const coreMismatch = status?.coreMismatch === true;
+  const conflict = status?.conflict === true;
+  const recoveryOnly =
+    enabled && !configured && !coreMismatch && status?.recoveryBackup === true;
   const canEnable = status?.canEnable === true;
+  const selectedCore = coreLabel(status?.coreType);
+  const ownerCore = coreLabel(status?.gatewayCoreType);
 
   return (
     <>
       {contextHolder}
-      <Tooltip title="Управление прозрачным шлюзом Xray">
-        <Button
-          icon={<ApartmentOutlined />}
-          loading={loading}
-          onClick={() => {
-            setOpen(true);
-            void refresh(true);
-          }}
-        >
-          Gateway: {recoveryOnly ? 'восстановление' : enabled ? 'вкл.' : 'выкл.'}
-        </Button>
-      </Tooltip>
+      <Space direction="vertical" size={14} style={{ width: '100%' }}>
+        <div>
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            Режим шлюза
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            Прозрачная маршрутизация TCP/UDP через TPROXY для выбранного ядра.
+          </Typography.Text>
+        </div>
 
-      <Modal
-        open={open}
-        title="Gateway Mode"
-        footer={null}
-        destroyOnClose={false}
-        onCancel={() => setOpen(false)}
-      >
-        <Space direction="vertical" size={14} style={{ width: '100%' }}>
-          <Alert
-            type={recoveryOnly ? 'warning' : enabled ? 'success' : 'info'}
-            showIcon
-            title={
-              recoveryOnly
-                ? 'Требуется очистка состояния Gateway Mode'
-                : enabled
-                  ? 'Gateway Mode включён'
-                  : 'Gateway Mode выключен'
-            }
-            description={
-              recoveryOnly
-                ? 'Найдена резервная копия Gateway Mode, но его объекты отсутствуют в текущем Xray-конфиге. Нажмите «Выключить», чтобы безопасно удалить устаревший recovery-marker.'
-                : enabled
-                  ? 'В шаблоне Xray активен отдельный TPROXY-вход. Дальнейшая маршрутизация выполняется обычными правилами Xray.'
-                  : 'Gateway-вход сейчас не активен в конфигурации Xray.'
-            }
-          />
+        <Alert
+          type={conflict ? 'error' : recoveryOnly || coreMismatch ? 'warning' : enabled ? 'success' : 'info'}
+          showIcon
+          title={
+            conflict
+              ? 'Обнаружен конфликт режима шлюза'
+              : recoveryOnly
+                ? 'Требуется очистка состояния режима шлюза'
+                : coreMismatch
+                  ? `Режим шлюза активен на другом ядре: ${ownerCore}`
+                  : enabled
+                    ? 'Режим шлюза включён'
+                    : 'Режим шлюза выключен'
+          }
+          description={
+            conflict
+              ? 'Служебная конфигурация режима шлюза обнаружена одновременно в Xray и sing-box. Выключение безопасно очистит собственные объекты режима шлюза в обоих ядрах.'
+              : recoveryOnly
+                ? 'Найдена резервная копия режима шлюза, но его служебная конфигурация отсутствует. Нажмите «Выключить», чтобы безопасно удалить устаревшее состояние восстановления.'
+                : coreMismatch
+                  ? `Сейчас выбрано ядро ${selectedCore}. Режим шлюза можно перенести на него без ручной очистки предыдущего ядра.`
+                  : enabled
+                    ? `Режим шлюза настроен для ${ownerCore === 'не определено' ? selectedCore : ownerCore}. Дальнейшая маршрутизация выполняется обычными правилами ядра.`
+                    : `Режим шлюза сейчас не активен. При включении он будет настроен для ${selectedCore}.`
+          }
+        />
 
-          <Space wrap>
-            <Typography.Text strong>Ядро:</Typography.Text>
-            <Tag color={singBoxSelected ? 'gold' : 'blue'}>
-              {singBoxSelected ? 'sing-box' : 'Xray'}
+        <Space wrap>
+          <Typography.Text strong>Выбранное ядро:</Typography.Text>
+          <Tag color={status?.coreType === 'sing-box' ? 'gold' : 'blue'}>{selectedCore}</Tag>
+          {enabled && (
+            <Tag color={coreMismatch || conflict ? 'warning' : 'success'}>
+              Шлюз: {ownerCore}
             </Tag>
-            <Tag color={status?.xrayRunning ? 'success' : 'default'}>
-              Xray {status?.xrayRunning ? 'работает' : 'остановлен'}
-            </Tag>
-            <Tag>TPROXY: {status?.port ?? 52345}</Tag>
-          </Space>
-
-          {singBoxSelected && !enabled && (
-            <Alert
-              type="warning"
-              showIcon
-              title="Для включения выберите Xray"
-              description="Gateway Mode меняет конфигурацию Xray и недоступен для включения, пока выбрано ядро sing-box."
-            />
           )}
-
-          {singBoxSelected && enabled && !recoveryOnly && (
-            <Alert
-              type="warning"
-              showIcon
-              title="Gateway Mode активен в Xray"
-              description="Сейчас выбрано ядро sing-box. Gateway Mode можно безопасно выключить: будет удалён только его собственный TPROXY-вход и старые служебные артефакты Gateway Mode, если они остались от предыдущей реализации."
-            />
-          )}
-
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            При включении панель сохраняет резервную копию текущего шаблона Xray и добавляет
-            отдельный TPROXY-вход. Outbound и routing не подменяются: перехваченный трафик проходит
-            через ваши обычные правила маршрутизации Xray.
-          </Typography.Paragraph>
-
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            Linux должен перенаправлять TCP/UDP через TPROXY на порт {status?.port ?? 52345} и иметь
-            включённый IPv4 forwarding. Клиентские устройства должны использовать этот сервер как
-            шлюз.
-          </Typography.Paragraph>
-
-          <Space wrap>
-            {enabled ? (
-              <Popconfirm
-                title="Выключить Gateway Mode?"
-                description={
-                  recoveryOnly
-                    ? 'Будет удалён только устаревший recovery-marker. Текущий Xray-конфиг не будет откатан.'
-                    : 'Будет удалён Gateway TPROXY-вход и совместимые служебные артефакты старой реализации. Остальные настройки Xray сохранятся.'
-                }
-                okText="Выключить"
-                cancelText="Отмена"
-                onConfirm={() => void runAction('disable')}
-              >
-                <Button danger loading={busy}>
-                  Выключить Gateway Mode
-                </Button>
-              </Popconfirm>
-            ) : (
-              <Popconfirm
-                title="Включить Gateway Mode?"
-                description="Панель сохранит резервную копию и добавит TPROXY-вход в текущий шаблон Xray, не меняя ваши outbound и routing."
-                okText="Включить"
-                cancelText="Отмена"
-                onConfirm={() => void runAction('enable')}
-                disabled={!canEnable || loading}
-              >
-                <Button type="primary" loading={busy} disabled={!canEnable || loading}>
-                  Включить Gateway Mode
-                </Button>
-              </Popconfirm>
-            )}
-            <Button icon={<ReloadOutlined />} disabled={busy} onClick={() => void refresh()}>
-              Обновить
-            </Button>
-          </Space>
+          <Tag>TPROXY: {status?.port ?? 52345}</Tag>
         </Space>
-      </Modal>
+
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          При включении панель сохраняет резервную копию конфигурации выбранного ядра и добавляет
+          отдельный TPROXY-вход. Outbound и routing не подменяются: перехваченный трафик проходит
+          через ваши обычные правила маршрутизации Xray или sing-box.
+        </Typography.Paragraph>
+
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          Linux должен перенаправлять TCP/UDP через TPROXY на порт {status?.port ?? 52345} и иметь
+          включённый IPv4 forwarding. Клиентские устройства должны использовать этот сервер как
+          шлюз.
+        </Typography.Paragraph>
+
+        <Space wrap>
+          {coreMismatch && !conflict && canEnable && (
+            <Popconfirm
+              title={`Перенести режим шлюза на ${selectedCore}?`}
+              description="Панель удалит собственную конфигурацию режима шлюза из предыдущего ядра и включит её для выбранного ядра. При ошибке будет выполнен откат."
+              okText="Перенести"
+              cancelText="Отмена"
+              onConfirm={() => void runAction('enable')}
+            >
+              <Button type="primary" loading={busy} disabled={loading}>
+                Перенести на {selectedCore}
+              </Button>
+            </Popconfirm>
+          )}
+
+          {enabled ? (
+            <Popconfirm
+              title="Выключить режим шлюза?"
+              description={
+                recoveryOnly
+                  ? 'Будет удалено только устаревшее состояние восстановления. Текущая конфигурация ядра не будет откатана.'
+                  : 'Будут удалены только собственные TPROXY-объекты режима шлюза. Остальные настройки Xray и sing-box сохранятся.'
+              }
+              okText="Выключить"
+              cancelText="Отмена"
+              onConfirm={() => void runAction('disable')}
+            >
+              <Button danger loading={busy}>
+                Выключить режим шлюза
+              </Button>
+            </Popconfirm>
+          ) : (
+            <Popconfirm
+              title="Включить режим шлюза?"
+              description={`Панель сохранит резервную копию и добавит TPROXY-вход для ${selectedCore}, не меняя ваши outbound и routing.`}
+              okText="Включить"
+              cancelText="Отмена"
+              onConfirm={() => void runAction('enable')}
+              disabled={!canEnable || loading}
+            >
+              <Button type="primary" loading={busy} disabled={!canEnable || loading}>
+                Включить режим шлюза
+              </Button>
+            </Popconfirm>
+          )}
+          <Button icon={<ReloadOutlined />} disabled={busy} onClick={() => void refresh()}>
+            Обновить
+          </Button>
+        </Space>
+      </Space>
     </>
   );
 }

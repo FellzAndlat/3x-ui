@@ -43,6 +43,7 @@ import SwapSettingsTab from './SwapSettingsTab';
 import SystemUpdateModal from './SystemUpdateModal';
 import GatewayModeControl from './GatewayModeControl';
 import './SettingsPage.css';
+import './TemporaryUiHides.css';
 
 interface ApiMsg {
   success?: boolean;
@@ -57,6 +58,7 @@ const tabSlugs = [
   'subscription',
   'subscription-formats',
   'subscription-balancers',
+  'gateway',
 ];
 
 function isIp(h: string): boolean {
@@ -285,6 +287,8 @@ export default function SettingsPage() {
         return <SubscriptionFormatsTab allSetting={allSetting} updateSetting={updateSetting} />;
       case 'subscription-balancers':
         return <SubscriptionBalancersTab allSetting={allSetting} updateSetting={updateSetting} />;
+      case 'gateway':
+        return <GatewayModeControl />;
       default:
         return (
           <GeneralTab
@@ -354,7 +358,6 @@ export default function SettingsPage() {
                               >
                                 {t('pages.settings.restartPanel')}
                               </Button>
-                              <GatewayModeControl />
                             </Space>
                           </Col>
                           <Col xs={24} sm={14} className="header-info">

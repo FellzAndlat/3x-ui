@@ -1,0 +1,9 @@
+/* Temporary: keep the Hiddify importer implementation available while hiding its core-settings entry point. */
+.settings-page
+  .ant-tabs-tabpane-active
+  .ant-space:has(> .ant-space-item > button .anticon-swap):has(
+    > .ant-space-item > button .anticon-reload
+  )
+  > .ant-space-item:first-child:has(> button:not(:has(.anticon))) {
+  display: none;
+}

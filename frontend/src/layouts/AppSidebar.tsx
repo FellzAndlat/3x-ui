@@ -163,6 +163,7 @@ function AppSidebar() {
   const xrayChildren = useMemo<NonNullable<MenuProps['items']>>(
     () => [
       { key: '/xray#basic', icon: <SettingOutlined />, label: t('pages.xray.basicTemplate') },
+      { key: '/settings#gateway', icon: <ApartmentOutlined />, label: 'Режим шлюза' },
       { key: '/xray#balancer', icon: <ClusterOutlined />, label: t('pages.xray.Balancers') },
       { key: '/xray#dns', icon: <DatabaseOutlined />, label: 'DNS' },
       { key: '/xray#advanced', icon: <CodeOutlined />, label: t('pages.xray.advancedTemplate') },
@@ -176,6 +177,11 @@ function AppSidebar() {
         key: '/singbox#basic',
         icon: <SettingOutlined />,
         label: t('pages.singBox.sections.basic'),
+      },
+      {
+        key: '/settings#gateway',
+        icon: <ApartmentOutlined />,
+        label: 'Режим шлюза',
       },
       {
         key: '/singbox#dns',
@@ -306,6 +312,7 @@ function AppSidebar() {
   const settingsActive = pathname === '/settings';
   const xrayActive = pathname === '/xray';
   const singBoxActive = pathname === '/singbox';
+  const gatewayActive = settingsActive && hash === '#gateway';
   const selectedKey = settingsActive
     ? `/settings${hash || '#general'}`
     : xrayActive
@@ -315,13 +322,16 @@ function AppSidebar() {
         : pathname === ''
           ? '/'
           : pathname;
-  const openSubmenu = settingsActive
-    ? '/settings'
-    : xrayActive
-      ? '/xray'
-      : singBoxActive
-        ? '/singbox'
-        : null;
+  const gatewaySubmenu = isSingBox ? '/singbox' : isXray ? '/xray' : '/settings';
+  const openSubmenu = gatewayActive
+    ? gatewaySubmenu
+    : settingsActive
+      ? '/settings'
+      : xrayActive
+        ? '/xray'
+        : singBoxActive
+          ? '/singbox'
+          : null;
   const [openKeys, setOpenKeys] = useState<string[]>(() => (openSubmenu ? [openSubmenu] : []));
   const visibleOpenKeys = useMemo(() => {
     let keys = openKeys;

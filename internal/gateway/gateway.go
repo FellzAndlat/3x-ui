@@ -64,6 +64,17 @@ func gatewayInbound() map[string]any {
 	}
 }
 
+func decodeXrayTemplate(raw string) (map[string]any, error) {
+	var cfg map[string]any
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		return nil, fmt.Errorf("parse Xray template: %w", err)
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("parse Xray template: top-level JSON value must be an object")
+	}
+	return cfg, nil
+}
+
 func loadTemplate() (map[string]any, string, error) {
 	if err := database.InitDB(config.GetDBPath()); err != nil {
 		return nil, "", fmt.Errorf("initialize database: %w", err)
@@ -75,9 +86,9 @@ func loadTemplate() (map[string]any, string, error) {
 		return nil, "", fmt.Errorf("get Xray template: %w", err)
 	}
 
-	var cfg map[string]any
-	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return nil, "", fmt.Errorf("parse Xray template: %w", err)
+	cfg, err := decodeXrayTemplate(raw)
+	if err != nil {
+		return nil, "", err
 	}
 
 	return cfg, raw, nil
@@ -152,7 +163,7 @@ func arrayField(cfg map[string]any, key string) ([]any, error) {
 	}
 	items, ok := value.([]any)
 	if !ok {
-		return nil, fmt.Errorf("Xray %s section must be an array", key)
+		return nil, fmt.Errorf("config %s section must be an array", key)
 	}
 	return items, nil
 }
@@ -164,6 +175,102 @@ func itemTag(item any) string {
 	}
 	tag, _ := obj["tag"].(string)
 	return tag
+}
+
+func xrayPort(value any) (int, bool) {
+	switch port := value.(type) {
+	case int:
+		return port, true
+	case int32:
+		return int(port), true
+	case int64:
+		return int(port), true
+	case float64:
+		converted := int(port)
+		if port != float64(converted) {
+			return 0, false
+		}
+		return converted, true
+	default:
+		return 0, false
+	}
+}
+
+func hasTPROXYSockopt(inbound map[string]any) bool {
+	stream, ok := inbound["streamSettings"].(map[string]any)
+	if !ok {
+		return false
+	}
+	sockopt, ok := stream["sockopt"].(map[string]any)
+	if !ok {
+		return false
+	}
+	return sockopt["tproxy"] == "tproxy"
+}
+
+func isXrayGatewayInbound(item any) bool {
+	inbound, ok := item.(map[string]any)
+	if !ok || itemTag(item) != inboundTag || inbound["protocol"] != "tunnel" {
+		return false
+	}
+	port, portOK := xrayPort(inbound["port"])
+	if !portOK || port != inboundPort || !hasTPROXYSockopt(inbound) {
+		return false
+	}
+	settings, ok := inbound["settings"].(map[string]any)
+	return ok && settings["allowedNetwork"] == "tcp,udp" && settings["followRedirect"] == true
+}
+
+// isLegacyXrayGatewayInbound recognizes the first GUI implementation so an
+// upgrade can still clean it up without treating an arbitrary matching tag as
+// Gateway-owned.
+func isLegacyXrayGatewayInbound(item any) bool {
+	inbound, ok := item.(map[string]any)
+	if !ok || itemTag(item) != inboundTag || inbound["protocol"] != "dokodemo-door" {
+		return false
+	}
+	if inbound["listen"] != "127.0.0.1" || !hasTPROXYSockopt(inbound) {
+		return false
+	}
+	port, portOK := xrayPort(inbound["port"])
+	if !portOK || port != inboundPort {
+		return false
+	}
+	settings, ok := inbound["settings"].(map[string]any)
+	return ok && settings["network"] == "tcp,udp" && settings["followRedirect"] == true
+}
+
+func isOwnedXrayGatewayInbound(item any) bool {
+	return isXrayGatewayInbound(item) || isLegacyXrayGatewayInbound(item)
+}
+
+func validateXrayGatewayConflicts(cfg map[string]any) error {
+	inbounds, err := arrayField(cfg, "inbounds")
+	if err != nil {
+		return err
+	}
+	for _, item := range inbounds {
+		if isOwnedXrayGatewayInbound(item) {
+			continue
+		}
+		if itemTag(item) == inboundTag {
+			return fmt.Errorf("Xray inbound tag %q is already used by a non-Gateway inbound", inboundTag)
+		}
+		inbound, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		port, ok := xrayPort(inbound["port"])
+		if !ok || port != inboundPort {
+			continue
+		}
+		tag := itemTag(item)
+		if tag == "" {
+			tag = "<untagged>"
+		}
+		return fmt.Errorf("Xray inbound %q already uses Gateway port %d", tag, inboundPort)
+	}
+	return nil
 }
 
 func hasInboundTag(rule map[string]any, tag string) bool {
@@ -181,11 +288,28 @@ func hasInboundTag(rule map[string]any, tag string) bool {
 
 func isLegacyGatewayRule(item any) bool {
 	rule, ok := item.(map[string]any)
+	if !ok || rule["type"] != "field" || rule["outboundTag"] != legacyOutboundTag {
+		return false
+	}
+	values, ok := rule["inboundTag"].([]any)
+	return ok && len(values) == 1 && values[0] == inboundTag
+}
+
+func isLegacyGatewayOutbound(item any) bool {
+	outbound, ok := item.(map[string]any)
+	if !ok || itemTag(item) != legacyOutboundTag || outbound["protocol"] != "freedom" {
+		return false
+	}
+	settings, ok := outbound["settings"].(map[string]any)
 	if !ok {
 		return false
 	}
-	outbound, _ := rule["outboundTag"].(string)
-	return outbound == legacyOutboundTag && hasInboundTag(rule, inboundTag)
+	finalRules, ok := settings["finalRules"].([]any)
+	if !ok || len(finalRules) != 1 {
+		return false
+	}
+	rule, ok := finalRules[0].(map[string]any)
+	return ok && len(rule) == 1 && rule["action"] == "allow"
 }
 
 func hasGatewayInbound(cfg map[string]any) bool {
@@ -194,7 +318,7 @@ func hasGatewayInbound(cfg map[string]any) bool {
 		return false
 	}
 	for _, item := range inbounds {
-		if itemTag(item) == inboundTag {
+		if isOwnedXrayGatewayInbound(item) {
 			return true
 		}
 	}
@@ -204,7 +328,7 @@ func hasGatewayInbound(cfg map[string]any) bool {
 func hasLegacyGatewayArtifacts(cfg map[string]any) bool {
 	if outbounds, ok := cfg["outbounds"].([]any); ok {
 		for _, item := range outbounds {
-			if itemTag(item) == legacyOutboundTag {
+			if isLegacyGatewayOutbound(item) {
 				return true
 			}
 		}
@@ -244,29 +368,48 @@ func applyGatewayConfig(cfg map[string]any) error {
 	// Gateway Mode must not select an outbound for the operator. Transparent
 	// traffic enters the normal Xray dispatcher and therefore follows the same
 	// routing rules/default outbound as any other inbound.
+	if err := validateXrayGatewayConflicts(cfg); err != nil {
+		return err
+	}
 	return replaceTaggedItem(cfg, "inbounds", inboundTag, gatewayInbound())
 }
 
-func removeTaggedItem(cfg map[string]any, key, tag string) (bool, error) {
-	value, exists := cfg[key]
-	if !exists || value == nil {
-		return false, nil
+func removeXrayGatewayInbound(cfg map[string]any) (bool, error) {
+	inbounds, err := arrayField(cfg, "inbounds")
+	if err != nil {
+		return false, err
 	}
-	items, ok := value.([]any)
-	if !ok {
-		return false, fmt.Errorf("Xray %s section must be an array", key)
-	}
-	filtered := make([]any, 0, len(items))
+	filtered := make([]any, 0, len(inbounds))
 	removed := false
-	for _, item := range items {
-		if itemTag(item) == tag {
+	for _, item := range inbounds {
+		if isOwnedXrayGatewayInbound(item) {
 			removed = true
 			continue
 		}
 		filtered = append(filtered, item)
 	}
 	if removed {
-		cfg[key] = filtered
+		cfg["inbounds"] = filtered
+	}
+	return removed, nil
+}
+
+func removeLegacyGatewayOutbound(cfg map[string]any) (bool, error) {
+	outbounds, err := arrayField(cfg, "outbounds")
+	if err != nil {
+		return false, err
+	}
+	filtered := make([]any, 0, len(outbounds))
+	removed := false
+	for _, item := range outbounds {
+		if isLegacyGatewayOutbound(item) {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if removed {
+		cfg["outbounds"] = filtered
 	}
 	return removed, nil
 }
@@ -307,16 +450,16 @@ func removeLegacyGatewayRoutingRule(cfg map[string]any) (bool, error) {
 func removeGatewayConfig(cfg map[string]any) (bool, error) {
 	removed := false
 
-	changed, err := removeTaggedItem(cfg, "inbounds", inboundTag)
+	changed, err := removeXrayGatewayInbound(cfg)
 	if err != nil {
 		return false, err
 	}
 	removed = removed || changed
 
-	// Clean up objects created by the first Gateway GUI implementation. They
-	// must never survive disable because its forced direct route bypassed the
-	// operator's normal Xray routing policy.
-	changed, err = removeTaggedItem(cfg, "outbounds", legacyOutboundTag)
+	// Clean up exact objects created by the first Gateway GUI implementation.
+	// Matching their complete owned shape avoids deleting user objects that only
+	// happen to reuse an old internal tag.
+	changed, err = removeLegacyGatewayOutbound(cfg)
 	if err != nil {
 		return false, err
 	}
