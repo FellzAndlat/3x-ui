@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SawaMEN/3x-ui/v3/internal/core"
 	"github.com/SawaMEN/3x-ui/v3/internal/singbox"
 
 	"github.com/gin-gonic/gin"
@@ -14,10 +15,44 @@ import (
 const defaultOutboundProbeURL = "https://www.gstatic.com/generate_204"
 
 func (a *ServerController) initOutboundProbeRouter(g *gin.RouterGroup) {
+	g.GET("/core/capabilities", a.getCoreCapabilities)
 	g.POST("/singbox/outbound/check", a.checkSingBoxOutbound)
 }
 
+func (a *ServerController) selectedCore() (core.Type, error) {
+	selected, err := a.settingService.GetCoreType()
+	if err != nil {
+		return "", err
+	}
+	coreType := core.Type(selected)
+	if !coreType.Valid() {
+		return "", fmt.Errorf("unsupported core type %q", selected)
+	}
+	return coreType, nil
+}
+
+func (a *ServerController) getCoreCapabilities(c *gin.Context) {
+	coreType, err := a.selectedCore()
+	if err != nil {
+		jsonObj(c, nil, err)
+		return
+	}
+	jsonObj(c, gin.H{
+		"core":         coreType,
+		"capabilities": coreType.Capabilities(),
+	}, nil)
+}
+
 func (a *ServerController) checkSingBoxOutbound(c *gin.Context) {
+	coreType, err := a.selectedCore()
+	if err != nil {
+		jsonObj(c, nil, err)
+		return
+	}
+	if !coreType.Capabilities().OutboundDelayProbe {
+		jsonObj(c, nil, fmt.Errorf("selected core %q does not support outbound delay probes", coreType))
+		return
+	}
 	if !a.singBoxService.IsRunning() {
 		jsonObj(c, nil, fmt.Errorf("sing-box is not running"))
 		return
