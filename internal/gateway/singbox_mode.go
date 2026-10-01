@@ -42,7 +42,7 @@ func loadSingBoxTemplate() (map[string]any, string, error) {
 		return nil, "", err
 	}
 	if raw == "" {
-		return nil, "", fmt.Errorf("sing-box template is empty")
+		return map[string]any{}, raw, nil
 	}
 
 	cfg, err := decodeSingBoxTemplate(raw)
@@ -52,17 +52,20 @@ func loadSingBoxTemplate() (map[string]any, string, error) {
 	return cfg, raw, nil
 }
 
+func saveSingBoxTemplateRaw(raw string) error {
+	settings := &service.SettingService{}
+	if err := settings.SetSingBoxConfigTemplate(raw); err != nil {
+		return fmt.Errorf("save sing-box template: %w", err)
+	}
+	return nil
+}
+
 func saveSingBoxTemplate(cfg map[string]any) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal sing-box template: %w", err)
 	}
-
-	settings := &service.SettingService{}
-	if err := settings.SetSingBoxConfigTemplate(string(data)); err != nil {
-		return fmt.Errorf("save sing-box template: %w", err)
-	}
-	return nil
+	return saveSingBoxTemplateRaw(string(data))
 }
 
 func singBoxBackupExists() (bool, error) {
@@ -74,6 +77,14 @@ func singBoxBackupExists() (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("check sing-box gateway backup: %w", err)
+}
+
+func readSingBoxBackup() (string, error) {
+	data, err := os.ReadFile(singBoxBackupPath)
+	if err != nil {
+		return "", fmt.Errorf("read sing-box gateway backup: %w", err)
+	}
+	return string(data), nil
 }
 
 func createSingBoxBackup(raw string) error {
@@ -121,10 +132,9 @@ func getSingBoxStateUnlocked() (State, error) {
 		return State{}, err
 	}
 
-	// Reading Gateway status must stay available before sing-box has ever been
-	// configured. An empty template means the selected core has no Gateway
-	// objects yet; it is not an operational error. Enable/Disable still use the
-	// strict loader above and therefore continue to require a real template.
+	// An empty template is a valid unconfigured state. Gateway operations can
+	// create their own objects from an empty config and restore the original
+	// empty value from backup when Gateway Mode is disabled.
 	if raw == "" {
 		return State{
 			Enabled:      backup,
@@ -203,6 +213,26 @@ func DisableSingBox() error {
 	artifacts := hasSingBoxGatewayArtifacts(cfg)
 	if !artifacts && !backup {
 		return fmt.Errorf("Gateway Mode is not enabled")
+	}
+
+	if backup {
+		backupRaw, err := readSingBoxBackup()
+		if err != nil {
+			return err
+		}
+		// Restore the exact original value when Gateway started from an empty
+		// template, or when the current config no longer contains Gateway-owned
+		// objects and the backup is the only recoverable state left.
+		if backupRaw == "" || !artifacts {
+			if err := saveSingBoxTemplateRaw(backupRaw); err != nil {
+				return err
+			}
+			if err := removeSingBoxBackup(); err != nil {
+				return err
+			}
+			fmt.Println("sing-box Gateway configuration disabled.")
+			return nil
+		}
 	}
 
 	if artifacts {
