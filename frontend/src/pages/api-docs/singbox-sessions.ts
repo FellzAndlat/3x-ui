@@ -53,6 +53,35 @@ export const singBoxSessionSections: readonly Section[] = [
       },
       {
         method: 'POST',
+        path: '/panel/api/server/singbox/sessions/disconnect-users',
+        summary:
+          'Disconnect active sing-box sessions for several users using one connection snapshot, optionally scoped to an inbound and/or remote node.',
+        params: [
+          {
+            name: 'nodeId',
+            in: 'body',
+            type: 'number',
+            desc: 'Optional remote node ID. Omit or use 0 for the local panel.',
+            optional: true,
+          },
+          {
+            name: 'inbound',
+            in: 'body',
+            type: 'string',
+            desc: 'Optional inbound tag used to scope the disconnect.',
+            optional: true,
+          },
+          {
+            name: 'users',
+            in: 'body',
+            type: 'array',
+            desc: 'Authenticated sing-box user identifiers to revoke.',
+          },
+        ],
+        body: '{\n  "nodeId": 2,\n  "users": ["alice@example.com", "bob@example.com"]\n}',
+      },
+      {
+        method: 'POST',
         path: '/panel/api/server/singbox/sessions/disconnect-inbound',
         summary: 'Disconnect all active sing-box sessions for an inbound on the local panel or a selected remote node.',
         params: [
