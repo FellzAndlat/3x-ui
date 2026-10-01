@@ -17,10 +17,12 @@ import (
 )
 
 /*
-frontend/src/pages/api-docs/endpoints.ts is a hand-maintained registry: an
-API route omitted there silently vanishes from the generated OpenAPI docs,
-and an entry for a removed route documents an endpoint that 404s. This test
-constructs the real router and diffs it against the registry both ways.
+frontend/src/pages/api-docs/endpoints.base.ts contains the established API
+registry, while endpoints.ts extends it with newer focused sections. An API
+route omitted from both files silently vanishes from the generated OpenAPI
+docs, and an entry for a removed route documents an endpoint that 404s. This
+test constructs the real router and diffs it against the combined registry
+both ways.
 
 Scope: everything under /panel/api/ plus the session-auth surface the
 registry also documents (/login, /logout, /csrf-token, /getTwoFactorEnable,
@@ -82,16 +84,22 @@ func registeredContractRoutes(t *testing.T) map[string]bool {
 
 func documentedContractRoutes(t *testing.T) map[string]bool {
 	t.Helper()
-	source, err := os.ReadFile(filepath.Join("..", "..", "frontend", "src", "pages", "api-docs", "endpoints.ts"))
-	if err != nil {
-		t.Fatalf("read endpoints.ts: %v", err)
+	docsDir := filepath.Join("..", "..", "frontend", "src", "pages", "api-docs")
+	var source strings.Builder
+	for _, name := range []string{"endpoints.base.ts", "endpoints.ts"} {
+		data, err := os.ReadFile(filepath.Join(docsDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		source.Write(data)
+		source.WriteByte('\n')
 	}
-	text := string(source)
+	text := source.String()
 	methodRe := regexp.MustCompile(`method:\s*'(GET|POST|PUT|DELETE|PATCH|HEAD|WS)'`)
 	pathRe := regexp.MustCompile(`path:\s*'([^']+)'`)
 	methods := methodRe.FindAllStringSubmatchIndex(text, -1)
 	if declared := strings.Count(text, "method: '"); len(methods) != declared {
-		t.Fatalf("parsed %d method fields but endpoints.ts declares %d — the parser regex no longer matches the file shape", len(methods), declared)
+		t.Fatalf("parsed %d method fields but API docs declare %d — the parser regex no longer matches the file shape", len(methods), declared)
 	}
 	docs := make(map[string]bool)
 	for i, m := range methods {
@@ -101,7 +109,7 @@ func documentedContractRoutes(t *testing.T) map[string]bool {
 		}
 		pathMatch := pathRe.FindStringSubmatch(text[m[1]:segmentEnd])
 		if pathMatch == nil {
-			t.Fatalf("entry %d in endpoints.ts has a method but no path before the next entry — the parser cannot pair it", i)
+			t.Fatalf("entry %d in API docs has a method but no path before the next entry — the parser cannot pair it", i)
 		}
 		method := text[m[2]:m[3]]
 		if strings.HasPrefix(pathMatch[1], "/{") || !strings.HasPrefix(pathMatch[1], "/") {
@@ -110,7 +118,7 @@ func documentedContractRoutes(t *testing.T) map[string]bool {
 		docs[method+" "+pathMatch[1]] = true
 	}
 	if len(docs) == 0 {
-		t.Fatal("no entries parsed from endpoints.ts; the parser regex is broken")
+		t.Fatal("no entries parsed from API docs; the parser regex is broken")
 	}
 	return docs
 }
@@ -135,7 +143,7 @@ func TestRouteRegistryContract(t *testing.T) {
 		}
 		sort.Strings(missing)
 		for _, route := range missing {
-			t.Error(fmt.Errorf("route %s is registered but absent from endpoints.ts — add an entry or it vanishes from the API docs", route))
+			t.Error(fmt.Errorf("route %s is registered but absent from API docs — add an entry or it vanishes from the API docs", route))
 		}
 	})
 
@@ -148,7 +156,7 @@ func TestRouteRegistryContract(t *testing.T) {
 		}
 		sort.Strings(stale)
 		for _, route := range stale {
-			t.Error(fmt.Errorf("endpoints.ts documents %s but the server does not register it — remove or fix the entry", route))
+			t.Error(fmt.Errorf("API docs document %s but the server does not register it — remove or fix the entry", route))
 		}
 	})
 }
