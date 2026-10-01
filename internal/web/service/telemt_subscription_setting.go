@@ -3,9 +3,9 @@ package service
 const telemtSubscriptionProxyEnableSettingKey = "telemtSubscriptionProxyEnable"
 
 func init() {
-	// Preserve the existing behavior: personal Telemt proxies are available for
-	// subscriptions unless the administrator explicitly disables the feature.
-	defaultValueMap[telemtSubscriptionProxyEnableSettingKey] = "true"
+	// Keep personal Telemt proxies disabled for subscriptions until the
+	// administrator explicitly enables the feature.
+	defaultValueMap[telemtSubscriptionProxyEnableSettingKey] = "false"
 }
 
 // GetTelemtSubscriptionProxyEnable reports whether personal Telemt proxies
