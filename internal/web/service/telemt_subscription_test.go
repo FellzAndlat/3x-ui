@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -45,6 +46,66 @@ func TestIsTelemtSubscriptionUsernameRejectsMalformed(t *testing.T) {
 	for _, value := range tests {
 		if isTelemtSubscriptionUsername(value) {
 			t.Errorf("expected malformed subscription username to be rejected: %q", value)
+		}
+	}
+}
+
+func TestTelemtSubscriptionUsernamesFiltersAndSorts(t *testing.T) {
+	first := telemtSubscriptionUsername("subscription-a")
+	second := telemtSubscriptionUsername("subscription-b")
+	users := map[string]string{
+		"xui":   "admin-secret",
+		second:  "second-secret",
+		"alice": "manual-secret",
+		first:   "first-secret",
+	}
+
+	got := telemtSubscriptionUsernames(users)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 subscription users, got %d: %#v", len(got), got)
+	}
+	if got[0] > got[1] {
+		t.Fatalf("expected deterministic sorted usernames, got %#v", got)
+	}
+	if got[0] != first && got[1] != first {
+		t.Fatalf("first subscription user missing from %#v", got)
+	}
+	if got[0] != second && got[1] != second {
+		t.Fatalf("second subscription user missing from %#v", got)
+	}
+}
+
+func TestRemoveTelemtSubscriptionUsersFromTOML(t *testing.T) {
+	first := telemtSubscriptionUsername("subscription-a")
+	second := telemtSubscriptionUsername("subscription-b")
+	outsideUsers := telemtSubscriptionUsername("not-an-access-user")
+	original := []byte(fmt.Sprintf(`[server]
+port = 443
+
+[access.users]
+xui = "admin-secret"
+%s = "first-secret"
+"%s" = "second-secret"
+alice = "manual-secret"
+
+[custom]
+%s = "must-stay"
+`, first, second, outsideUsers))
+
+	updated, removed, err := removeTelemtSubscriptionUsersFromTOML(original)
+	if err != nil {
+		t.Fatalf("remove subscription users: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("expected 2 removed subscription users, got %d", removed)
+	}
+	text := string(updated)
+	if strings.Contains(text, first) || strings.Contains(text, second) {
+		t.Fatalf("subscription users were left in access.users:\n%s", text)
+	}
+	for _, preserved := range []string{"xui = \"admin-secret\"", "alice = \"manual-secret\"", outsideUsers + " = \"must-stay\""} {
+		if !strings.Contains(text, preserved) {
+			t.Fatalf("expected unrelated TOML entry %q to be preserved:\n%s", preserved, text)
 		}
 	}
 }

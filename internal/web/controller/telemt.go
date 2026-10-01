@@ -173,7 +173,34 @@ func (a *TelemtController) saveSubscriptionProxySetting(c *gin.Context) {
 		jsonMsg(c, "invalid Telemt subscription proxy setting", err)
 		return
 	}
+
+	oldEnabled, err := a.settingService.GetTelemtSubscriptionProxyEnable()
+	if err != nil {
+		jsonMsg(c, "failed to read current Telemt subscription proxy setting", err)
+		return
+	}
+	host := publicHostFromRequest(c)
+	if host == "" {
+		defaultDomain, _ := a.settingService.GetWebDomain()
+		host = strings.TrimSpace(defaultDomain)
+	}
+
+	if err := a.service.ReconcileSubscriptionProxies(req.Enabled, host); err != nil {
+		if oldEnabled != req.Enabled {
+			if rollbackErr := a.service.ReconcileSubscriptionProxies(oldEnabled, host); rollbackErr != nil {
+				err = errors.New(err.Error() + "; rollback failed: " + rollbackErr.Error())
+			}
+		}
+		jsonMsg(c, "failed to synchronize Telemt subscription proxies", err)
+		return
+	}
+
 	if err := a.settingService.SetTelemtSubscriptionProxyEnable(req.Enabled); err != nil {
+		if oldEnabled != req.Enabled {
+			if rollbackErr := a.service.ReconcileSubscriptionProxies(oldEnabled, host); rollbackErr != nil {
+				err = errors.New(err.Error() + "; proxy rollback failed: " + rollbackErr.Error())
+			}
+		}
 		jsonMsg(c, "failed to save Telemt subscription proxy setting", err)
 		return
 	}

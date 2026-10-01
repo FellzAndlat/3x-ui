@@ -15,8 +15,8 @@ func (s *SettingService) GetTelemtSubscriptionProxyEnable() (bool, error) {
 }
 
 // SetTelemtSubscriptionProxyEnable persists the administrator's preference.
-// Disabling the setting intentionally does not remove already-created Telemt
-// users; it only affects new creation/exposure paths.
+// The Telemt controller reconciles all existing subscription users before the
+// new value is committed, so saved subscription pages follow this setting too.
 func (s *SettingService) SetTelemtSubscriptionProxyEnable(enabled bool) error {
 	return s.setBool(telemtSubscriptionProxyEnableSettingKey, enabled)
 }
