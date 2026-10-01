@@ -7,45 +7,39 @@ import (
 
 var consistentTrafficCollectMu sync.Mutex
 
-// mergeCounterSnapshots advances one successful /stats snapshot while keeping
-// baselines for users omitted from that particular response. mtg counters are
-// cumulative, so dropping an omitted user's baseline would lose all bytes
-// accumulated between the last visible sample and the next one.
+// mergeCounterSnapshots advances one successful Telemt /v1/users snapshot
+// while keeping baselines for users omitted from that particular response.
+// Telemt exposes a cumulative total_octets counter per user.
 func mergeCounterSnapshots(previous map[string]clientCounters, users map[string]statsUser) (map[string]clientCounters, map[string]clientCounters, []string) {
 	next := make(map[string]clientCounters, len(previous)+len(users))
 	maps.Copy(next, previous)
 	deltas := make(map[string]clientCounters, len(users))
 	online := make([]string, 0, len(users))
 
-	for email, user := range users {
-		current := clientCounters{up: user.BytesIn, down: user.BytesOut}
-		next[email] = current
+	for username, user := range users {
+		current := clientCounters{total: int64(user.TotalOctets)}
+		next[username] = current
 		if user.Connections > 0 {
-			online = append(online, email)
+			online = append(online, username)
 		}
 
-		prev, had := previous[email]
+		prev, had := previous[username]
 		if !had {
 			continue
 		}
-		delta := clientCounters{
-			up:   monotonicCounterDelta(current.up, prev.up),
-			down: monotonicCounterDelta(current.down, prev.down),
-		}
-		if delta.up > 0 || delta.down > 0 {
-			deltas[email] = delta
+		delta := clientCounters{total: monotonicCounterDelta(current.total, prev.total)}
+		if delta.total > 0 {
+			deltas[username] = delta
 		}
 	}
 	return next, deltas, online
 }
 
 // CollectTrafficConsistent is the race-safe traffic collector used by the web
-// job. It preserves cumulative baselines across temporarily incomplete /stats
-// responses and discards a scrape if the owning mtg process was replaced while
+// job. It preserves cumulative baselines across temporarily incomplete Telemt
+// API responses and discards a scrape if the owning process was replaced while
 // the HTTP request was in flight.
 func (m *Manager) CollectTrafficConsistent() ([]Traffic, []string) {
-	// The scheduler already serializes its own calls, but keeping this guard in
-	// the manager makes the baseline contract safe for any other caller too.
 	consistentTrafficCollectMu.Lock()
 	defer consistentTrafficCollectMu.Unlock()
 
@@ -55,6 +49,7 @@ func (m *Manager) CollectTrafficConsistent() ([]Traffic, []string) {
 		apiToken string
 		owner    *managed
 		last     map[string]clientCounters
+		users    map[string]string
 	}
 
 	m.mu.Lock()
@@ -65,12 +60,15 @@ func (m *Manager) CollectTrafficConsistent() ([]Traffic, []string) {
 		}
 		lastCopy := make(map[string]clientCounters, len(cur.last))
 		maps.Copy(lastCopy, cur.last)
+		usersCopy := make(map[string]string, len(cur.users))
+		maps.Copy(usersCopy, cur.users)
 		snaps = append(snaps, snap{
 			id:       id,
 			apiPort:  cur.apiPort,
 			apiToken: cur.apiToken,
 			owner:    cur,
 			last:     lastCopy,
+			users:    usersCopy,
 		})
 	}
 	m.mu.Unlock()
@@ -96,14 +94,17 @@ func (m *Manager) CollectTrafficConsistent() ([]Traffic, []string) {
 		tag := cur.tag
 		m.mu.Unlock()
 
-		online = append(online, instanceOnline...)
-		for email, delta := range deltas {
-			out = append(out, Traffic{
-				Tag:   tag,
-				Email: email,
-				Up:    delta.up,
-				Down:  delta.down,
-			})
+		for _, username := range instanceOnline {
+			if email, exists := s.users[username]; exists {
+				online = append(online, email)
+			}
+		}
+		for username, delta := range deltas {
+			email, exists := s.users[username]
+			if !exists {
+				continue
+			}
+			out = append(out, Traffic{Tag: tag, Email: email, Down: delta.total})
 		}
 	}
 	return out, online
