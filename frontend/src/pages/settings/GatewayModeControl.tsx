@@ -184,9 +184,9 @@ export default function GatewayModeControl() {
           )}
 
           <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            При включении панель сохраняет резервную копию текущего шаблона Xray и добавляет отдельный
-            TPROXY-вход. Outbound и routing не подменяются: перехваченный трафик проходит через ваши
-            обычные правила маршрутизации Xray.
+            При включении панель сохраняет резервную копию текущего шаблона Xray и добавляет
+            отдельный TPROXY-вход. Outbound и routing не подменяются: перехваченный трафик проходит
+            через ваши обычные правила маршрутизации Xray.
           </Typography.Paragraph>
 
           <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
