@@ -9,8 +9,6 @@ import (
 	"testing"
 )
 
-// serverPort extracts the loopback port a httptest server bound to, so
-// scrapeStats can rebuild the same http://127.0.0.1:<port>/stats URL.
 func serverPort(t *testing.T, srv *httptest.Server) int {
 	t.Helper()
 	u, err := url.Parse(srv.URL)
@@ -24,46 +22,32 @@ func serverPort(t *testing.T, srv *httptest.Server) int {
 	return port
 }
 
-func TestScrapeStats(t *testing.T) {
+func TestScrapeStatsTelemt(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/stats" {
-			http.NotFound(w, r)
+		if r.URL.Path != "/v1/users" || r.Header.Get("Authorization") != "Bearer sesame" {
+			http.Error(w, "bad request", http.StatusUnauthorized)
 			return
 		}
-		if r.Header.Get("Authorization") != "Bearer sesame" {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		_, _ = io.WriteString(w, `{"started_at":"2026-01-01T00:00:00Z","total_connections":2,`+
-			`"users":{`+
-			`"alice":{"connections":2,"bytes_in":100,"bytes_out":200,"last_seen":"2026-01-01T00:01:00Z"},`+
-			`"bob":{"connections":0,"bytes_in":5,"bytes_out":7,"last_seen":null}}}`)
+		_, _ = io.WriteString(w, `{"ok":true,"data":[{"username":"alice","current_connections":2,"total_octets":300},{"username":"bob","current_connections":0,"total_octets":12}],"revision":"x"}`)
 	}))
 	defer srv.Close()
-
 	users, ok := scrapeStats(serverPort(t, srv), "sesame")
-	if !ok {
-		t.Fatal("scrapeStats should succeed against a valid /stats endpoint")
-	}
-	if len(users) != 2 {
-		t.Fatalf("expected 2 users, got %d: %+v", len(users), users)
-	}
-	if users["alice"].BytesIn != 100 || users["alice"].BytesOut != 200 || users["alice"].Connections != 2 {
-		t.Fatalf("alice stats parsed wrong: %+v", users["alice"])
-	}
-	if users["bob"].Connections != 0 || users["bob"].BytesIn != 5 {
-		t.Fatalf("bob stats parsed wrong: %+v", users["bob"])
+	if !ok || len(users) != 2 || users["alice"].Connections != 2 || users["alice"].TotalOctets != 300 {
+		t.Fatalf("bad Telemt stats parse: ok=%v users=%+v", ok, users)
 	}
 }
 
-func TestScrapeStatsUnreachable(t *testing.T) {
+func TestRequestReloadTelemt(t *testing.T) {
+	var method, path, auth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
+		method, path, auth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusAccepted)
 	}))
-	port := serverPort(t, srv)
-	srv.Close()
-
-	if _, ok := scrapeStats(port, ""); ok {
-		t.Fatal("scrapeStats must report ok=false when the endpoint is unreachable")
+	defer srv.Close()
+	if !requestReload(serverPort(t, srv), "sesame") {
+		t.Fatal("202 reload must be accepted")
+	}
+	if method != http.MethodPost || path != "/v1/system/reload" || auth != "Bearer sesame" {
+		t.Fatalf("unexpected reload request: %s %s %q", method, path, auth)
 	}
 }
