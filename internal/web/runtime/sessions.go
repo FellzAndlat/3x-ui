@@ -16,6 +16,7 @@ import (
 type SessionRuntime interface {
 	ActiveSessions(ctx context.Context) ([]singbox.ActiveSession, error)
 	DisconnectUserSessions(ctx context.Context, inbound, user string) (int, error)
+	DisconnectUsersSessions(ctx context.Context, inbound string, users []string) (int, error)
 	DisconnectInboundSessions(ctx context.Context, inbound string) (int, error)
 }
 
@@ -43,12 +44,16 @@ func (l *Local) ActiveSessions(ctx context.Context) ([]singbox.ActiveSession, er
 }
 
 func (l *Local) DisconnectUserSessions(ctx context.Context, inbound, user string) (int, error) {
+	return l.DisconnectUsersSessions(ctx, inbound, []string{user})
+}
+
+func (l *Local) DisconnectUsersSessions(ctx context.Context, inbound string, users []string) (int, error) {
 	if !l.isSingBox() {
 		return 0, errors.New("session disconnect is currently available only for sing-box")
 	}
 	client := singbox.NewConnectionAPIClient()
 	defer client.Close()
-	return client.DisconnectUser(ctx, inbound, user)
+	return client.DisconnectUsers(ctx, inbound, users)
 }
 
 func (l *Local) DisconnectInboundSessions(ctx context.Context, inbound string) (int, error) {
@@ -76,9 +81,13 @@ func (r *Remote) ActiveSessions(ctx context.Context) ([]singbox.ActiveSession, e
 }
 
 func (r *Remote) DisconnectUserSessions(ctx context.Context, inbound, user string) (int, error) {
-	return r.disconnectSessions(ctx, "panel/api/server/singbox/sessions/disconnect-user", map[string]string{
+	return r.DisconnectUsersSessions(ctx, inbound, []string{user})
+}
+
+func (r *Remote) DisconnectUsersSessions(ctx context.Context, inbound string, users []string) (int, error) {
+	return r.disconnectSessions(ctx, "panel/api/server/singbox/sessions/disconnect-users", map[string]any{
 		"inbound": inbound,
-		"user":    user,
+		"users":   users,
 	})
 }
 
