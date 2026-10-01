@@ -329,6 +329,9 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 	if err := translateStream(out, singProtocol, streamSettings, false); err != nil {
 		return nil, err
 	}
+	if err := applyXrayOutboundCompatibility(out, raw, streamSettings); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -772,7 +775,7 @@ func TranslateShadowTLSWrappedInbound(raw map[string]any) (map[string]any, map[s
 	delete(inner, "network")
 	if users, ok := inner["users"].([]map[string]any); ok {
 		for _, user := range users {
-			delete(user, "flow") // Vision requires inner TLS/REALITY, removed by this wrapper.
+			delete(user, "flow")
 		}
 	}
 	outerRaw := map[string]any{
@@ -881,9 +884,6 @@ func translateUsers(out map[string]any, protocol string, settings map[string]any
 	}
 	switch protocol {
 	case "vless", "vmess", "trojan", "naive", "hysteria", "hysteria2", "anytls", "shadowtls", "tuic", "http", "socks", "mixed":
-		// Emit an explicit users array even when there are no active clients.
-		// sing-box requires the field for authenticated inbounds and accepts an
-		// empty array for the unauthenticated SOCKS/HTTP variants.
 		out["users"] = users
 	default:
 		if len(users) > 0 {
@@ -933,8 +933,6 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 		} else {
 			switch security {
 			case "":
-				// Legacy/flat panel outbounds may omit the security marker.
-				// Both Hysteria versions require a client TLS block.
 				out["tls"] = map[string]any{"enabled": true}
 			case "tls":
 			default:
@@ -1084,8 +1082,6 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 	}
 	switch network {
 	case "", "tcp", "raw":
-		// Xray's "raw" is its current name for the plain TCP transport.
-		// sing-box represents the same stream without an explicit transport.
 		return nil
 	case "ws":
 		ws := rawObject(stream, "wsSettings")
@@ -1153,7 +1149,11 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 		}
 		out["transport"] = transport
 	default:
-		return fmt.Errorf("inbound %q uses unsupported Xray transport %q", rawString(out, "tag"), network)
+		direction := "outbound"
+		if inbound {
+			direction = "inbound"
+		}
+		return fmt.Errorf("%s %q uses unsupported Xray transport %q", direction, rawString(out, "tag"), network)
 	}
 	return nil
 }
@@ -1296,7 +1296,6 @@ func translateHysteriaStream(out map[string]any, protocol string, stream map[str
 				}
 				out["obfs"] = normalized
 			case "":
-				// Empty type means obfuscation disabled.
 			default:
 				return fmt.Errorf("%s %q has invalid Hysteria2 obfs type %q", direction, rawString(out, "tag"), kind)
 			}
@@ -1338,7 +1337,6 @@ func translateHysteriaStream(out map[string]any, protocol string, stream map[str
 				m["headers"] = headers
 			}
 		case "":
-			// Keep the default sing-box 404 behavior when masquerade is disabled.
 		default:
 			return fmt.Errorf("inbound %q has invalid Hysteria2 masquerade type %q", rawString(out, "tag"), rawString(masquerade, "type"))
 		}
