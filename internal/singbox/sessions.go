@@ -85,15 +85,9 @@ func (c *ConnectionAPIClient) DisconnectInbound(ctx context.Context, inbound str
 	})
 }
 
-func (c *ConnectionAPIClient) disconnectMatching(ctx context.Context, match func(*singBoxConnection) bool) (int, error) {
-	connections, err := c.Snapshot(ctx)
-	if err != nil {
-		return 0, err
-	}
-
-	closed := 0
+func matchingConnectionIDs(connections []*singBoxConnection, match func(*singBoxConnection) bool) []string {
+	ids := make([]string, 0, len(connections))
 	seen := make(map[string]struct{}, len(connections))
-	var closeErr error
 	for _, connection := range connections {
 		if connection == nil || connection.ID == "" || !match(connection) {
 			continue
@@ -102,8 +96,22 @@ func (c *ConnectionAPIClient) disconnectMatching(ctx context.Context, match func
 			continue
 		}
 		seen[connection.ID] = struct{}{}
-		if err := c.CloseConnection(ctx, connection.ID); err != nil {
-			closeErr = errors.Join(closeErr, fmt.Errorf("close sing-box connection %s: %w", connection.ID, err))
+		ids = append(ids, connection.ID)
+	}
+	return ids
+}
+
+func (c *ConnectionAPIClient) disconnectMatching(ctx context.Context, match func(*singBoxConnection) bool) (int, error) {
+	connections, err := c.Snapshot(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	closed := 0
+	var closeErr error
+	for _, id := range matchingConnectionIDs(connections, match) {
+		if err := c.CloseConnection(ctx, id); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close sing-box connection %s: %w", id, err))
 			continue
 		}
 		closed++
