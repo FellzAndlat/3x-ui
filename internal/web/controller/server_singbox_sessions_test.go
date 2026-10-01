@@ -55,6 +55,7 @@ func TestSingBoxSessionNodeSyncScope(t *testing.T) {
 	}{
 		{path: "/server/singbox/sessions", method: http.MethodGet},
 		{path: "/server/singbox/sessions/disconnect-user", method: http.MethodPost},
+		{path: "/server/singbox/sessions/disconnect-users", method: http.MethodPost},
 		{path: "/server/singbox/sessions/disconnect-inbound", method: http.MethodPost},
 	}
 
