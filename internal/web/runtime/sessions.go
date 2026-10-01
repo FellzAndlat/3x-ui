@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -68,7 +69,7 @@ func (r *Remote) ActiveSessions(ctx context.Context) ([]singbox.ActiveSession, e
 	if len(env.Obj) == 0 {
 		return sessions, nil
 	}
-	if err := jsonUnmarshal(env.Obj, &sessions); err != nil {
+	if err := json.Unmarshal(env.Obj, &sessions); err != nil {
 		return nil, fmt.Errorf("decode active sessions: %w", err)
 	}
 	return sessions, nil
@@ -98,7 +99,7 @@ func (r *Remote) disconnectSessions(ctx context.Context, path string, body any) 
 	if len(env.Obj) == 0 {
 		return 0, nil
 	}
-	if err := jsonUnmarshal(env.Obj, &result); err != nil {
+	if err := json.Unmarshal(env.Obj, &result); err != nil {
 		return 0, fmt.Errorf("decode disconnect result: %w", err)
 	}
 	return result.Closed, nil
