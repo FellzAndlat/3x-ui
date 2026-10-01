@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Input, InputNumber, Select, Switch } from 'antd';
+import { Divider, Input, InputNumber, Select, Switch, Typography } from 'antd';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 import { FormField } from '@/components/form/rhf';
@@ -11,9 +11,17 @@ export default function MtprotoFields() {
   const routeThroughXray = useWatch({ control, name: 'settings.routeThroughXray' }) as
     | boolean
     | undefined;
+  const mekoEnabled = useWatch({ control, name: 'settings.mekoFix.enabled' }) as
+    | boolean
+    | undefined;
+  const proxyProtocolEnabled = useWatch({ control, name: 'settings.proxyProtocolListener' }) as
+    | boolean
+    | undefined;
   const { data: outboundTags } = useOutboundTags({ excludeBlackhole: true });
+
   return (
     <>
+      <Typography.Text strong>Telemt</Typography.Text>
       <FormField
         name={['settings', 'fakeTlsDomain']}
         label={t('pages.inbounds.form.fakeTlsDomain')}
@@ -22,62 +30,119 @@ export default function MtprotoFields() {
         <Input placeholder="www.cloudflare.com" />
       </FormField>
       <FormField
-        name={['settings', 'domainFronting', 'ip']}
-        label={t('pages.inbounds.form.mtgDomainFrontingIp')}
-        tooltip={t('pages.inbounds.form.mtgDomainFrontingHint')}
+        name={['settings', 'tlsDomains']}
+        label="Additional FakeTLS domains"
+        tooltip="Telemt will generate an additional FakeTLS link for every domain."
       >
-        <Input placeholder="127.0.0.1" />
+        <Select mode="tags" tokenSeparators={[',', ' ']} placeholder="example.com" />
+      </FormField>
+
+      <FormField name={['settings', 'telemtModes', 'classic']} label="Classic mode" valueProp="checked">
+        <Switch />
+      </FormField>
+      <FormField name={['settings', 'telemtModes', 'secure']} label="Secure (DD) mode" valueProp="checked">
+        <Switch />
+      </FormField>
+      <FormField name={['settings', 'telemtModes', 'tls']} label="FakeTLS (EE) mode" valueProp="checked">
+        <Switch />
       </FormField>
       <FormField
-        name={['settings', 'domainFronting', 'port']}
-        label={t('pages.inbounds.form.mtgDomainFrontingPort')}
+        name={['settings', 'mask']}
+        label="Traffic masking"
+        tooltip="Telemt censorship.mask. Masks invalid/non-MTProto traffic."
+        valueProp="checked"
       >
-        <InputNumber min={0} max={65535} placeholder="443" style={{ width: '100%' }} />
+        <Switch />
       </FormField>
       <FormField
-        name={['settings', 'domainFronting', 'proxyProtocol']}
-        label={t('pages.inbounds.form.mtgDomainFrontingProxyProtocol')}
+        name={['settings', 'tlsEmulation']}
+        label="TLS emulation"
+        tooltip="Telemt censorship.tls_emulation. Emulates TLS record/certificate behavior."
         valueProp="checked"
       >
         <Switch />
       </FormField>
       <FormField
         name={['settings', 'proxyProtocolListener']}
-        label={t('pages.inbounds.form.mtgProxyProtocolListener')}
+        label="PROXY protocol listener"
         valueProp="checked"
       >
         <Switch />
       </FormField>
-      <FormField name={['settings', 'preferIp']} label={t('pages.inbounds.form.mtgPreferIp')}>
+      {proxyProtocolEnabled && (
+        <FormField
+          name={['settings', 'proxyProtocolTrustedCidrs']}
+          label="Trusted PROXY protocol CIDRs"
+          tooltip="Only PROXY headers from these source networks are accepted. Loopback is the safe default for the local Xray bridge."
+        >
+          <Select mode="tags" tokenSeparators={[',', ' ']} placeholder="127.0.0.0/8" />
+        </FormField>
+      )}
+      <FormField name={['settings', 'preferIp']} label="Telemt IP preference">
         <Select
           allowClear
-          placeholder="prefer-ipv6"
           options={[
-            { value: 'prefer-ipv6', label: 'prefer-ipv6' },
-            { value: 'prefer-ipv4', label: 'prefer-ipv4' },
-            { value: 'only-ipv6', label: 'only-ipv6' },
-            { value: 'only-ipv4', label: 'only-ipv4' },
+            { value: 'prefer-ipv6', label: 'Prefer IPv6' },
+            { value: 'prefer-ipv4', label: 'Prefer IPv4' },
+            { value: 'only-ipv6', label: 'IPv6 only' },
+            { value: 'only-ipv4', label: 'IPv4 only' },
           ]}
         />
       </FormField>
+      <FormField name={['settings', 'debug']} label="Telemt debug logging" valueProp="checked">
+        <Switch />
+      </FormField>
+
+      <Divider orientation="left">MEKO proxy fix</Divider>
       <FormField
-        name={['settings', 'debug']}
-        label={t('pages.inbounds.form.mtgDebug')}
+        name={['settings', 'mekoFix', 'enabled']}
+        label="Enable MTPROTO_FIX_By_MEKO"
+        tooltip="Installs an inbound-scoped SYN filter for this Telemt port."
         valueProp="checked"
       >
         <Switch />
       </FormField>
-      <FormField
-        name={['settings', 'throttleMaxConnections']}
-        label={t('pages.inbounds.form.mtgThrottleMaxConnections')}
-        tooltip={t('pages.inbounds.form.mtgThrottleMaxConnectionsHint')}
-      >
-        <InputNumber min={0} placeholder="0" style={{ width: '100%' }} />
-      </FormField>
+      {mekoEnabled !== false && (
+        <>
+          <FormField name={['settings', 'mekoFix', 'backend']} label="Firewall backend">
+            <Select
+              options={[
+                { value: 'auto', label: 'Auto (nftables → iptables)' },
+                { value: 'nftables', label: 'nftables' },
+                { value: 'iptables', label: 'iptables' },
+              ]}
+            />
+          </FormField>
+          <FormField
+            name={['settings', 'mekoFix', 'synRatePerMinute']}
+            label="Non-iOS SYN rate / minute"
+            tooltip="MEKO v3 default is 54 SYN/minute per source IP."
+          >
+            <InputNumber min={1} max={100000} style={{ width: '100%' }} />
+          </FormField>
+          <FormField
+            name={['settings', 'mekoFix', 'burst']}
+            label="SYN burst"
+            tooltip="MEKO v3 default is 1 packet."
+          >
+            <InputNumber min={1} max={10000} style={{ width: '100%' }} />
+          </FormField>
+          <FormField
+            name={['settings', 'mekoFix', 'iosBypass']}
+            label="iOS signature bypass"
+            tooltip="Recognize MEKO's iOS TCP signature and bypass the non-iOS SYN limiter."
+            valueProp="checked"
+          >
+            <Switch />
+          </FormField>
+        </>
+      )}
+
+      <Divider orientation="left">Routing</Divider>
       <FormField
         name={['settings', 'routeThroughXray']}
         label={t('pages.inbounds.form.mtgRouteThroughXray')}
-        tooltip={t('pages.inbounds.form.mtgRouteThroughXrayHint')}
+        tooltip="Route Telemt upstream connections through the existing local Xray SOCKS bridge."
         valueProp="checked"
       >
         <Switch />
@@ -86,13 +151,11 @@ export default function MtprotoFields() {
         <FormField
           name={['settings', 'outboundTag']}
           label={t('pages.inbounds.form.mtgRouteOutbound')}
-          tooltip={t('pages.inbounds.form.mtgRouteOutboundHint')}
         >
           <Select
             id="mtprotoOutboundTag"
             allowClear
             showSearch
-            placeholder={t('pages.inbounds.form.mtgRouteOutboundPlaceholder')}
             options={(outboundTags ?? []).map((tag) => ({ value: tag, label: tag }))}
           />
         </FormField>
@@ -100,14 +163,12 @@ export default function MtprotoFields() {
       <FormField
         name={['settings', 'publicIpv4']}
         label={t('pages.inbounds.form.mtgPublicIpv4')}
-        tooltip={t('pages.inbounds.form.mtgPublicIpHint')}
       >
         <Input allowClear placeholder="1.2.3.4" />
       </FormField>
       <FormField
         name={['settings', 'publicIpv6']}
         label={t('pages.inbounds.form.mtgPublicIpv6')}
-        tooltip={t('pages.inbounds.form.mtgPublicIpHint')}
       >
         <Input allowClear placeholder="2001:db8::1" />
       </FormField>
