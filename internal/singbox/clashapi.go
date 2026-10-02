@@ -61,10 +61,25 @@ type ClashStatsClient struct {
 	configErr error
 }
 
+func newClashHTTPClient() *http.Client {
+	// The Clash controller is a local service. Never honor HTTP_PROXY or
+	// HTTPS_PROXY here: for a controller bound to a local LAN address, an
+	// environment proxy could otherwise receive the Bearer secret.
+	transport := &http.Transport{}
+	if defaultTransport, ok := http.DefaultTransport.(*http.Transport); ok {
+		transport = defaultTransport.Clone()
+	}
+	transport.Proxy = nil
+	return &http.Client{
+		Transport: transport,
+		Timeout:   2 * time.Second,
+	}
+}
+
 func NewClashStatsClient() *ClashStatsClient {
 	baseURL, secret, err := clashAPIInfoFromConfig()
 	return &ClashStatsClient{
-		client:    &http.Client{Timeout: 2 * time.Second},
+		client:    newClashHTTPClient(),
 		baseURL:   baseURL,
 		secret:    secret,
 		configErr: err,
