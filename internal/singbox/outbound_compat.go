@@ -245,6 +245,10 @@ func validateXrayOutboundOnlyOptions(raw map[string]any, protocol, tag string) e
 	if xrayBool(mux, "enabled") {
 		return fmt.Errorf("outbound %q enables Xray Mux.Cool; sing-box multiplex is a different protocol", tag)
 	}
+	stream := rawObject(raw, "streamSettings")
+	if strings.EqualFold(strings.TrimSpace(rawString(stream, "network")), "quic") {
+		return fmt.Errorf("outbound %q uses Xray QUIC transport, which is not wire-compatible with sing-box V2Ray QUIC", tag)
+	}
 	strategy := strings.TrimSpace(rawString(raw, "targetStrategy"))
 	if protocol != "freedom" && strategy != "" && !strings.EqualFold(strategy, "AsIs") {
 		return fmt.Errorf("outbound %q uses Xray targetStrategy %q which has no equivalent sing-box outbound option", tag, strategy)
