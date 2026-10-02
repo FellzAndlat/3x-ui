@@ -548,12 +548,6 @@ func ensureWireGuardEndpointDomainResolver(endpoint map[string]any) {
 
 func applyXrayWireGuardEndpointCompatibility(endpoint map[string]any, raw map[string]any) error {
 	tag := rawString(raw, "tag")
-	if _, exists := endpoint["system"]; !exists {
-		endpoint["system"] = true
-	}
-	if strings.TrimSpace(rawString(endpoint, "name")) == "" && tag != "" {
-		endpoint["name"] = "wg-" + tag
-	}
 	if err := validateXrayOutboundOnlyOptions(raw, "wireguard", tag); err != nil {
 		return err
 	}
