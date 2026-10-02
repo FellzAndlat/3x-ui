@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -120,5 +121,46 @@ func TestConfigMarshalRejectsMalformedClashController(t *testing.T) {
 	}
 	if _, err := cfg.Marshal(); err == nil {
 		t.Fatal("expected non-string external_controller to be rejected")
+	}
+}
+
+func TestConfigMarshalRejectsMalformedClashSecret(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Experimental = map[string]any{
+		"clash_api": map[string]any{
+			"external_controller": "127.0.0.1:9090",
+			"secret":              123,
+		},
+	}
+	if _, err := cfg.Marshal(); err == nil {
+		t.Fatal("expected non-string Clash API secret to be rejected")
+	}
+}
+
+func TestConfigMarshalRequiresSecretForNonLoopbackClashAPI(t *testing.T) {
+	for _, controller := range []string{"0.0.0.0:9090", "[::]:9090", ":9090", "192.168.1.10:9090"} {
+		t.Run(controller, func(t *testing.T) {
+			cfg := NewConfig()
+			cfg.Experimental = map[string]any{
+				"clash_api": map[string]any{"external_controller": controller},
+			}
+			_, err := cfg.Marshal()
+			if err == nil || !strings.Contains(err.Error(), "secret is required") {
+				t.Fatalf("Marshal error = %v, want missing-secret error", err)
+			}
+		})
+	}
+}
+
+func TestConfigMarshalAllowsAuthenticatedNonLoopbackClashAPI(t *testing.T) {
+	cfg := NewConfig()
+	cfg.Experimental = map[string]any{
+		"clash_api": map[string]any{
+			"external_controller": "0.0.0.0:9090",
+			"secret":              "strong-secret",
+		},
+	}
+	if _, err := cfg.Marshal(); err != nil {
+		t.Fatalf("authenticated non-loopback Clash API was rejected: %v", err)
 	}
 }
