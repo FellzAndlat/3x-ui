@@ -282,12 +282,12 @@ func translateRoutingMark(out map[string]any, sockopt map[string]any, tag string
 		}
 		out["routing_mark"] = int(parsed)
 	default:
-		mark := rawInt(sockopt, "mark")
-		if mark < 0 {
+		numericMark := rawInt(sockopt, "mark")
+		if numericMark < 0 {
 			return fmt.Errorf("outbound %q has invalid negative routing mark", tag)
 		}
-		if mark > 0 {
-			out["routing_mark"] = mark
+		if numericMark > 0 {
+			out["routing_mark"] = numericMark
 		}
 	}
 	return nil
