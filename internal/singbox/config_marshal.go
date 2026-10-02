@@ -200,9 +200,6 @@ func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string
 		if rawString(outbound, "password") == "" {
 			return fmt.Errorf("sing-box outbound %q AnyTLS requires password", tag)
 		}
-		if enabled, _ := outbound["tcp_fast_open"].(bool); enabled {
-			return fmt.Errorf("sing-box outbound %q AnyTLS does not support tcp_fast_open", tag)
-		}
 	case "naive":
 		if err := validateNaiveOutboundTLS(outbound, tag); err != nil {
 			return err
@@ -327,11 +324,13 @@ func validateWireGuardEndpoint(endpoint map[string]any, tag string) error {
 		return fmt.Errorf("sing-box WireGuard endpoint %q requires at least one peer", tag)
 	}
 	for i, peer := range peers {
-		if rawString(peer, "address") == "" {
-			return fmt.Errorf("sing-box WireGuard endpoint %q peer %d requires an address", tag, i+1)
-		}
+		address := strings.TrimSpace(rawString(peer, "address"))
 		port := rawInt(peer, "port")
-		if port < 1 || port > 65535 {
+		if address == "" {
+			if port != 0 {
+				return fmt.Errorf("sing-box WireGuard endpoint %q peer %d has a port without an address", tag, i+1)
+			}
+		} else if port < 1 || port > 65535 {
 			return fmt.Errorf("sing-box WireGuard endpoint %q peer %d has an invalid port", tag, i+1)
 		}
 		if rawString(peer, "public_key") == "" {
@@ -367,6 +366,28 @@ func validateSingBoxEndpoint(endpoint map[string]any) error {
 	}
 }
 
+func hasDNSServerTag(dns map[string]any, tag string) bool {
+	if dns == nil || tag == "" {
+		return false
+	}
+	switch servers := dns["servers"].(type) {
+	case []map[string]any:
+		for _, server := range servers {
+			if rawString(server, "tag") == tag {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range servers {
+			server, ok := item.(map[string]any)
+			if ok && rawString(server, "tag") == tag {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c *Config) MarshalJSON() ([]byte, error) {
 	if c == nil {
 		return []byte("null"), nil
@@ -375,6 +396,15 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 	clone := configJSON(*c)
 	clone.Outbounds = make([]map[string]any, 0, len(c.Outbounds))
 	clone.Endpoints = make([]map[string]any, 0, len(c.Endpoints))
+	clone.Route = maps.Clone(c.Route)
+	if hasDNSServerTag(c.DNS, "local") {
+		if clone.Route == nil {
+			clone.Route = map[string]any{}
+		}
+		if _, exists := clone.Route["default_domain_resolver"]; !exists {
+			clone.Route["default_domain_resolver"] = "local"
+		}
+	}
 	seen := make(map[string]string, len(c.Outbounds)+len(c.Endpoints))
 
 	for _, source := range c.Outbounds {
