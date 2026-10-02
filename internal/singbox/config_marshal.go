@@ -27,6 +27,15 @@ func validateSingBoxOutboundType(protocol, tag string) error {
 	}
 }
 
+func isKnownSingBoxOutbound(protocol string) bool {
+	switch protocol {
+	case "direct", "bridge", "block", "socks", "http", "shadowsocks", "vmess", "trojan", "wireguard", "hysteria", "vless", "shadowtls", "tuic", "hysteria2", "anytls", "snell", "tailcat", "tor", "ssh", "dns", "selector", "urltest", "naive":
+		return true
+	default:
+		return false
+	}
+}
+
 func singBoxOutboundSupportsTLS(protocol string) bool {
 	switch protocol {
 	case "http", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic", "shadowtls", "anytls", "naive":
@@ -170,8 +179,11 @@ func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string
 			return fmt.Errorf("sing-box outbound %q Trojan requires password", tag)
 		}
 	case "hysteria":
-		if rawInt(outbound, "up_mbps") <= 0 || rawInt(outbound, "down_mbps") <= 0 {
-			return fmt.Errorf("sing-box outbound %q Hysteria requires positive up_mbps and down_mbps", tag)
+		if strings.TrimSpace(rawString(outbound, "up")) == "" && rawInt(outbound, "up_mbps") <= 0 {
+			return fmt.Errorf("sing-box outbound %q Hysteria requires up or positive up_mbps", tag)
+		}
+		if strings.TrimSpace(rawString(outbound, "down")) == "" && rawInt(outbound, "down_mbps") <= 0 {
+			return fmt.Errorf("sing-box outbound %q Hysteria requires down or positive down_mbps", tag)
 		}
 	case "tuic":
 		if rawString(outbound, "uuid") == "" {
@@ -217,8 +229,9 @@ func validateSingBoxOutbound(outbound map[string]any) error {
 		return err
 	}
 
+	knownProtocol := isKnownSingBoxOutbound(protocol)
 	tls, hasTLS := outbound["tls"].(map[string]any)
-	if hasTLS && len(tls) > 0 {
+	if knownProtocol && hasTLS && len(tls) > 0 {
 		if !singBoxOutboundSupportsTLS(protocol) {
 			return fmt.Errorf("sing-box outbound %q protocol %s does not support TLS settings", tag, protocol)
 		}
@@ -235,6 +248,9 @@ func validateSingBoxOutbound(outbound map[string]any) error {
 
 	transport, ok := outbound["transport"].(map[string]any)
 	if !ok || len(transport) == 0 {
+		return nil
+	}
+	if !knownProtocol {
 		return nil
 	}
 	if !singBoxOutboundSupportsV2RayTransport(protocol) {
