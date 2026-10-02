@@ -148,6 +148,155 @@ func translateGRPCTransportCompatibility(out map[string]any, stream map[string]a
 	return nil
 }
 
+func normalizeXrayTLSCurve(value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "curvep256", "secp256r1", "p256":
+		return "P256"
+	case "curvep384", "secp384r1", "p384":
+		return "P384"
+	case "curvep521", "secp521r1", "p521":
+		return "P521"
+	case "x25519":
+		return "X25519"
+	case "x25519mlkem768":
+		return "X25519MLKEM768"
+	default:
+		return value
+	}
+}
+
+func translateOutboundTLSCertificates(tlsOut, tlsIn map[string]any, tag string) error {
+	certs, ok := tlsIn["certificates"].([]any)
+	if !ok || len(certs) == 0 {
+		return nil
+	}
+
+	// translateStream historically treated outbound certificates as server
+	// certificates. Clear those fields and rebuild them according to Xray's
+	// certificate usage so mTLS client credentials are not emitted as
+	// server-only sing-box TLS fields.
+	for _, key := range []string{"certificate", "certificate_path", "key", "key_path", "client_certificate", "client_certificate_path", "client_key", "client_key_path"} {
+		delete(tlsOut, key)
+	}
+
+	clientCredentials := 0
+	verifyCertificates := 0
+	for index, item := range certs {
+		cert, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("outbound %q TLS certificate %d is invalid", tag, index+1)
+		}
+		usage := strings.ToLower(strings.TrimSpace(rawString(cert, "usage")))
+		if usage == "" {
+			usage = "encipherment"
+		}
+		if rawInt(cert, "ocspStapling") > 0 || xrayBool(cert, "oneTimeLoading") || xrayBool(cert, "buildChain") {
+			return fmt.Errorf("outbound %q TLS certificate %d uses Xray certificate lifecycle options which sing-box outbound TLS cannot represent", tag, index+1)
+		}
+
+		certificatePath := strings.TrimSpace(rawString(cert, "certificateFile"))
+		certificate := compatStringSlice(cert["certificate"])
+		keyPath := strings.TrimSpace(rawString(cert, "keyFile"))
+		key := compatStringSlice(cert["key"])
+
+		switch usage {
+		case "verify":
+			verifyCertificates++
+			if verifyCertificates > 1 {
+				return fmt.Errorf("outbound %q has multiple Xray TLS verify certificates; sing-box outbound TLS accepts one custom certificate chain", tag)
+			}
+			if certificatePath != "" {
+				tlsOut["certificate_path"] = certificatePath
+			} else if len(certificate) > 0 {
+				tlsOut["certificate"] = certificate
+			} else {
+				return fmt.Errorf("outbound %q TLS verify certificate %d has no certificate data", tag, index+1)
+			}
+		case "encipherment":
+			clientCredentials++
+			if clientCredentials > 1 {
+				return fmt.Errorf("outbound %q has multiple Xray TLS client certificates which cannot be represented by one sing-box TLS client identity", tag)
+			}
+			if certificatePath != "" {
+				tlsOut["client_certificate_path"] = certificatePath
+			} else if len(certificate) > 0 {
+				tlsOut["client_certificate"] = certificate
+			} else {
+				return fmt.Errorf("outbound %q TLS client certificate %d has no certificate data", tag, index+1)
+			}
+			if keyPath != "" {
+				tlsOut["client_key_path"] = keyPath
+			} else if len(key) > 0 {
+				tlsOut["client_key"] = key
+			} else {
+				return fmt.Errorf("outbound %q TLS client certificate %d has no private key", tag, index+1)
+			}
+		case "issue":
+			return fmt.Errorf("outbound %q TLS certificate %d uses Xray issue mode which sing-box outbound TLS cannot represent", tag, index+1)
+		default:
+			return fmt.Errorf("outbound %q TLS certificate %d has unsupported usage %q", tag, index+1, usage)
+		}
+	}
+	return nil
+}
+
+func translateOutboundTLSCompatibility(out map[string]any, stream map[string]any, tag string) error {
+	if !strings.EqualFold(strings.TrimSpace(rawString(stream, "security")), "tls") {
+		return nil
+	}
+	tlsIn := rawObject(stream, "tlsSettings")
+	tlsOut, ok := out["tls"].(map[string]any)
+	if !ok || tlsOut == nil {
+		tlsOut = map[string]any{"enabled": true}
+		out["tls"] = tlsOut
+	}
+
+	if minVersion := strings.TrimSpace(rawString(tlsIn, "minVersion")); minVersion != "" {
+		tlsOut["min_version"] = minVersion
+	}
+	if maxVersion := strings.TrimSpace(rawString(tlsIn, "maxVersion")); maxVersion != "" {
+		tlsOut["max_version"] = maxVersion
+	}
+	if suites := strings.TrimSpace(rawString(tlsIn, "cipherSuites")); suites != "" {
+		parts := strings.FieldsFunc(suites, func(r rune) bool { return r == ':' || r == ',' })
+		values := make([]string, 0, len(parts))
+		for _, value := range parts {
+			if value = strings.TrimSpace(value); value != "" {
+				values = append(values, value)
+			}
+		}
+		if len(values) > 0 {
+			tlsOut["cipher_suites"] = values
+		}
+	}
+	if curves := rawStrings(tlsIn, "curvePreferences"); len(curves) > 0 {
+		values := make([]string, 0, len(curves))
+		for _, curve := range curves {
+			if curve = normalizeXrayTLSCurve(curve); curve != "" {
+				values = append(values, curve)
+			}
+		}
+		if len(values) > 0 {
+			tlsOut["curve_preferences"] = values
+		}
+	}
+	if xrayBool(tlsIn, "disableSystemRoot") {
+		return fmt.Errorf("outbound %q enables Xray disableSystemRoot which sing-box outbound TLS cannot represent per-outbound", tag)
+	}
+	if verifyName := strings.TrimSpace(rawString(tlsIn, "verifyPeerCertByName")); verifyName != "" {
+		serverName := strings.TrimSpace(rawString(tlsIn, "serverName"))
+		if serverName != "" && !strings.EqualFold(serverName, verifyName) {
+			return fmt.Errorf("outbound %q uses different Xray TLS SNI %q and certificate verification name %q which sing-box cannot represent separately", tag, serverName, verifyName)
+		}
+		tlsOut["server_name"] = verifyName
+	}
+	if pins := rawStrings(tlsIn, "pinnedPeerCertSha256"); len(pins) > 0 {
+		return fmt.Errorf("outbound %q uses Xray full-certificate SHA-256 pinning which stable sing-box 1.14 cannot represent", tag)
+	}
+	return translateOutboundTLSCertificates(tlsOut, tlsIn, tag)
+}
+
 func xrayV2RayUser(settings map[string]any) map[string]any {
 	server := firstObject(settings, "vnext")
 	if server == nil {
@@ -465,6 +614,9 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 	ensureRequiredOutboundTLS(out, protocol)
 	if rawString(out, "type") == "block" {
 		return nil
+	}
+	if err := translateOutboundTLSCompatibility(out, stream, tag); err != nil {
+		return err
 	}
 	if err := translateGRPCTransportCompatibility(out, stream, tag); err != nil {
 		return err
