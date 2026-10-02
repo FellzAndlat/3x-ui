@@ -285,11 +285,22 @@ func translateOutboundTLSCompatibility(out map[string]any, stream map[string]any
 		return fmt.Errorf("outbound %q enables Xray disableSystemRoot which sing-box outbound TLS cannot represent per-outbound", tag)
 	}
 	if verifyName := strings.TrimSpace(rawString(tlsIn, "verifyPeerCertByName")); verifyName != "" {
+		names := strings.Split(verifyName, ",")
+		if len(names) != 1 {
+			return fmt.Errorf("outbound %q uses multiple Xray TLS certificate verification names %q which sing-box cannot represent with one server_name", tag, verifyName)
+		}
+		verifyName = strings.TrimSpace(names[0])
+		if verifyName == "" {
+			return fmt.Errorf("outbound %q has an empty Xray TLS certificate verification name", tag)
+		}
 		serverName := strings.TrimSpace(rawString(tlsIn, "serverName"))
 		if serverName != "" && !strings.EqualFold(serverName, verifyName) {
 			return fmt.Errorf("outbound %q uses different Xray TLS SNI %q and certificate verification name %q which sing-box cannot represent separately", tag, serverName, verifyName)
 		}
 		tlsOut["server_name"] = verifyName
+	}
+	if pin := strings.TrimSpace(rawString(tlsIn, "pinnedPeerCertSha256")); pin != "" {
+		return fmt.Errorf("outbound %q uses Xray full-certificate SHA-256 pinning which stable sing-box 1.14 cannot represent", tag)
 	}
 	if pins := rawStrings(tlsIn, "pinnedPeerCertSha256"); len(pins) > 0 {
 		return fmt.Errorf("outbound %q uses Xray full-certificate SHA-256 pinning which stable sing-box 1.14 cannot represent", tag)
