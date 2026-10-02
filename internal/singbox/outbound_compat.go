@@ -112,6 +112,73 @@ func translateTUICOutboundOptions(out map[string]any, settings map[string]any) {
 	}
 }
 
+func xrayV2RayUser(settings map[string]any) map[string]any {
+	server := firstObject(settings, "vnext")
+	if server == nil {
+		return nil
+	}
+	users, _ := server["users"].([]any)
+	if len(users) == 0 {
+		return nil
+	}
+	user, _ := users[0].(map[string]any)
+	return user
+}
+
+func xrayPacketEncoding(settings map[string]any) string {
+	if value := compatStringOption(settings, "packetEncoding", "packet_encoding"); value != "" {
+		return value
+	}
+	if user := xrayV2RayUser(settings); user != nil {
+		return compatStringOption(user, "packetEncoding", "packet_encoding")
+	}
+	return ""
+}
+
+func translateV2RayPacketEncoding(out map[string]any, settings map[string]any, protocol, tag string) error {
+	if protocol != "vless" && protocol != "vmess" {
+		return nil
+	}
+
+	specialVisionUDP443 := false
+	if protocol == "vless" {
+		flow := strings.ToLower(strings.TrimSpace(rawString(out, "flow")))
+		switch flow {
+		case "":
+		case "xtls-rprx-vision":
+			out["flow"] = "xtls-rprx-vision"
+		case "xtls-rprx-vision-udp443":
+			out["flow"] = "xtls-rprx-vision"
+			out["packet_encoding"] = "xudp"
+			specialVisionUDP443 = true
+		default:
+			return fmt.Errorf("outbound %q VLESS has unsupported flow %q", tag, rawString(out, "flow"))
+		}
+	}
+
+	value := strings.ToLower(strings.TrimSpace(xrayPacketEncoding(settings)))
+	switch value {
+	case "":
+		return nil
+	case "none":
+		if !specialVisionUDP443 {
+			delete(out, "packet_encoding")
+		}
+		return nil
+	case "xudp":
+		out["packet_encoding"] = "xudp"
+		return nil
+	case "packetaddr":
+		if specialVisionUDP443 {
+			return fmt.Errorf("outbound %q VLESS flow xtls-rprx-vision-udp443 conflicts with packetEncoding %q", tag, value)
+		}
+		out["packet_encoding"] = "packetaddr"
+		return nil
+	default:
+		return fmt.Errorf("outbound %q %s has unsupported packetEncoding %q", tag, strings.ToUpper(protocol), value)
+	}
+}
+
 func translateSendThrough(out map[string]any, raw map[string]any, tag string) error {
 	value := strings.TrimSpace(rawString(raw, "sendThrough"))
 	if value == "" || value == "0.0.0.0" || value == "::" {
@@ -289,6 +356,10 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 		translateHTTPOutboundOptions(out, settings)
 	case "shadowsocks":
 		if err := translateShadowsocksOutboundOptions(out, settings, tag); err != nil {
+			return err
+		}
+	case "vmess", "vless":
+		if err := translateV2RayPacketEncoding(out, settings, protocol, tag); err != nil {
 			return err
 		}
 	case "tuic":
