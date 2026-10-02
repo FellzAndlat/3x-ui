@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -89,6 +90,66 @@ func TestNormalizeOutboundsForRuntimeStripsStaleQuicOptions(t *testing.T) {
 	}
 }
 
+func TestNormalizeV2RayTransportForRuntimeRemovesOnlyKnownIncompatibleFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		typeName  string
+		wantKeys  []string
+		dropKeys  []string
+	}{
+		{
+			name:     "websocket after grpc",
+			typeName: "ws",
+			wantKeys: []string{"type", "path", "headers", "max_early_data", "early_data_header_name", "future_option"},
+			dropKeys: []string{"host", "method", "idle_timeout", "ping_timeout", "service_name", "permit_without_stream"},
+		},
+		{
+			name:     "grpc after http",
+			typeName: "grpc",
+			wantKeys: []string{"type", "service_name", "idle_timeout", "ping_timeout", "permit_without_stream", "future_option"},
+			dropKeys: []string{"host", "path", "method", "headers", "max_early_data", "early_data_header_name"},
+		},
+		{
+			name:     "httpupgrade after grpc",
+			typeName: "httpupgrade",
+			wantKeys: []string{"type", "host", "path", "headers", "future_option"},
+			dropKeys: []string{"method", "idle_timeout", "ping_timeout", "max_early_data", "early_data_header_name", "service_name", "permit_without_stream"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			transport := map[string]any{
+				"type":                  tc.typeName,
+				"host":                  []any{"cdn.example.com"},
+				"path":                  "/edge",
+				"method":                "PUT",
+				"headers":               map[string]any{"X-Test": "1"},
+				"idle_timeout":          "30s",
+				"ping_timeout":          "10s",
+				"max_early_data":        float64(2048),
+				"early_data_header_name": "Sec-WebSocket-Protocol",
+				"service_name":          "grpc-service",
+				"permit_without_stream": true,
+				"future_option":         "preserve-me",
+			}
+			if err := normalizeV2RayTransportForRuntime(transport, tc.typeName); err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range tc.wantKeys {
+				if _, ok := transport[key]; !ok {
+					t.Errorf("expected %q to be preserved: %#v", key, transport)
+				}
+			}
+			for _, key := range tc.dropKeys {
+				if _, ok := transport[key]; ok {
+					t.Errorf("expected stale %q to be removed: %#v", key, transport)
+				}
+			}
+		})
+	}
+}
+
 func TestNormalizeOutboundsForRuntimeKeepsWebSocketHostHeader(t *testing.T) {
 	outbounds := []map[string]any{{
 		"type": "vless",
@@ -109,6 +170,24 @@ func TestNormalizeOutboundsForRuntimeKeepsWebSocketHostHeader(t *testing.T) {
 	}
 	if _, exists := transport["host"]; exists {
 		t.Fatalf("WebSocket Host header was incorrectly converted: %#v", transport)
+	}
+}
+
+func TestNormalizeV2RayTransportForRuntimeLeavesUnknownTransportUntouched(t *testing.T) {
+	transport := map[string]any{
+		"type":         "future-transport",
+		"service_name": "keep",
+		"future_option": true,
+	}
+	before := map[string]any{}
+	for key, value := range transport {
+		before[key] = value
+	}
+	if err := normalizeV2RayTransportForRuntime(transport, "future-transport"); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(transport, before) {
+		t.Fatalf("unknown transport was modified: before=%#v after=%#v", before, transport)
 	}
 }
 
