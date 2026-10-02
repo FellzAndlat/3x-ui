@@ -51,6 +51,15 @@ func translateHTTPOutboundOptions(out map[string]any, settings map[string]any) {
 	}
 }
 
+func translateFlatProxyCredentials(out map[string]any, settings map[string]any) {
+	if username := compatStringOption(settings, "user", "username"); username != "" {
+		out["username"] = username
+	}
+	if password := compatStringOption(settings, "pass", "password"); password != "" {
+		out["password"] = password
+	}
+}
+
 func translateShadowsocksOutboundOptions(out map[string]any, settings map[string]any, tag string) error {
 	server := firstObject(settings, "servers")
 	if server == nil || !xrayBool(server, "uot") {
@@ -252,7 +261,10 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 		return err
 	}
 	switch protocol {
+	case "socks":
+		translateFlatProxyCredentials(out, settings)
 	case "http":
+		translateFlatProxyCredentials(out, settings)
 		translateHTTPOutboundOptions(out, settings)
 	case "shadowsocks":
 		if err := translateShadowsocksOutboundOptions(out, settings, tag); err != nil {
