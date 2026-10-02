@@ -13,8 +13,6 @@ func validateSingBoxOutboundType(protocol, tag string) error {
 	switch protocol {
 	case "":
 		return fmt.Errorf("sing-box outbound %q has an empty type", tag)
-	case "block":
-		return fmt.Errorf("sing-box outbound %q uses removed block outbound; sing-box 1.13+ requires route reject actions instead", tag)
 	case "dns":
 		return fmt.Errorf("sing-box outbound %q uses removed DNS outbound; sing-box 1.13+ requires DNS rule actions instead", tag)
 	case "tun", "redirect", "tproxy":
@@ -412,153 +410,6 @@ func hasDNSServerTag(dns map[string]any, tag string) bool {
 	return false
 }
 
-func cloneConfigValue(value any) any {
-	switch v := value.(type) {
-	case map[string]any:
-		out := make(map[string]any, len(v))
-		for key, item := range v {
-			out[key] = cloneConfigValue(item)
-		}
-		return out
-	case []map[string]any:
-		out := make([]map[string]any, len(v))
-		for i, item := range v {
-			out[i] = cloneConfigValue(item).(map[string]any)
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
-			out[i] = cloneConfigValue(item)
-		}
-		return out
-	case []string:
-		return append([]string(nil), v...)
-	case []int:
-		return append([]int(nil), v...)
-	default:
-		return value
-	}
-}
-
-func cloneConfigMap(source map[string]any) map[string]any {
-	if source == nil {
-		return nil
-	}
-	return cloneConfigValue(source).(map[string]any)
-}
-
-func hasLegacyBlockTag(value string, tags map[string]struct{}) bool {
-	_, exists := tags[strings.TrimSpace(value)]
-	return exists
-}
-
-func rewriteLegacyBlockRule(rule map[string]any, blockTags map[string]struct{}) error {
-	if tag := strings.TrimSpace(rawString(rule, "outbound")); tag != "" && hasLegacyBlockTag(tag, blockTags) {
-		action := strings.ToLower(strings.TrimSpace(rawString(rule, "action")))
-		if action != "" && action != "route" {
-			return fmt.Errorf("route rule references removed block outbound %q while using action %q", tag, action)
-		}
-		delete(rule, "outbound")
-		rule["action"] = "reject"
-	}
-
-	switch nested := rule["rules"].(type) {
-	case []map[string]any:
-		for _, child := range nested {
-			if err := rewriteLegacyBlockRule(child, blockTags); err != nil {
-				return err
-			}
-		}
-	case []any:
-		for _, item := range nested {
-			child, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if err := rewriteLegacyBlockRule(child, blockTags); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func rewriteLegacyBlockRules(route map[string]any, blockTags map[string]struct{}) error {
-	if len(blockTags) == 0 || route == nil {
-		return nil
-	}
-
-	switch rules := route["rules"].(type) {
-	case []map[string]any:
-		for _, rule := range rules {
-			if err := rewriteLegacyBlockRule(rule, blockTags); err != nil {
-				return err
-			}
-		}
-	case []any:
-		for _, item := range rules {
-			rule, ok := item.(map[string]any)
-			if !ok {
-				continue
-			}
-			if err := rewriteLegacyBlockRule(rule, blockTags); err != nil {
-				return err
-			}
-		}
-	}
-
-	if final := strings.TrimSpace(rawString(route, "final")); final != "" && hasLegacyBlockTag(final, blockTags) {
-		var rules []any
-		switch existing := route["rules"].(type) {
-		case []any:
-			rules = append(existing, map[string]any{"action": "reject"})
-		case []map[string]any:
-			rules = make([]any, 0, len(existing)+1)
-			for _, rule := range existing {
-				rules = append(rules, rule)
-			}
-			rules = append(rules, map[string]any{"action": "reject"})
-		case nil:
-			rules = []any{map[string]any{"action": "reject"}}
-		default:
-			return fmt.Errorf("route rules have unsupported type while migrating final block outbound %q", final)
-		}
-		route["rules"] = rules
-		delete(route, "final")
-	}
-	return nil
-}
-
-func stringListContainsTag(value any, tags map[string]struct{}) (string, bool) {
-	switch list := value.(type) {
-	case []string:
-		for _, tag := range list {
-			if hasLegacyBlockTag(tag, tags) {
-				return tag, true
-			}
-		}
-	case []any:
-		for _, item := range list {
-			tag, ok := item.(string)
-			if ok && hasLegacyBlockTag(tag, tags) {
-				return tag, true
-			}
-		}
-	}
-	return "", false
-}
-
-func validateNoLegacyBlockDependency(item map[string]any, kind string, blockTags map[string]struct{}) error {
-	if tag := strings.TrimSpace(rawString(item, "detour")); tag != "" && hasLegacyBlockTag(tag, blockTags) {
-		return fmt.Errorf("sing-box %s %q uses removed block outbound %q as detour", kind, rawString(item, "tag"), tag)
-	}
-	if tag, exists := stringListContainsTag(item["outbounds"], blockTags); exists {
-		return fmt.Errorf("sing-box %s %q references removed block outbound %q in outbounds list", kind, rawString(item, "tag"), tag)
-	}
-	return nil
-}
-
 func (c *Config) MarshalJSON() ([]byte, error) {
 	if c == nil {
 		return []byte("null"), nil
@@ -567,7 +418,7 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 	clone := configJSON(*c)
 	clone.Outbounds = make([]map[string]any, 0, len(c.Outbounds))
 	clone.Endpoints = make([]map[string]any, 0, len(c.Endpoints))
-	clone.Route = cloneConfigMap(c.Route)
+	clone.Route = maps.Clone(c.Route)
 	if hasDNSServerTag(c.DNS, "local") {
 		if clone.Route == nil {
 			clone.Route = map[string]any{}
@@ -577,26 +428,13 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		}
 	}
 	seen := make(map[string]string, len(c.Outbounds)+len(c.Endpoints))
-	blockTags := make(map[string]struct{})
 
 	for _, source := range c.Outbounds {
 		outbound := maps.Clone(source)
-		protocol := strings.ToLower(strings.TrimSpace(rawString(outbound, "type")))
-		tag := strings.TrimSpace(rawString(outbound, "tag"))
-		if protocol == "block" {
-			if tag == "" {
-				return nil, fmt.Errorf("legacy sing-box block outbound has an empty tag")
-			}
-			if previous, exists := seen[tag]; exists {
-				return nil, fmt.Errorf("duplicate sing-box tag %q used by %s and legacy block outbound", tag, previous)
-			}
-			seen[tag] = "legacy block outbound"
-			blockTags[tag] = struct{}{}
-			continue
-		}
 		if err := validateSingBoxOutbound(outbound); err != nil {
 			return nil, err
 		}
+		tag := rawString(outbound, "tag")
 		if tag != "" {
 			if previous, exists := seen[tag]; exists {
 				return nil, fmt.Errorf("duplicate sing-box tag %q used by %s and outbound", tag, previous)
@@ -606,20 +444,8 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		clone.Outbounds = append(clone.Outbounds, outbound)
 	}
 
-	if err := rewriteLegacyBlockRules(clone.Route, blockTags); err != nil {
-		return nil, err
-	}
-	for _, outbound := range clone.Outbounds {
-		if err := validateNoLegacyBlockDependency(outbound, "outbound", blockTags); err != nil {
-			return nil, err
-		}
-	}
-
 	for _, source := range c.Endpoints {
 		endpoint := maps.Clone(source)
-		if err := validateNoLegacyBlockDependency(endpoint, "endpoint", blockTags); err != nil {
-			return nil, err
-		}
 		if err := validateSingBoxEndpoint(endpoint); err != nil {
 			return nil, err
 		}
