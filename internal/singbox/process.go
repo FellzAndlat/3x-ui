@@ -357,8 +357,6 @@ func (p *Process) stopLocked() error {
 		if externalPID <= 0 {
 			return nil
 		}
-		// Re-check immediately before signalling. A cached PID can be reused by
-		// an unrelated process after sing-box exits.
 		if !processMatchesBinary(externalPID, binary) {
 			p.clearExternalPID(externalPID)
 			return nil
@@ -368,9 +366,44 @@ func (p *Process) stopLocked() error {
 			return err
 		}
 		if err := proc.Signal(os.Interrupt); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			_ = proc.Kill()
+			// Never escalate a cached PID without verifying it still points at
+			// the configured sing-box binary. The PID may have been reused after
+			// the identity check above.
+			if !processMatchesBinary(externalPID, binary) {
+				p.clearExternalPID(externalPID)
+				return nil
+			}
+			if killErr := proc.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+				return fmt.Errorf("force stop external sing-box process %d: %w", externalPID, killErr)
+			}
+			if !p.waitForExternalExit(externalPID, defaultForceStopTimeout) {
+				return fmt.Errorf("external sing-box process %d did not exit after force stop", externalPID)
+			}
+			p.setErr(nil)
+			return nil
 		}
-		p.waitForExternalExit(externalPID, defaultGracefulStopTimeout)
+		if p.waitForExternalExit(externalPID, defaultGracefulStopTimeout) {
+			p.setErr(nil)
+			return nil
+		}
+		// Graceful shutdown timed out. Revalidate immediately before SIGKILL so
+		// a PID recycled during the wait cannot cause an unrelated process to be
+		// terminated.
+		if !processMatchesBinary(externalPID, binary) {
+			p.clearExternalPID(externalPID)
+			p.setErr(nil)
+			return nil
+		}
+		proc, err = os.FindProcess(externalPID)
+		if err != nil {
+			return err
+		}
+		if err := proc.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return fmt.Errorf("force stop external sing-box process %d: %w", externalPID, err)
+		}
+		if !p.waitForExternalExit(externalPID, defaultForceStopTimeout) {
+			return fmt.Errorf("external sing-box process %d did not exit after force stop", externalPID)
+		}
 		p.setErr(nil)
 		return nil
 	}
