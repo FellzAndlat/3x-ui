@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-const clashAPIAddress = "http://127.0.0.1:10090"
-
 type ClashConnection struct {
 	ID       string        `json:"id"`
 	Upload   int64         `json:"upload"`
@@ -78,7 +76,13 @@ func clashAPIInfoFromConfig() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("read sing-box config: %w", err)
 	}
+	return clashAPIInfo(data)
+}
 
+// clashAPIInfo derives the controller endpoint from the effective runtime
+// configuration. No implicit fallback is used here: according to sing-box,
+// an omitted or empty external_controller means the Clash API is disabled.
+func clashAPIInfo(data []byte) (string, string, error) {
 	type clashAPIConfig struct {
 		ExternalController *string `json:"external_controller"`
 		Secret             string  `json:"secret"`
@@ -92,12 +96,12 @@ func clashAPIInfoFromConfig() (string, string, error) {
 		return "", "", fmt.Errorf("parse sing-box config: %w", err)
 	}
 	if cfg.Experimental.ClashAPI == nil {
-		return clashAPIAddress, "", nil
+		return "", "", nil
 	}
 
 	secret := cfg.Experimental.ClashAPI.Secret
 	if cfg.Experimental.ClashAPI.ExternalController == nil {
-		return clashAPIAddress, secret, nil
+		return "", secret, nil
 	}
 	controller := strings.TrimSpace(*cfg.Experimental.ClashAPI.ExternalController)
 	if controller == "" {

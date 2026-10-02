@@ -11,6 +11,41 @@ import (
 	"time"
 )
 
+func TestClashAPIInfoUsesOnlyConfiguredController(t *testing.T) {
+	tests := []struct {
+		name       string
+		config     string
+		wantURL    string
+		wantSecret string
+		wantErr    string
+	}{
+		{name: "no experimental block", config: `{}`},
+		{name: "no clash api block", config: `{"experimental":{}}`},
+		{name: "no controller", config: `{"experimental":{"clash_api":{"secret":"unused"}}}`, wantSecret: "unused"},
+		{name: "empty controller", config: `{"experimental":{"clash_api":{"external_controller":"","secret":"unused"}}}`, wantSecret: "unused"},
+		{name: "loopback controller", config: `{"experimental":{"clash_api":{"external_controller":"127.0.0.1:10090","secret":"panel-secret"}}}`, wantURL: "http://127.0.0.1:10090", wantSecret: "panel-secret"},
+		{name: "malformed json", config: `{`, wantErr: "parse sing-box config"},
+		{name: "invalid controller", config: `{"experimental":{"clash_api":{"external_controller":"bad"}}}`, wantErr: "invalid sing-box Clash API controller"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotURL, gotSecret, err := clashAPIInfo([]byte(tc.config))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("clashAPIInfo error = %v, want containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("clashAPIInfo returned error: %v", err)
+			}
+			if gotURL != tc.wantURL || gotSecret != tc.wantSecret {
+				t.Fatalf("clashAPIInfo = (%q, %q), want (%q, %q)", gotURL, gotSecret, tc.wantURL, tc.wantSecret)
+			}
+		})
+	}
+}
+
 func TestClashControllerURL(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -139,7 +174,7 @@ func TestConnectionsReportsAPIError(t *testing.T) {
 }
 
 func TestProxyDelayRejectsInvalidURL(t *testing.T) {
-	client := NewClashStatsClient()
+	client := &ClashStatsClient{client: &http.Client{}, baseURL: "http://127.0.0.1:10090"}
 	for _, raw := range []string{"", "example.com", "file:///etc/passwd", "ftp://example.com/file"} {
 		if _, err := client.ProxyDelay(context.Background(), "proxy", raw, time.Second); err == nil {
 			t.Fatalf("expected URL %q to be rejected", raw)
