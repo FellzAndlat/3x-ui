@@ -131,22 +131,10 @@ func parsePanelPortSelector(value string) ([]int, []string, error) {
 			continue
 		}
 		if strings.Contains(token, ":") {
-			parts := strings.Split(token, ":")
-			if len(parts) != 2 {
-				return nil, nil, fmt.Errorf("invalid port range %q", token)
-			}
-			start, err := parseRuntimePort(parts[0])
+			normalized, err := parseRuntimePortRange(token)
 			if err != nil {
-				return nil, nil, fmt.Errorf("invalid port range %q: %w", token, err)
+				return nil, nil, err
 			}
-			end, err := parseRuntimePort(parts[1])
-			if err != nil {
-				return nil, nil, fmt.Errorf("invalid port range %q: %w", token, err)
-			}
-			if start > end {
-				return nil, nil, fmt.Errorf("invalid port range %q: start exceeds end", token)
-			}
-			normalized := strconv.Itoa(start) + ":" + strconv.Itoa(end)
 			if _, exists := seenRanges[normalized]; !exists {
 				seenRanges[normalized] = struct{}{}
 				ranges = append(ranges, normalized)
@@ -164,6 +152,42 @@ func parsePanelPortSelector(value string) ([]int, []string, error) {
 		}
 	}
 	return ports, ranges, nil
+}
+
+func parseRuntimePortRange(value string) (string, error) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid port range %q", value)
+	}
+
+	startText := strings.TrimSpace(parts[0])
+	endText := strings.TrimSpace(parts[1])
+	if startText == "" && endText == "" {
+		return "", fmt.Errorf("invalid port range %q", value)
+	}
+
+	start := 0
+	end := 0
+	if startText != "" {
+		parsed, err := parseRuntimePort(startText)
+		if err != nil {
+			return "", fmt.Errorf("invalid port range %q: %w", value, err)
+		}
+		start = parsed
+		startText = strconv.Itoa(parsed)
+	}
+	if endText != "" {
+		parsed, err := parseRuntimePort(endText)
+		if err != nil {
+			return "", fmt.Errorf("invalid port range %q: %w", value, err)
+		}
+		end = parsed
+		endText = strconv.Itoa(parsed)
+	}
+	if start != 0 && end != 0 && start > end {
+		return "", fmt.Errorf("invalid port range %q: start exceeds end", value)
+	}
+	return startText + ":" + endText, nil
 }
 
 func parseRuntimePort(value string) (int, error) {
