@@ -39,9 +39,17 @@ func normalizeOutboundsForRuntime(outbounds []map[string]any) ([]map[string]any,
 				return nil, fmt.Errorf("outbounds[%d].transport: %w", index, err)
 			}
 		case "quic":
-			// service_name is a gRPC option. Older panel builds accidentally
-			// exposed it for QUIC too, where sing-box rejects the field.
-			delete(transport, "service_name")
+			// Current sing-box QUIC transport has no protocol-specific options.
+			// The editor intentionally keeps the previous transport object when a
+			// user changes its type, so switching HTTP/WS/gRPC -> QUIC can leave
+			// stale path/headers/host/service_name fields behind. Strict sing-box
+			// decoding rejects those fields. Preserve only the discriminator in
+			// the runtime copy while leaving the stored editor template untouched.
+			for key := range transport {
+				if key != "type" {
+					delete(transport, key)
+				}
+			}
 		}
 	}
 	return normalized, nil
