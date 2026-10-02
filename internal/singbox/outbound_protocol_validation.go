@@ -15,6 +15,14 @@ func finalizeTranslatedOutbound(out map[string]any, protocol string, settings, s
 	}
 
 	switch protocol {
+	case "freedom":
+		if err := validateFreedomTranslation(tag, settings, streamSettings); err != nil {
+			return err
+		}
+	case "blackhole":
+		if err := validateBlackholeTranslation(tag, settings); err != nil {
+			return err
+		}
 	case "shadowsocks":
 		method := strings.TrimSpace(rawString(out, "method"))
 		if method == "" {
@@ -61,4 +69,46 @@ func finalizeTranslatedOutbound(out map[string]any, protocol string, settings, s
 		}
 	}
 	return nil
+}
+
+func validateFreedomTranslation(tag string, settings, streamSettings map[string]any) error {
+	if value := strings.TrimSpace(rawString(settings, "redirect")); value != "" {
+		return fmt.Errorf("outbound %q Freedom redirect %q cannot be represented safely by sing-box direct", tag, value)
+	}
+	if rawInt(settings, "userLevel") != 0 {
+		return fmt.Errorf("outbound %q Freedom userLevel is not supported by sing-box direct", tag)
+	}
+	if rawInt(settings, "proxyProtocol") != 0 {
+		return fmt.Errorf("outbound %q Freedom proxyProtocol is not supported by sing-box direct", tag)
+	}
+	if fragment := rawObject(settings, "fragment"); len(fragment) > 0 {
+		return fmt.Errorf("outbound %q Freedom fragment cannot be represented by sing-box direct", tag)
+	}
+	if values, ok := settings["noises"].([]any); ok && len(values) > 0 {
+		return fmt.Errorf("outbound %q Freedom noises cannot be represented by sing-box direct", tag)
+	}
+	if values, ok := settings["finalRules"].([]any); ok && len(values) > 0 {
+		return fmt.Errorf("outbound %q Freedom finalRules cannot be represented by sing-box direct", tag)
+	}
+
+	for _, source := range []map[string]any{settings, rawObject(streamSettings, "sockopt")} {
+		strategy := strings.TrimSpace(rawString(source, "domainStrategy"))
+		if strategy != "" && !strings.EqualFold(strategy, "AsIs") {
+			return fmt.Errorf("outbound %q Freedom domainStrategy %q is not translated to sing-box direct", tag, strategy)
+		}
+	}
+	return nil
+}
+
+func validateBlackholeTranslation(tag string, settings map[string]any) error {
+	response := rawObject(settings, "response")
+	responseType := strings.ToLower(strings.TrimSpace(rawString(response, "type")))
+	switch responseType {
+	case "", "none":
+		return nil
+	case "http", "custom":
+		return fmt.Errorf("outbound %q Blackhole response type %q cannot be represented by sing-box block", tag, responseType)
+	default:
+		return fmt.Errorf("outbound %q has unsupported Blackhole response type %q", tag, responseType)
+	}
 }
