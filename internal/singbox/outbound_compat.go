@@ -226,6 +226,23 @@ func translateOutboundSockopt(out map[string]any, stream map[string]any, tag str
 	return nil
 }
 
+func ensureOutboundDomainResolver(out map[string]any) {
+	if _, exists := out["domain_resolver"]; exists {
+		return
+	}
+	if strings.TrimSpace(rawString(out, "detour")) != "" {
+		return
+	}
+	server := strings.TrimSpace(rawString(out, "server"))
+	if server == "" {
+		return
+	}
+	if ip := net.ParseIP(strings.Trim(server, "[]")); ip != nil {
+		return
+	}
+	out["domain_resolver"] = "local"
+}
+
 func ensureRequiredOutboundTLS(out map[string]any, protocol string) {
 	if protocol != "tuic" {
 		return
@@ -284,5 +301,9 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 	if err := translateSendThrough(out, raw, tag); err != nil {
 		return err
 	}
-	return translateOutboundSockopt(out, stream, tag)
+	if err := translateOutboundSockopt(out, stream, tag); err != nil {
+		return err
+	}
+	ensureOutboundDomainResolver(out)
+	return nil
 }
