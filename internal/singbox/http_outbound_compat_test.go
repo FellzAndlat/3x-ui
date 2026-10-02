@@ -6,6 +6,10 @@ import (
 )
 
 func TestTranslateXrayHTTPOutboundPreservesHeaders(t *testing.T) {
+	sourceHeaders := map[string]any{
+		"X-Proxy-Token": "token",
+		"User-Agent":    "3x-ui",
+	}
 	raw := map[string]any{
 		"protocol": "http",
 		"tag":      "corp-http",
@@ -18,10 +22,7 @@ func TestTranslateXrayHTTPOutboundPreservesHeaders(t *testing.T) {
 					"pass": "secret",
 				}},
 			}},
-			"headers": map[string]any{
-				"X-Proxy-Token": "token",
-				"User-Agent":    "3x-ui",
-			},
+			"headers": sourceHeaders,
 		},
 	}
 
@@ -38,7 +39,7 @@ func TestTranslateXrayHTTPOutboundPreservesHeaders(t *testing.T) {
 	}
 
 	// Translation must not retain a mutable reference to the Xray config.
-	wantHeaders["X-Proxy-Token"] = "changed"
+	sourceHeaders["X-Proxy-Token"] = "changed"
 	if gotHeaders := got["headers"].(map[string]any); gotHeaders["X-Proxy-Token"] != "token" {
 		t.Fatalf("translated headers changed through source alias: %#v", gotHeaders)
 	}
