@@ -180,6 +180,12 @@ func runtimeStringSlice(value any) ([]string, error) {
 		return nil, nil
 	}
 	switch items := value.(type) {
+	case string:
+		items = strings.TrimSpace(items)
+		if items == "" {
+			return nil, nil
+		}
+		return []string{items}, nil
 	case []string:
 		return append([]string(nil), items...), nil
 	case []any:
@@ -193,7 +199,7 @@ func runtimeStringSlice(value any) ([]string, error) {
 		}
 		return result, nil
 	default:
-		return nil, fmt.Errorf("must be an array")
+		return nil, fmt.Errorf("must be a string or array")
 	}
 }
 
