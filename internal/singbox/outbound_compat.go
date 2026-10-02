@@ -310,6 +310,55 @@ func ensureOutboundDomainResolver(out map[string]any) {
 	out["domain_resolver"] = "local"
 }
 
+func wireGuardPeerUsesDomain(peer map[string]any) bool {
+	address := strings.TrimSpace(rawString(peer, "address"))
+	if address == "" {
+		return false
+	}
+	return net.ParseIP(strings.Trim(address, "[]")) == nil
+}
+
+func ensureWireGuardEndpointDomainResolver(endpoint map[string]any) {
+	if _, exists := endpoint["domain_resolver"]; exists {
+		return
+	}
+	if strings.TrimSpace(rawString(endpoint, "detour")) != "" {
+		return
+	}
+	switch peers := endpoint["peers"].(type) {
+	case []map[string]any:
+		for _, peer := range peers {
+			if wireGuardPeerUsesDomain(peer) {
+				endpoint["domain_resolver"] = "local"
+				return
+			}
+		}
+	case []any:
+		for _, item := range peers {
+			peer, ok := item.(map[string]any)
+			if ok && wireGuardPeerUsesDomain(peer) {
+				endpoint["domain_resolver"] = "local"
+				return
+			}
+		}
+	}
+}
+
+func applyXrayWireGuardEndpointCompatibility(endpoint map[string]any, raw map[string]any) error {
+	tag := rawString(raw, "tag")
+	if err := validateXrayOutboundOnlyOptions(raw, "wireguard", tag); err != nil {
+		return err
+	}
+	if err := translateSendThrough(endpoint, raw, tag); err != nil {
+		return err
+	}
+	if err := translateOutboundSockopt(endpoint, rawObject(raw, "streamSettings"), tag); err != nil {
+		return err
+	}
+	ensureWireGuardEndpointDomainResolver(endpoint)
+	return nil
+}
+
 func ensureRequiredOutboundTLS(out map[string]any, protocol string) {
 	if protocol != "tuic" {
 		return
