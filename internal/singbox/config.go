@@ -334,6 +334,9 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 	if err := translateStream(out, singProtocol, streamSettings, false); err != nil {
 		return nil, err
 	}
+	if err := finalizeTranslatedOutbound(out, singProtocol, settings, streamSettings); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
