@@ -210,13 +210,9 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 		if version == 0 {
 			version = 2
 		}
-		isHysteria2 := protocol == "hysteria2" || (protocol == "hysteria" && version == 2)
-		serverPorts := []string(nil)
-		if isHysteria2 {
-			serverPorts = compatStringSlice(hySettings["server_ports"])
-			if len(serverPorts) == 0 {
-				serverPorts = compatStringSlice(hySettings["serverPorts"])
-			}
+		serverPorts := compatStringSlice(hySettings["server_ports"])
+		if len(serverPorts) == 0 {
+			serverPorts = compatStringSlice(hySettings["serverPorts"])
 		}
 		out["server"] = address
 		if len(serverPorts) > 0 {
@@ -301,6 +297,14 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 			}
 		default:
 			return nil, fmt.Errorf("outbound %q has unsupported Hysteria version %d", tag, version)
+		}
+	}
+	if singProtocol == "hysteria" {
+		hySettings := rawObject(streamSettings, "hysteriaSettings")
+		if value, ok := hySettings["hop_interval"]; ok {
+			out["hop_interval"] = value
+		} else if value, ok := hySettings["hopInterval"]; ok {
+			out["hop_interval"] = value
 		}
 	}
 	if singProtocol == "hysteria2" {
