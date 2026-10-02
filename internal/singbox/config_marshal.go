@@ -72,15 +72,37 @@ func singBoxOutboundSupportsV2RayTransport(protocol string) bool {
 	}
 }
 
+func validateHysteria2Realm(outbound map[string]any, tag string) error {
+	realm := rawObject(outbound, "realm")
+	if len(realm) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(rawString(outbound, "server")) != "" || rawInt(outbound, "server_port") != 0 || stringSliceLength(outbound["server_ports"]) > 0 {
+		return fmt.Errorf("sing-box outbound %q Hysteria2 Realm conflicts with server, server_port and server_ports", tag)
+	}
+	if strings.TrimSpace(rawString(realm, "server_url")) == "" {
+		return fmt.Errorf("sing-box outbound %q Hysteria2 Realm requires server_url", tag)
+	}
+	if strings.TrimSpace(rawString(realm, "realm_id")) == "" {
+		return fmt.Errorf("sing-box outbound %q Hysteria2 Realm requires realm_id", tag)
+	}
+	if stringSliceLength(realm["stun_servers"]) == 0 {
+		return fmt.Errorf("sing-box outbound %q Hysteria2 Realm requires at least one STUN server", tag)
+	}
+	return nil
+}
+
 func validateSingBoxServer(outbound map[string]any, protocol, tag string) error {
+	if protocol == "hysteria2" {
+		if realm := rawObject(outbound, "realm"); len(realm) > 0 {
+			return validateHysteria2Realm(outbound, tag)
+		}
+	}
 	if rawString(outbound, "server") == "" {
 		return fmt.Errorf("sing-box outbound %q protocol %s requires a server", tag, protocol)
 	}
-	if protocol == "hysteria2" {
-		if ports, ok := outbound["server_ports"].([]string); ok && len(ports) > 0 {
-			return nil
-		}
-		if ports, ok := outbound["server_ports"].([]any); ok && len(ports) > 0 {
+	if protocol == "hysteria" || protocol == "hysteria2" {
+		if stringSliceLength(outbound["server_ports"]) > 0 {
 			return nil
 		}
 	}
