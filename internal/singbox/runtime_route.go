@@ -46,22 +46,30 @@ func normalizeRuntimeRuleList(value any, path string) ([]any, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s[%d] must be an object", path, index)
 		}
+		rulePath := fmt.Sprintf("%s[%d]", path, index)
 
 		// comment is panel-only metadata. sing-box uses strict JSON decoding and
 		// rejects unknown route-rule fields.
 		delete(rule, "comment")
 
-		if err := normalizeRuntimePortField(rule, "port", "port_range", fmt.Sprintf("%s[%d]", path, index)); err != nil {
+		// "selector" used to be exposed by the panel as a route action, but it
+		// is an outbound type rather than a sing-box route action. Reject it here
+		// instead of writing a configuration that can never start.
+		if action, ok := rule["action"].(string); ok && strings.EqualFold(strings.TrimSpace(action), "selector") {
+			return nil, fmt.Errorf("%s.action %q is not a sing-box route action; use route with an outbound tag", rulePath, action)
+		}
+
+		if err := normalizeRuntimePortField(rule, "port", "port_range", rulePath); err != nil {
 			return nil, err
 		}
-		if err := normalizeRuntimePortField(rule, "source_port", "source_port_range", fmt.Sprintf("%s[%d]", path, index)); err != nil {
+		if err := normalizeRuntimePortField(rule, "source_port", "source_port_range", rulePath); err != nil {
 			return nil, err
 		}
 
 		// Logical route rules contain another rules array. Normalize recursively
 		// so panel metadata never leaks through nested AND/OR groups either.
 		if nested, exists := rule["rules"]; exists {
-			normalizedNested, err := normalizeRuntimeRuleList(nested, fmt.Sprintf("%s[%d].rules", path, index))
+			normalizedNested, err := normalizeRuntimeRuleList(nested, rulePath+".rules")
 			if err != nil {
 				return nil, err
 			}
