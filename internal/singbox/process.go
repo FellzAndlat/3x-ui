@@ -98,9 +98,12 @@ func (p *Process) IsRunning() bool {
 			return true
 		}
 	}
-	if externalPID > 0 && processExists(externalPID) {
-		p.clearErrorWhileRunning()
-		return true
+	if externalPID > 0 {
+		if processMatchesBinary(externalPID, GetBinaryPath()) {
+			p.clearErrorWhileRunning()
+			return true
+		}
+		p.clearExternalPID(externalPID)
 	}
 	if pid := findRunningPID(GetBinaryPath()); pid > 0 {
 		p.mu.Lock()
@@ -110,6 +113,14 @@ func (p *Process) IsRunning() bool {
 		return true
 	}
 	return false
+}
+
+func (p *Process) clearExternalPID(pid int) {
+	p.mu.Lock()
+	if p.externalPID == pid {
+		p.externalPID = 0
+	}
+	p.mu.Unlock()
 }
 
 func (p *Process) clearErrorWhileRunning() {
@@ -161,14 +172,34 @@ func (p *Process) GetStartTime() time.Time {
 // GetUptime returns the uptime of the sing-box process in seconds.
 func (p *Process) GetUptime() uint64 {
 	p.mu.RLock()
-	startTime, externalPID := p.startTime, p.externalPID
+	startTime, externalPID, cmd, done := p.startTime, p.externalPID, p.cmd, p.done
 	p.mu.RUnlock()
 
-	if !startTime.IsZero() {
-		return uint64(time.Since(startTime).Seconds())
+	if !startTime.IsZero() && cmd != nil && cmd.Process != nil {
+		running := true
+		if done != nil {
+			select {
+			case <-done:
+				running = false
+			default:
+			}
+		}
+		if running {
+			return uint64(time.Since(startTime).Seconds())
+		}
+	}
+
+	if externalPID > 0 && !processMatchesBinary(externalPID, GetBinaryPath()) {
+		p.clearExternalPID(externalPID)
+		externalPID = 0
 	}
 	if externalPID <= 0 {
 		externalPID = findRunningPID(GetBinaryPath())
+		if externalPID > 0 {
+			p.mu.Lock()
+			p.externalPID = externalPID
+			p.mu.Unlock()
+		}
 	}
 	if externalPID <= 0 {
 		return 0
@@ -315,10 +346,21 @@ func (p *Process) stopLocked() error {
 	cmd, done, externalPID := p.cmd, p.done, p.externalPID
 	p.mu.RUnlock()
 	if cmd == nil || cmd.Process == nil {
-		if externalPID <= 0 {
-			externalPID = findRunningPID(GetBinaryPath())
+		binary := GetBinaryPath()
+		if externalPID > 0 && !processMatchesBinary(externalPID, binary) {
+			p.clearExternalPID(externalPID)
+			externalPID = 0
 		}
 		if externalPID <= 0 {
+			externalPID = findRunningPID(binary)
+		}
+		if externalPID <= 0 {
+			return nil
+		}
+		// Re-check immediately before signalling. A cached PID can be reused by
+		// an unrelated process after sing-box exits.
+		if !processMatchesBinary(externalPID, binary) {
+			p.clearExternalPID(externalPID)
 			return nil
 		}
 		proc, err := os.FindProcess(externalPID)
@@ -363,19 +405,20 @@ func (p *Process) Restart(ctx context.Context) error {
 }
 
 func (p *Process) waitForExternalExit(pid int, timeout time.Duration) bool {
+	binary := GetBinaryPath()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !processExists(pid) {
-			p.mu.Lock()
-			if p.externalPID == pid {
-				p.externalPID = 0
-			}
-			p.mu.Unlock()
+		if !processMatchesBinary(pid, binary) {
+			p.clearExternalPID(pid)
 			return true
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return !processExists(pid)
+	if !processMatchesBinary(pid, binary) {
+		p.clearExternalPID(pid)
+		return true
+	}
+	return false
 }
 
 func processExists(pid int) bool {
@@ -392,6 +435,40 @@ func processExists(pid int) bool {
 	return proc.Signal(nil) == nil
 }
 
+func processMatchesBinary(pid int, binary string) bool {
+	if pid <= 0 || runtime.GOOS != "linux" {
+		return false
+	}
+
+	binary = filepath.Clean(resolvePath(binary))
+	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
+		binary = filepath.Clean(resolved)
+	}
+
+	procDir := filepath.Join("/proc", strconv.Itoa(pid))
+	if exe, err := os.Readlink(filepath.Join(procDir, "exe")); err == nil {
+		exe = strings.TrimSuffix(exe, " (deleted)")
+		return filepath.Clean(exe) == binary
+	}
+
+	// /proc/<pid>/exe can be unavailable under restrictive procfs settings.
+	// Fall back to argv[0], but only when the stronger executable check could
+	// not be read at all.
+	cmdline, err := os.ReadFile(filepath.Join(procDir, "cmdline"))
+	if err != nil {
+		return false
+	}
+	args := strings.Split(string(cmdline), "\x00")
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return false
+	}
+	arg0 := filepath.Clean(resolvePath(args[0]))
+	if resolved, err := filepath.EvalSymlinks(arg0); err == nil {
+		arg0 = filepath.Clean(resolved)
+	}
+	return arg0 == binary
+}
+
 func findRunningPID(binary string) int {
 	if runtime.GOOS != "linux" {
 		return 0
@@ -400,7 +477,6 @@ func findRunningPID(binary string) int {
 	if err != nil {
 		return 0
 	}
-	binary = resolvePath(binary)
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -409,16 +485,7 @@ func findRunningPID(binary string) int {
 		if err != nil || pid <= 0 {
 			continue
 		}
-		exe, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
-		if err == nil && filepath.Clean(exe) == filepath.Clean(binary) {
-			return pid
-		}
-		cmdline, err := os.ReadFile(filepath.Join("/proc", entry.Name(), "cmdline"))
-		if err != nil {
-			continue
-		}
-		args := strings.Split(string(cmdline), "\x00")
-		if len(args) > 0 && filepath.Clean(resolvePath(args[0])) == filepath.Clean(binary) {
+		if processMatchesBinary(pid, binary) {
 			return pid
 		}
 	}
