@@ -213,6 +213,7 @@ func (p *Process) Validate(ctx context.Context) error {
 		p.setErr(err)
 		return err
 	}
+	p.setErr(nil)
 	return nil
 }
 
