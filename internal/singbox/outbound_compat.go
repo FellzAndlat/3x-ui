@@ -112,6 +112,42 @@ func translateTUICOutboundOptions(out map[string]any, settings map[string]any) {
 	}
 }
 
+func translateGRPCTransportCompatibility(out map[string]any, stream map[string]any, tag string) error {
+	transport, ok := out["transport"].(map[string]any)
+	if !ok || !strings.EqualFold(strings.TrimSpace(rawString(transport, "type")), "grpc") {
+		return nil
+	}
+	grpc := rawObject(stream, "grpcSettings")
+	if len(grpc) == 0 {
+		return nil
+	}
+	if authority := strings.TrimSpace(rawString(grpc, "authority")); authority != "" {
+		return fmt.Errorf("outbound %q uses Xray gRPC authority %q which sing-box V2Ray gRPC transport cannot represent", tag, authority)
+	}
+	if userAgent := strings.TrimSpace(rawString(grpc, "user_agent")); userAgent != "" {
+		return fmt.Errorf("outbound %q uses Xray gRPC user_agent which sing-box V2Ray gRPC transport cannot represent", tag)
+	}
+	if xrayBool(grpc, "multiMode") {
+		return fmt.Errorf("outbound %q enables Xray gRPC multiMode which is not wire-compatible with sing-box gRPC transport", tag)
+	}
+	if window := rawInt(grpc, "initial_windows_size"); window > 0 {
+		return fmt.Errorf("outbound %q uses Xray gRPC initial_windows_size=%d which sing-box V2Ray gRPC transport cannot represent", tag, window)
+	}
+	if idle := rawInt(grpc, "idle_timeout"); idle > 0 {
+		if idle < 10 {
+			idle = 10
+		}
+		transport["idle_timeout"] = fmt.Sprintf("%ds", idle)
+	}
+	if timeout := rawInt(grpc, "health_check_timeout"); timeout > 0 {
+		transport["ping_timeout"] = fmt.Sprintf("%ds", timeout)
+	}
+	if permit, ok := grpc["permit_without_stream"].(bool); ok {
+		transport["permit_without_stream"] = permit
+	}
+	return nil
+}
+
 func xrayV2RayUser(settings map[string]any) map[string]any {
 	server := firstObject(settings, "vnext")
 	if server == nil {
@@ -423,6 +459,9 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 	ensureRequiredOutboundTLS(out, protocol)
 	if rawString(out, "type") == "block" {
 		return nil
+	}
+	if err := translateGRPCTransportCompatibility(out, stream, tag); err != nil {
+		return err
 	}
 	if err := translateSendThrough(out, raw, tag); err != nil {
 		return err
