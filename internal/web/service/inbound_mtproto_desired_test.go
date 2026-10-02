@@ -48,7 +48,7 @@ func TestDesiredMtprotoInstancesFiltersDepleted(t *testing.T) {
 		if instances[0].Id != served.Id {
 			t.Fatalf("expected inbound %d, got %d", served.Id, instances[0].Id)
 		}
-		want := []mtproto.SecretEntry{{Name: "alice", Secret: mtprotoTestSecretA}}
+		want := []mtproto.SecretEntry{{Name: "alice", Secret: "00112233445566778899aabbccddeeff"}}
 		if !reflect.DeepEqual(instances[0].Secrets, want) {
 			t.Fatalf("served secrets: got %+v, want %+v", instances[0].Secrets, want)
 		}

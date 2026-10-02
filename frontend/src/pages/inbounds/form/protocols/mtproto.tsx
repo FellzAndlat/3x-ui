@@ -6,12 +6,16 @@ import { FormField } from '@/components/form/rhf';
 import { useOutboundTags } from '@/api/queries/useOutboundTags';
 
 export default function MtprotoFields() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { control } = useFormContext();
   const routeThroughXray = useWatch({ control, name: 'settings.routeThroughXray' }) as
     | boolean
     | undefined;
   const { data: outboundTags } = useOutboundTags({ excludeBlackhole: true });
+  const routeThroughXrayHint = i18n.resolvedLanguage?.startsWith('ru')
+    ? 'Направляет Telegram-трафик этого Telemt inbound через локальный SOCKS-мост Xray, чтобы применялись выбранное исходящее соединение и правила маршрутизации.'
+    : 'Routes this Telemt inbound Telegram traffic through the local Xray SOCKS bridge so the selected outbound and routing rules are applied.';
+
   return (
     <>
       <FormField
@@ -20,26 +24,6 @@ export default function MtprotoFields() {
         tooltip={t('pages.inbounds.form.mtprotoFakeTlsDomainHint')}
       >
         <Input placeholder="www.cloudflare.com" />
-      </FormField>
-      <FormField
-        name={['settings', 'domainFronting', 'ip']}
-        label={t('pages.inbounds.form.mtgDomainFrontingIp')}
-        tooltip={t('pages.inbounds.form.mtgDomainFrontingHint')}
-      >
-        <Input placeholder="127.0.0.1" />
-      </FormField>
-      <FormField
-        name={['settings', 'domainFronting', 'port']}
-        label={t('pages.inbounds.form.mtgDomainFrontingPort')}
-      >
-        <InputNumber min={0} max={65535} placeholder="443" style={{ width: '100%' }} />
-      </FormField>
-      <FormField
-        name={['settings', 'domainFronting', 'proxyProtocol']}
-        label={t('pages.inbounds.form.mtgDomainFrontingProxyProtocol')}
-        valueProp="checked"
-      >
-        <Switch />
       </FormField>
       <FormField
         name={['settings', 'proxyProtocolListener']}
@@ -77,7 +61,7 @@ export default function MtprotoFields() {
       <FormField
         name={['settings', 'routeThroughXray']}
         label={t('pages.inbounds.form.mtgRouteThroughXray')}
-        tooltip={t('pages.inbounds.form.mtgRouteThroughXrayHint')}
+        tooltip={routeThroughXrayHint}
         valueProp="checked"
       >
         <Switch />

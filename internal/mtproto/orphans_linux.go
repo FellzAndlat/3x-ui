@@ -11,22 +11,10 @@ import (
 	"syscall"
 )
 
-// killStrayMtgProcesses terminates orphaned mtg sidecars left over from a
-// previous x-ui run and returns how many were killed.
-//
-// x-ui starts one mtg process per mtproto inbound outside its own lifecycle, and
-// on Linux a child is not guaranteed to die with the panel (there is no
-// kill-on-exit, unlike the Windows job object). A survivor keeps holding the
-// inbound port with a now-stale secret, so new clients are silently
-// domain-fronted to the FakeTLS domain instead of proxied to Telegram. x-ui is
-// the sole owner of mtg, so any process matching our binary name at startup is
-// an orphan and is safe to kill before we start our own.
-//
-// binaryPath is the configured mtg path (e.g. "bin/mtg-linux-amd64"); matching
-// is done on the executable's base name so it is independent of the bin folder
-// and still works after an update has deleted the binary (the running process's
-// /proc/<pid>/exe then reads as "<path> (deleted)", so argv[0] is used too).
-func killStrayMtgProcesses(binaryPath string) int {
+// killStrayTelemtSidecars reaps only Telemt processes owned by the MTProto
+// sidecar manager. Matching the binary name alone is unsafe because the same
+// telemt binary can also be used by telemt.service / WEB Proxy.
+func killStrayTelemtSidecars(binaryPath string) int {
 	base := filepath.Base(binaryPath)
 	if base == "" || base == "." || base == string(filepath.Separator) {
 		return 0
@@ -45,11 +33,33 @@ func killStrayMtgProcesses(binaryPath string) int {
 		if procExeBase(pid) != base && cmdlineArgv0Base(pid) != base {
 			continue
 		}
+		if !isOwnedTelemtSidecar(pid) {
+			continue
+		}
 		if err := syscall.Kill(pid, syscall.SIGKILL); err == nil {
 			killed++
 		}
 	}
 	return killed
+}
+
+func isOwnedTelemtSidecar(pid int) bool {
+	args := cmdlineArgs(pid)
+	if len(args) < 3 || args[1] != "run" {
+		return false
+	}
+	cfg := filepath.Clean(args[2])
+	ownedDir := filepath.Clean(configDir())
+	if filepath.Dir(cfg) != ownedDir {
+		return false
+	}
+	name := filepath.Base(cfg)
+	if !strings.HasPrefix(name, "telemt-") || !strings.HasSuffix(name, ".toml") {
+		return false
+	}
+	id := strings.TrimSuffix(strings.TrimPrefix(name, "telemt-"), ".toml")
+	_, err := strconv.Atoi(id)
+	return err == nil && id != ""
 }
 
 // procExeBase returns the base name of /proc/<pid>/exe, or "" if unreadable.
@@ -58,22 +68,30 @@ func procExeBase(pid int) string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Base(exe)
+	return filepath.Base(strings.TrimSuffix(exe, " (deleted)"))
+}
+
+func cmdlineArgs(pid int) []string {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+	if err != nil || len(data) == 0 {
+		return nil
+	}
+	raw := strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
+	args := make([]string, 0, len(raw))
+	for _, arg := range raw {
+		if arg != "" {
+			args = append(args, arg)
+		}
+	}
+	return args
 }
 
 // cmdlineArgv0Base returns the base name of argv[0] from /proc/<pid>/cmdline,
 // the reliable fallback when the binary has been replaced or exe is unreadable.
 func cmdlineArgv0Base(pid int) string {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-	if err != nil || len(data) == 0 {
+	args := cmdlineArgs(pid)
+	if len(args) == 0 {
 		return ""
 	}
-	argv0 := data
-	if i := strings.IndexByte(string(data), 0); i >= 0 {
-		argv0 = data[:i]
-	}
-	if len(argv0) == 0 {
-		return ""
-	}
-	return filepath.Base(string(argv0))
+	return filepath.Base(args[0])
 }

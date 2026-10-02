@@ -12,16 +12,16 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/web/runtime"
 )
 
-func mtgConfigPath(t *testing.T, inboundId int) string {
+func mtprotoTelemtConfigPath(t *testing.T, inboundId int) string {
 	t.Helper()
-	return filepath.Join(os.Getenv("XUI_BIN_FOLDER"), "mtproto", fmt.Sprintf("mtg-%d.toml", inboundId))
+	return filepath.Join(os.Getenv("XUI_BIN_FOLDER"), "mtproto", fmt.Sprintf("telemt-%d.toml", inboundId))
 }
 
-func readMtgConfig(t *testing.T, inboundId int) string {
+func readTelemtConfig(t *testing.T, inboundId int) string {
 	t.Helper()
-	data, err := os.ReadFile(mtgConfigPath(t, inboundId))
+	data, err := os.ReadFile(mtprotoTelemtConfigPath(t, inboundId))
 	if err != nil {
-		t.Fatalf("read mtg config: %v", err)
+		t.Fatalf("read Telemt config: %v", err)
 	}
 	return string(data)
 }
@@ -44,14 +44,14 @@ func TestUpdateInboundMtprotoUnchangedDoesNotRestart(t *testing.T) {
 	svc := &InboundService{}
 	primed, ok := mtproto.InstanceFromInbound(seeded)
 	if !ok {
-		t.Fatal("seed inbound must produce an mtg instance")
+		t.Fatal("seed inbound must produce a Telemt instance")
 	}
 	if err := mtproto.GetManager().Ensure(primed); err != nil {
-		t.Fatalf("prime mtg: %v", err)
+		t.Fatalf("prime Telemt: %v", err)
 	}
 	t.Cleanup(func() { mtproto.GetManager().Remove(seeded.Id) })
 	waitForSpawns(t, pidFile, 1)
-	primedConfig := readMtgConfig(t, seeded.Id)
+	primedConfig := readTelemtConfig(t, seeded.Id)
 
 	saveAndAssertKept := func(t *testing.T, mutate func(*model.Inbound)) {
 		t.Helper()
@@ -65,7 +65,7 @@ func TestUpdateInboundMtprotoUnchangedDoesNotRestart(t *testing.T) {
 			t.Fatal("an mtproto-only edit must not request an xray restart")
 		}
 		assertNoNewSpawns(t, pidFile, 1)
-		if got := readMtgConfig(t, seeded.Id); got != primedConfig {
+		if got := readTelemtConfig(t, seeded.Id); got != primedConfig {
 			t.Fatalf("config rewritten on a no-op edit:\nbefore:\n%s\nafter:\n%s", primedConfig, got)
 		}
 	}
@@ -92,8 +92,8 @@ func TestUpdateInboundMtprotoUnchangedDoesNotRestart(t *testing.T) {
 			t.Fatal("an mtproto secret change must not request an xray restart")
 		}
 		waitForSpawns(t, pidFile, 2)
-		if got := readMtgConfig(t, seeded.Id); !strings.Contains(got, mtprotoTestSecretD) {
-			t.Fatalf("restarted config must carry the new secret:\n%s", got)
+		if got := readTelemtConfig(t, seeded.Id); !strings.Contains(got, "303132333435363738393a3b3c3d3e3f") {
+			t.Fatalf("restarted Telemt config must carry the normalized base secret:\n%s", got)
 		}
 	})
 }

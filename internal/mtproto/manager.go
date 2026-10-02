@@ -1,7 +1,6 @@
 package mtproto
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -12,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,22 +22,15 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 )
 
-// SecretEntry is one named FakeTLS secret served by an mtg-multi process. Name is
-// the client email, used both as the [secrets] key and as the per-user key in the
-// /stats API so traffic can be attributed back to the client. AdTag is the
-// client's own advertising-tag override, emitted into the [secret-ad-tags]
-// section; empty falls back to the instance-level tag.
 type SecretEntry struct {
 	Name        string
 	Secret      string
 	AdTag       string
 	QuotaBytes  int64
 	ExpiresUnix int64
+	LimitIP     int
 }
 
-// Instance is the desired runtime configuration of one mtproto inbound. A single
-// mtg-multi process serves every active client's secret through the [secrets]
-// section, so one inbound maps to one process with many named secrets.
 type Instance struct {
 	Id      int
 	Tag     string
@@ -45,78 +38,52 @@ type Instance struct {
 	Port    int
 	Secrets []SecretEntry
 
-	// Optional mtg tuning; each is omitted from the generated TOML when
-	// zero-valued so mtg falls back to its own defaults.
-	Debug                 bool
-	ProxyProtocolListener bool
-	PreferIP              string
-	FrontingIP            string
-	FrontingPort          int
-	FrontingProxyProtocol bool
-
-	// ThrottleMaxConnections caps concurrent connections across all users with a
-	// fair-share algorithm; zero disables throttling.
+	Debug                  bool
+	ProxyProtocolListener  bool
+	PreferIP               string
+	FrontingIP             string
+	FrontingPort           int
+	FrontingProxyProtocol  bool
 	ThrottleMaxConnections int
-
-	// PublicIPv4/PublicIPv6 pin the proxy's reachable address the Telegram
-	// middle proxy needs when clients carry advertising tags; they are omitted
-	// when empty so mtg auto-detects, and a change forces a restart.
-	PublicIPv4 string
-	PublicIPv6 string
-
-	// When RouteThroughXray is set, mtg dials Telegram through the loopback
-	// SOCKS bridge the panel injects into the Xray config at XrayRoutePort, so
-	// the egress obeys the core's routing rules instead of going out directly.
-	RouteThroughXray bool
-	XrayRoutePort    int
+	PublicIPv4             string
+	PublicIPv6             string
+	RouteThroughXray       bool
+	XrayRoutePort          int
+	FakeTLSDomain          string
 }
 
 func (inst Instance) bindTo() string {
-	listen := inst.Listen
+	listen := strings.TrimSpace(inst.Listen)
 	if listen == "" {
 		listen = "0.0.0.0"
 	}
 	return fmt.Sprintf("%s:%d", listen, inst.Port)
 }
 
-// structuralFingerprint changes whenever a value outside the [secrets] section
-// of the generated TOML changes. Such a change can only be applied by
-// restarting mtg, unlike a secrets-only change, which a reload-capable mtg can
-// absorb in place.
 func (inst Instance) structuralFingerprint() string {
-	parts := []string{
+	return strings.Join([]string{
 		inst.bindTo(),
 		strconv.FormatBool(inst.Debug),
 		strconv.FormatBool(inst.ProxyProtocolListener),
 		inst.PreferIP,
-		inst.FrontingIP,
-		strconv.Itoa(inst.FrontingPort),
-		strconv.FormatBool(inst.FrontingProxyProtocol),
 		strconv.Itoa(inst.ThrottleMaxConnections),
 		strconv.FormatBool(inst.RouteThroughXray),
 		strconv.Itoa(inst.XrayRoutePort),
 		inst.PublicIPv4,
 		inst.PublicIPv6,
-	}
-	return strings.Join(parts, "|")
+		inst.FakeTLSDomain,
+	}, "|")
 }
 
-// secretsFingerprint identifies the reloadable secret config regardless of
-// client order, so a reordered clients array in the stored settings does not
-// read as a change. It moves whenever a client is added, removed, disabled,
-// re-keyed, re-tagged, or re-limited (quota/expiry) — all of which mtg applies
-// in place without dropping connections.
 func (inst Instance) secretsFingerprint() string {
 	pairs := make([]string, 0, len(inst.Secrets))
 	for _, e := range inst.Secrets {
-		pairs = append(pairs, fmt.Sprintf("%s=%s;tag=%s;q=%d;exp=%d", e.Name, e.Secret, e.AdTag, e.QuotaBytes, e.ExpiresUnix))
+		pairs = append(pairs, fmt.Sprintf("%s=%s;tag=%s;q=%d;exp=%d;ip=%d", e.Name, e.Secret, e.AdTag, e.QuotaBytes, e.ExpiresUnix, e.LimitIP))
 	}
 	slices.Sort(pairs)
 	return strings.Join(pairs, "|")
 }
 
-// Traffic is a per-client traffic delta scraped from an mtg /stats endpoint. Tag
-// is the owning inbound's tag and Email is the client the bytes belong to.
 type Traffic struct {
 	Tag   string
 	Email string
@@ -129,10 +96,6 @@ type clientCounters struct {
 	down int64
 }
 
-// monotonicCounterDelta returns the bytes accumulated since the previous
-// cumulative sample. A lower current value means mtg reset that user's counter
-// (for example after reset-quota), so the current value is traffic accumulated
-// after the reset and must not be discarded.
 func monotonicCounterDelta(current, previous int64) int64 {
 	if current <= 0 {
 		return 0
@@ -153,12 +116,9 @@ type managed struct {
 	last         map[string]clientCounters
 }
 
-// Manager owns the set of running mtg processes keyed by inbound id.
 type Manager struct {
 	mu    sync.Mutex
 	procs map[int]*managed
-	// swept records that the one-time startup cleanup of orphaned mtg
-	// processes (survivors of a previous x-ui run) has already run.
 	swept bool
 }
 
@@ -167,7 +127,6 @@ var (
 	manager     *Manager
 )
 
-// GetManager returns the process-wide mtg manager singleton.
 func GetManager() *Manager {
 	managerOnce.Do(func() {
 		manager = &Manager{procs: map[int]*managed{}}
@@ -175,19 +134,41 @@ func GetManager() *Manager {
 	return manager
 }
 
-// InstanceFromInbound derives a desired Instance from an mtproto inbound,
-// building one named secret per active client. Secrets are healed on save (see
-// normalizeMtprotoSecret) and by the migration, so they are read as-is here to
-// keep the fingerprint stable across reconciles. Returns false when the inbound
-// is not a usable mtproto inbound or has no active client secret to serve.
+// decodeLegacySecret converts a Telegram-link MTProxy secret to Telemt's raw
+// 32-hex user secret and recovers the FakeTLS host embedded after an ee secret.
+func decodeLegacySecret(secret string) (raw, domain string) {
+	s := strings.TrimSpace(secret)
+	if len(s) >= 34 && (strings.HasPrefix(s, "ee") || strings.HasPrefix(s, "dd")) {
+		raw = s[2:34]
+		if strings.HasPrefix(s, "ee") && len(s) > 34 {
+			if b, err := hex.DecodeString(s[34:]); err == nil {
+				domain = strings.TrimSpace(string(b))
+			}
+		}
+		return raw, domain
+	}
+	if len(s) >= 32 {
+		return s[:32], ""
+	}
+	return s, ""
+}
+
+func validRawSecret(secret string) bool {
+	if len(secret) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(secret)
+	return err == nil
+}
+
 func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 	if ib == nil || ib.Protocol != model.MTProto {
 		return Instance{}, false
 	}
-	settings := ib.Settings
 	var parsed struct {
-		ProxyProtocolListener bool `json:"proxyProtocolListener"`
-		Debug                 bool `json:"debug"`
+		ProxyProtocolListener bool   `json:"proxyProtocolListener"`
+		Debug                 bool   `json:"debug"`
+		FakeTLSDomain         string `json:"fakeTlsDomain"`
 		DomainFronting        struct {
 			IP            string `json:"ip"`
 			Port          int    `json:"port"`
@@ -206,24 +187,33 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 			Enable     bool   `json:"enable"`
 			TotalGB    int64  `json:"totalGB"`
 			ExpiryTime int64  `json:"expiryTime"`
+			LimitIP    int    `json:"limitIp"`
 		} `json:"clients"`
 	}
-	if err := json.Unmarshal([]byte(settings), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(ib.Settings), &parsed); err != nil {
 		return Instance{}, false
 	}
 	secrets := make([]SecretEntry, 0, len(parsed.Clients))
+	domain := strings.TrimSpace(parsed.FakeTLSDomain)
 	for _, c := range parsed.Clients {
 		if !c.Enable || c.Secret == "" || c.Email == "" {
 			continue
 		}
-		entry := SecretEntry{Name: c.Email, Secret: c.Secret, AdTag: usableAdTag(c.AdTag)}
+		raw, embeddedDomain := decodeLegacySecret(c.Secret)
+		if !validRawSecret(raw) {
+			continue
+		}
+		if domain == "" && embeddedDomain != "" {
+			domain = embeddedDomain
+		}
+		e := SecretEntry{Name: c.Email, Secret: raw, AdTag: usableAdTag(c.AdTag), LimitIP: max(c.LimitIP, 0)}
 		if c.TotalGB > 0 {
-			entry.QuotaBytes = c.TotalGB
+			e.QuotaBytes = c.TotalGB
 		}
 		if c.ExpiryTime > 0 {
-			entry.ExpiresUnix = c.ExpiryTime / 1000
+			e.ExpiresUnix = c.ExpiryTime / 1000
 		}
-		secrets = append(secrets, entry)
+		secrets = append(secrets, e)
 	}
 	if len(secrets) == 0 {
 		return Instance{}, false
@@ -245,13 +235,10 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 		XrayRoutePort:          parsed.RouteXrayPort,
 		PublicIPv4:             strings.TrimSpace(parsed.PublicIPv4),
 		PublicIPv6:             strings.TrimSpace(parsed.PublicIPv6),
+		FakeTLSDomain:          domain,
 	}, true
 }
 
-// usableAdTag returns a stored advertising tag only when it is well-formed.
-// The save paths validate tags, but settings can arrive from raw API payloads
-// or older data, and one malformed tag in a generated config makes mtg reject
-// the whole file — taking every client of the inbound down with it.
 func usableAdTag(tag string) string {
 	tag = strings.TrimSpace(tag)
 	if !model.ValidMtprotoAdTag(tag) {
@@ -260,8 +247,6 @@ func usableAdTag(tag string) string {
 	return tag
 }
 
-// Ensure starts the mtg process for an instance, or restarts it when its
-// configuration changed. A no-op when the desired process is already running.
 func (m *Manager) Ensure(inst Instance) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -269,23 +254,16 @@ func (m *Manager) Ensure(inst Instance) error {
 	return m.ensureLocked(inst)
 }
 
-// sweepOrphansLocked kills mtg processes left running by a previous x-ui run,
-// exactly once per process lifetime and before any of our own mtg are started.
-// Because x-ui owns every mtg process, anything alive at this point is an orphan
-// that would otherwise keep holding an inbound port with a stale secret.
 func (m *Manager) sweepOrphansLocked() {
 	if m.swept {
 		return
 	}
 	m.swept = true
-	if n := killStrayMtgProcesses(GetBinaryPath()); n > 0 {
-		logger.Warningf("mtproto: terminated %d orphaned mtg process(es) from a previous run", n)
+	if n := killStrayTelemtSidecars(GetBinaryPath()); n > 0 {
+		logger.Warningf("mtproto: terminated %d orphaned Telemt process(es)", n)
 	}
 }
 
-// ensureAction is what ensureLocked must do to move a running mtg process to a
-// desired instance: leave it alone, hot-reload only its secrets, or fully
-// restart it.
 type ensureAction int
 
 const (
@@ -294,10 +272,6 @@ const (
 	ensureRestart
 )
 
-// ensureActionFor decides how to apply a desired instance to the currently
-// managed process. A structural change (or a dead process) forces a restart; a
-// secrets-only change is a candidate for an in-place reload; identical
-// fingerprints on a live process need nothing.
 func ensureActionFor(running bool, curStructFP, curSecretsFP, newStructFP, newSecretsFP string) ensureAction {
 	if !running || curStructFP != newStructFP {
 		return ensureRestart
@@ -308,9 +282,22 @@ func ensureActionFor(running bool, curStructFP, curSecretsFP, newStructFP, newSe
 	return ensureNoop
 }
 
+// stopManaged treats an already-exited process as stopped, but never lets the
+// manager forget a sidecar that Stop failed to terminate. Keeping the entry and
+// its config makes the next reconcile retry the stop instead of starting a
+// second Telemt process on the same listener.
+func stopManaged(cur *managed) error {
+	if cur == nil || cur.proc == nil || !cur.proc.IsRunning() {
+		return nil
+	}
+	if err := cur.proc.Stop(); err != nil && cur.proc.IsRunning() {
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) ensureLocked(inst Instance) error {
-	structFP := inst.structuralFingerprint()
-	secFP := inst.secretsFingerprint()
+	structFP, secFP := inst.structuralFingerprint(), inst.secretsFingerprint()
 	if cur, ok := m.procs[inst.Id]; ok {
 		switch ensureActionFor(cur.proc.IsRunning(), cur.structuralFP, cur.secretsFP, structFP, secFP) {
 		case ensureNoop:
@@ -320,19 +307,22 @@ func (m *Manager) ensureLocked(inst Instance) error {
 			if err := writeConfig(configPathForID(inst.Id), inst, cur.apiPort, cur.apiToken); err != nil {
 				return err
 			}
-			if applySecrets(cur.apiPort, cur.apiToken, inst) {
+			if reloadTelemt(cur.apiPort, cur.apiToken) {
 				cur.tag = inst.Tag
 				cur.secretsFP = secFP
-				logger.Infof("mtproto: applied secret update to inbound %d in place", inst.Id)
+				logger.Infof("mtproto: reloaded Telemt users for inbound %d", inst.Id)
 				return nil
 			}
-			logger.Warningf("mtproto: live secret update unavailable for inbound %d, restarting", inst.Id)
+			logger.Warningf("mtproto: Telemt reload failed for inbound %d, restarting", inst.Id)
 			fallthrough
 		case ensureRestart:
-			_ = cur.proc.Stop()
+			if err := stopManaged(cur); err != nil {
+				return fmt.Errorf("mtproto: stop Telemt for inbound %d before restart: %w", inst.Id, err)
+			}
 			delete(m.procs, inst.Id)
 		}
 	}
+
 	apiPort, err := FreeLocalPort()
 	if err != nil {
 		return err
@@ -341,11 +331,11 @@ func (m *Manager) ensureLocked(inst Instance) error {
 	if err != nil {
 		return err
 	}
-	cfgPath := configPathForID(inst.Id)
-	if err := writeConfig(cfgPath, inst, apiPort, apiToken); err != nil {
+	cfg := configPathForID(inst.Id)
+	if err := writeConfig(cfg, inst, apiPort, apiToken); err != nil {
 		return err
 	}
-	proc := newProcess(cfgPath, fmt.Sprintf("inbound %d", inst.Id))
+	proc := newProcess(cfg, fmt.Sprintf("inbound %d", inst.Id))
 	if err := proc.Start(); err != nil {
 		return err
 	}
@@ -358,61 +348,99 @@ func (m *Manager) ensureLocked(inst Instance) error {
 		apiToken:     apiToken,
 		last:         map[string]clientCounters{},
 	}
-	logger.Infof("mtproto: started mtg for inbound %d on %s", inst.Id, inst.bindTo())
+	logger.Infof("mtproto: started Telemt for inbound %d on %s", inst.Id, inst.bindTo())
 	return nil
 }
 
-// Remove stops and forgets the mtg process for an inbound id.
 func (m *Manager) Remove(id int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if cur, ok := m.procs[id]; ok {
-		_ = cur.proc.Stop()
+		if err := stopManaged(cur); err != nil {
+			logger.Errorf("mtproto: failed to stop Telemt for inbound %d: %v", id, err)
+			return
+		}
 		delete(m.procs, id)
-		_ = os.Remove(configPathForID(id))
-		logger.Infof("mtproto: stopped mtg for inbound %d", id)
+		logger.Infof("mtproto: stopped Telemt for inbound %d", id)
+	}
+	if err := os.Remove(configPathForID(id)); err == nil {
+		scheduleMekoSync()
 	}
 }
 
-// Reconcile drives the running set toward the desired instances: it stops
-// processes that are no longer wanted and (re)starts the rest. Used at boot
-// and periodically to recover from crashes.
+func configIDFromPath(path string) (int, bool) {
+	name := filepath.Base(path)
+	if !strings.HasPrefix(name, "telemt-") || !strings.HasSuffix(name, ".toml") {
+		return 0, false
+	}
+	rawID := strings.TrimSuffix(strings.TrimPrefix(name, "telemt-"), ".toml")
+	id, err := strconv.Atoi(rawID)
+	return id, err == nil && id > 0
+}
+
+func removeStaleConfigs(want map[int]struct{}) int {
+	files, err := filepath.Glob(filepath.Join(configDir(), "telemt-*.toml"))
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, path := range files {
+		id, ok := configIDFromPath(path)
+		if !ok {
+			continue
+		}
+		if _, keep := want[id]; keep {
+			continue
+		}
+		if err := os.Remove(path); err == nil {
+			removed++
+		}
+	}
+	return removed
+}
+
 func (m *Manager) Reconcile(desired []Instance) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sweepOrphansLocked()
 	want := make(map[int]struct{}, len(desired))
-	for _, inst := range desired {
-		want[inst.Id] = struct{}{}
+	for _, i := range desired {
+		want[i.Id] = struct{}{}
 	}
 	for id, cur := range m.procs {
 		if _, ok := want[id]; !ok {
-			_ = cur.proc.Stop()
+			if err := stopManaged(cur); err != nil {
+				logger.Warningf("mtproto: failed to stop removed inbound %d: %v", id, err)
+				continue
+			}
 			delete(m.procs, id)
 			_ = os.Remove(configPathForID(id))
 		}
 	}
-	for _, inst := range desired {
-		if err := m.ensureLocked(inst); err != nil {
-			logger.Warningf("mtproto: reconcile failed for inbound %d: %v", inst.Id, err)
+	if n := removeStaleConfigs(want); n > 0 {
+		logger.Infof("mtproto: removed %d stale Telemt config(s)", n)
+		scheduleMekoSync()
+	}
+	for _, i := range desired {
+		if err := m.ensureLocked(i); err != nil {
+			logger.Warningf("mtproto: reconcile failed for inbound %d: %v", i.Id, err)
 		}
 	}
 }
 
-// StopAll stops every managed mtg process. Called on panel shutdown.
 func (m *Manager) StopAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, cur := range m.procs {
-		_ = cur.proc.Stop()
+		if err := stopManaged(cur); err != nil {
+			logger.Warningf("mtproto: failed to stop Telemt for inbound %d during shutdown: %v", id, err)
+			continue
+		}
 		_ = os.Remove(configPathForID(id))
 		delete(m.procs, id)
 	}
 }
 
-// CollectTraffic scrapes each running mtg /stats endpoint and returns the
-// per-client byte deltas since the previous scrape, plus the emails of clients
-// with at least one live connection.
 func (m *Manager) CollectTraffic() ([]Traffic, []string) {
 	type snap struct {
 		id       int
@@ -427,9 +455,9 @@ func (m *Manager) CollectTraffic() ([]Traffic, []string) {
 		if cur.proc == nil || !cur.proc.IsRunning() {
 			continue
 		}
-		lastCopy := make(map[string]clientCounters, len(cur.last))
-		maps.Copy(lastCopy, cur.last)
-		snaps = append(snaps, snap{id: id, apiPort: cur.apiPort, apiToken: cur.apiToken, tag: cur.tag, last: lastCopy})
+		cp := make(map[string]clientCounters, len(cur.last))
+		maps.Copy(cp, cur.last)
+		snaps = append(snaps, snap{id: id, apiPort: cur.apiPort, apiToken: cur.apiToken, tag: cur.tag, last: cp})
 	}
 	m.mu.Unlock()
 
@@ -440,28 +468,23 @@ func (m *Manager) CollectTraffic() ([]Traffic, []string) {
 		if !ok {
 			continue
 		}
-		newLast := make(map[string]clientCounters, len(users))
+		next := make(map[string]clientCounters, len(users))
 		for email, u := range users {
-			up := u.BytesIn
-			down := u.BytesOut
-			newLast[email] = clientCounters{up: up, down: down}
-			if u.Connections > 0 {
+			total := u.TotalOctets
+			next[email] = clientCounters{down: total}
+			if u.CurrentConnections > 0 {
 				online = append(online, email)
 			}
-			prev, had := s.last[email]
-			if !had {
-				continue
-			}
-			du := monotonicCounterDelta(up, prev.up)
-			dd := monotonicCounterDelta(down, prev.down)
-			if du > 0 || dd > 0 {
-				out = append(out, Traffic{Tag: s.tag, Email: email, Up: du, Down: dd})
+			if prev, had := s.last[email]; had {
+				d := monotonicCounterDelta(total, prev.down)
+				if d > 0 {
+					out = append(out, Traffic{Tag: s.tag, Email: email, Down: d})
+				}
 			}
 		}
-
 		m.mu.Lock()
 		if cur, ok := m.procs[s.id]; ok {
-			cur.last = newLast
+			cur.last = next
 		}
 		m.mu.Unlock()
 	}
@@ -488,36 +511,30 @@ func (m *Manager) ResetQuota(email string) {
 		token string
 	}
 	m.mu.Lock()
-	targets := make([]target, 0, len(m.procs))
+	ts := make([]target, 0, len(m.procs))
 	for _, cur := range m.procs {
 		if cur.proc != nil && cur.proc.IsRunning() {
-			targets = append(targets, target{cur.apiPort, cur.apiToken})
+			ts = append(ts, target{port: cur.apiPort, token: cur.apiToken})
 		}
 	}
 	m.mu.Unlock()
-	for _, t := range targets {
+	for _, t := range ts {
 		resetQuota(t.port, t.token, email)
 	}
 }
 
 func resetQuota(port int, token, email string) {
-	client := http.Client{Timeout: 3 * time.Second}
-	endpoint := fmt.Sprintf("http://127.0.0.1:%d/secrets/%s/reset-quota", port, url.PathEscape(email))
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/v1/users/%s/reset-quota", port, url.PathEscape(email)), nil)
 	if err != nil {
 		return
 	}
 	authorize(req, token)
-	resp, err := client.Do(req)
-	if err != nil {
-		return
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	if err == nil {
+		_ = resp.Body.Close()
 	}
-	_ = resp.Body.Close()
 }
 
-// FreeLocalPort asks the OS for an unused loopback TCP port. It is used both
-// for mtg's /stats API endpoint and to allocate the per-inbound SOCKS egress
-// bridge port persisted into mtproto inbound settings.
 func FreeLocalPort() (int, error) {
 	l, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
@@ -527,85 +544,127 @@ func FreeLocalPort() (int, error) {
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 
-// renderConfig builds the mtg-multi TOML for an instance. Top-level keys must
-// precede any [section] header in TOML, and [secrets] must be the final section
-// so trailing keys are not swallowed by another table. The layout is therefore:
-// top-level scalars (incl. api-bind-to and api-token), then [domain-fronting],
-// [network] and [throttle], then [secret-ad-tags] for clients overriding the
-// global advertising tag, and finally [secrets] with one named secret per
-// active client.
+func tomlQuote(s string) string { return strconv.Quote(s) }
+
+func networkOptions(preferIP string) (ipv4, ipv6 bool, prefer int) {
+	ipv4, ipv6, prefer = true, true, 4
+	switch strings.ToLower(strings.TrimSpace(preferIP)) {
+	case "prefer-ipv6":
+		prefer = 6
+	case "only-ipv6":
+		ipv4, ipv6, prefer = false, true, 6
+	case "only-ipv4":
+		ipv4, ipv6, prefer = true, false, 4
+	}
+	return
+}
+
+func validAnnounceIP(value string, wantV6 bool) string {
+	value = strings.Trim(strings.TrimSpace(value), "[]")
+	ip := net.ParseIP(value)
+	if ip == nil {
+		return ""
+	}
+	if wantV6 {
+		if ip.To4() != nil {
+			return ""
+		}
+	} else if ip.To4() == nil {
+		return ""
+	}
+	return value
+}
+
+func (inst Instance) listenerAnnounceIP(listen string) string {
+	listen = strings.Trim(strings.TrimSpace(listen), "[]")
+	ip := net.ParseIP(listen)
+	if ip != nil && ip.To4() == nil {
+		return validAnnounceIP(inst.PublicIPv6, true)
+	}
+	return validAnnounceIP(inst.PublicIPv4, false)
+}
+
 func renderConfig(inst Instance, apiPort int, apiToken string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "bind-to = %q\n", inst.bindTo())
+	b.WriteString("[general]\nfast_mode = true\nuse_middle_proxy = false\n")
 	if inst.Debug {
-		b.WriteString("debug = true\n")
+		b.WriteString("log_level = \"debug\"\n")
+	} else {
+		b.WriteString("log_level = \"normal\"\n")
 	}
-	if inst.ProxyProtocolListener {
-		b.WriteString("proxy-protocol-listener = true\n")
+
+	// Telemt can serve all MTProxy handshakes from the same raw 32-hex user
+	// secret. Keep all three modes enabled so existing classic, dd (secure) and
+	// ee (FakeTLS) Telegram links continue to work after migration from mtg.
+	b.WriteString("\n[general.modes]\nclassic = true\nsecure = true\ntls = true\n")
+	b.WriteString("\n[general.links]\nshow = \"*\"\n")
+	ipv4, ipv6, prefer := networkOptions(inst.PreferIP)
+	fmt.Fprintf(&b, "\n[network]\nipv4 = %t\nipv6 = %t\nprefer = %d\n", ipv4, ipv6, prefer)
+	fmt.Fprintf(&b, "\n[server]\nport = %d\n", inst.Port)
+	listen := strings.TrimSpace(inst.Listen)
+	if listen == "" {
+		listen = "0.0.0.0"
 	}
-	if inst.PreferIP != "" {
-		fmt.Fprintf(&b, "prefer-ip = %q\n", inst.PreferIP)
+	fmt.Fprintf(&b, "\n[[server.listeners]]\nip = %s\nproxy_protocol = %t\n", tomlQuote(listen), inst.ProxyProtocolListener)
+	if announceIP := inst.listenerAnnounceIP(listen); announceIP != "" {
+		fmt.Fprintf(&b, "announce_ip = %s\n", tomlQuote(announceIP))
 	}
-	fmt.Fprintf(&b, "api-bind-to = \"127.0.0.1:%d\"\n", apiPort)
-	if apiToken != "" {
-		fmt.Fprintf(&b, "api-token = %q\n", apiToken)
+	fmt.Fprintf(&b, "\n[server.api]\nenabled = true\nlisten = %s\nwhitelist = [\"127.0.0.0/8\"]\nauth_header = %s\nread_only = false\n", tomlQuote(fmt.Sprintf("127.0.0.1:%d", apiPort)), tomlQuote("Bearer "+apiToken))
+	if inst.FakeTLSDomain != "" {
+		fmt.Fprintf(&b, "\n[censorship]\ntls_domain = %s\nmask = true\ntls_emulation = true\n", tomlQuote(inst.FakeTLSDomain))
 	}
-	if inst.PublicIPv4 != "" {
-		fmt.Fprintf(&b, "public-ipv4 = %q\n", inst.PublicIPv4)
-	}
-	if inst.PublicIPv6 != "" {
-		fmt.Fprintf(&b, "public-ipv6 = %q\n", inst.PublicIPv6)
-	}
-	if inst.FrontingIP != "" || inst.FrontingPort > 0 || inst.FrontingProxyProtocol {
-		b.WriteString("\n[domain-fronting]\n")
-		if inst.FrontingIP != "" {
-			fmt.Fprintf(&b, "host = %q\n", inst.FrontingIP)
-		}
-		if inst.FrontingPort > 0 {
-			fmt.Fprintf(&b, "port = %d\n", inst.FrontingPort)
-		}
-		if inst.FrontingProxyProtocol {
-			b.WriteString("proxy-protocol = true\n")
-		}
-	}
-	// When the inbound opts into Xray routing, mtg reaches Telegram through the
-	// loopback SOCKS bridge the panel injects into the running Xray config. mtg
-	// only supports SOCKS5 upstreams, which is exactly what the bridge exposes.
-	if inst.RouteThroughXray && inst.XrayRoutePort > 0 {
-		fmt.Fprintf(&b, "\n[network]\nproxies = [\"socks5://127.0.0.1:%d\"]\n", inst.XrayRoutePort)
-	}
+	b.WriteString("\n[access]\nreplay_check_len = 65536\nignore_time_skew = false\n")
 	if inst.ThrottleMaxConnections > 0 {
-		fmt.Fprintf(&b, "\n[throttle]\nmax-connections = %d\n", inst.ThrottleMaxConnections)
+		fmt.Fprintf(&b, "user_max_tcp_conns_global_each = %d\n", inst.ThrottleMaxConnections)
 	}
-	// Only clients present in [secrets] may appear here: mtg rejects a config
-	// whose [secret-ad-tags] names an unknown secret, so a disabled client's
-	// override must vanish together with its secret.
+	b.WriteString("\n[access.users]\n")
+	for _, e := range inst.Secrets {
+		fmt.Fprintf(&b, "%s = %s\n", tomlQuote(e.Name), tomlQuote(e.Secret))
+	}
 	tagged := false
 	for _, e := range inst.Secrets {
-		if e.AdTag == "" {
-			continue
+		if e.AdTag != "" {
+			if !tagged {
+				b.WriteString("\n[access.user_ad_tags]\n")
+				tagged = true
+			}
+			fmt.Fprintf(&b, "%s = %s\n", tomlQuote(e.Name), tomlQuote(e.AdTag))
 		}
-		if !tagged {
-			b.WriteString("\n[secret-ad-tags]\n")
-			tagged = true
-		}
-		fmt.Fprintf(&b, "%q = %q\n", e.Name, e.AdTag)
 	}
+	quota := false
 	for _, e := range inst.Secrets {
-		if e.QuotaBytes <= 0 && e.ExpiresUnix <= 0 {
-			continue
-		}
-		fmt.Fprintf(&b, "\n[secret-limits.%q]\n", e.Name)
 		if e.QuotaBytes > 0 {
-			fmt.Fprintf(&b, "quota = %q\n", quotaString(e.QuotaBytes))
-		}
-		if e.ExpiresUnix > 0 {
-			fmt.Fprintf(&b, "expires = %q\n", expiresString(e.ExpiresUnix))
+			if !quota {
+				b.WriteString("\n[access.user_data_quota]\n")
+				quota = true
+			}
+			fmt.Fprintf(&b, "%s = %d\n", tomlQuote(e.Name), e.QuotaBytes)
 		}
 	}
-	b.WriteString("\n[secrets]\n")
+	exp := false
 	for _, e := range inst.Secrets {
-		fmt.Fprintf(&b, "%q = %q\n", e.Name, e.Secret)
+		if e.ExpiresUnix > 0 {
+			if !exp {
+				b.WriteString("\n[access.user_expirations]\n")
+				exp = true
+			}
+			fmt.Fprintf(&b, "%s = %s\n", tomlQuote(e.Name), tomlQuote(expiresString(e.ExpiresUnix)))
+		}
+	}
+	ipLimits := false
+	for _, e := range inst.Secrets {
+		if e.LimitIP > 0 {
+			if !ipLimits {
+				b.WriteString("\n[access.user_max_unique_ips]\n")
+				ipLimits = true
+			}
+			fmt.Fprintf(&b, "%s = %d\n", tomlQuote(e.Name), e.LimitIP)
+		}
+	}
+	if inst.RouteThroughXray && inst.XrayRoutePort > 0 {
+		fmt.Fprintf(&b, "\n[[upstreams]]\ntype = \"socks5\"\naddress = %s\nweight = 1\nenabled = true\n", tomlQuote(fmt.Sprintf("127.0.0.1:%d", inst.XrayRoutePort)))
+	} else {
+		b.WriteString("\n[[upstreams]]\ntype = \"direct\"\nweight = 1\nenabled = true\n")
 	}
 	return b.String()
 }
@@ -617,56 +676,9 @@ func writeConfig(path string, inst Instance, apiPort int, apiToken string) error
 	return os.WriteFile(path, []byte(renderConfig(inst, apiPort, apiToken)), 0o640)
 }
 
-// statsUser is one entry of the mtg-multi /stats users map. bytes_in is traffic
-// the client sent to the proxy (upload) and bytes_out is what the proxy returned
-// (download).
-type statsUser struct {
-	Connections int64 `json:"connections"`
-	BytesIn     int64 `json:"bytes_in"`
-	BytesOut    int64 `json:"bytes_out"`
-}
+func expiresString(unix int64) string { return time.Unix(unix, 0).UTC().Format(time.RFC3339) }
+func quotaString(bytes int64) string   { return strconv.FormatInt(bytes, 10) + "B" }
 
-type secretPutEntry struct {
-	Secret  string `json:"secret"`
-	AdTag   string `json:"ad_tag,omitempty"`
-	Quota   string `json:"quota,omitempty"`
-	Expires string `json:"expires,omitempty"`
-}
-
-type secretsPutBody struct {
-	Secrets map[string]secretPutEntry `json:"secrets"`
-}
-
-func secretsPayload(inst Instance) secretsPutBody {
-	secrets := make(map[string]secretPutEntry, len(inst.Secrets))
-	for _, e := range inst.Secrets {
-		entry := secretPutEntry{Secret: e.Secret, AdTag: e.AdTag}
-		if e.QuotaBytes > 0 {
-			entry.Quota = quotaString(e.QuotaBytes)
-		}
-		if e.ExpiresUnix > 0 {
-			entry.Expires = expiresString(e.ExpiresUnix)
-		}
-		secrets[e.Name] = entry
-	}
-	return secretsPutBody{Secrets: secrets}
-}
-
-func quotaString(bytes int64) string {
-	return strconv.FormatInt(bytes, 10) + "B"
-}
-
-func expiresString(unix int64) string {
-	return time.Unix(unix, 0).UTC().Format(time.RFC3339)
-}
-
-// newAPIToken mints the bearer token one mtg process and its manager share for
-// the lifetime of that process. The management API can replace the whole
-// secret set, so even though it only listens on loopback it must not be open
-// to every local process. The token lives in the generated config (mtg reads
-// it at startup only — a rewritten token would not apply until a restart,
-// which is why the reload path reuses the stored one) and in the manager's
-// memory, nowhere else.
 func newAPIToken() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
@@ -681,53 +693,141 @@ func authorize(req *http.Request, token string) {
 	}
 }
 
-// applySecrets pushes the desired secret set and advertising tags to a running
-// mtg-multi through its management API (PUT /secrets on the same loopback port
-// that serves /stats), so a client add, removal, re-key, or ad-tag change is
-// applied in place. mtg keeps every connection whose secret is unchanged and
-// closes only the removed or re-keyed ones. It returns true only on a 200: an
-// older binary without the endpoint (404), a refused connection, or any other
-// status yields false, so the caller falls back to a full restart.
-func applySecrets(port int, token string, inst Instance) bool {
-	body, err := json.Marshal(secretsPayload(inst))
-	if err != nil {
-		return false
-	}
-	client := http.Client{Timeout: 3 * time.Second}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPut, fmt.Sprintf("http://127.0.0.1:%d/secrets", port), bytes.NewReader(body))
-	if err != nil {
-		return false
-	}
-	req.Header.Set("Content-Type", "application/json")
-	authorize(req, token)
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+type telemtReloadEnvelope struct {
+	OK   bool `json:"ok"`
+	Data struct {
+		ReloadID uint64 `json:"reload_id"`
+		State    string `json:"state"`
+	} `json:"data"`
 }
 
-// scrapeStats reads the mtg-multi /stats JSON API and returns the per-user
-// cumulative counters. Best-effort: an unreachable endpoint or unparseable body
-// yields ok=false.
-func scrapeStats(port int, token string) (map[string]statsUser, bool) {
-	client := http.Client{Timeout: 3 * time.Second}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/stats", port), nil)
+func reloadTelemt(port int, token string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client := &http.Client{Timeout: 4 * time.Second}
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/system/reload", nil)
 	if err != nil {
-		return nil, false
+		return false
 	}
 	authorize(req, token)
 	resp, err := client.Do(req)
 	if err != nil {
+		return false
+	}
+	var accepted telemtReloadEnvelope
+	decodeErr := json.NewDecoder(resp.Body).Decode(&accepted)
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusOK && decodeErr != nil {
+		// Compatibility with old Telemt builds where reload was synchronous and
+		// returned an empty 200 response.
+		return true
+	}
+	if (resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusOK) || decodeErr != nil || !accepted.OK {
+		return false
+	}
+	if accepted.Data.ReloadID == 0 {
+		return resp.StatusCode == http.StatusOK
+	}
+
+	statusURL := fmt.Sprintf("%s/v1/system/reload/%d", baseURL, accepted.Data.ReloadID)
+	for {
+		statusReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+		if err != nil {
+			return false
+		}
+		authorize(statusReq, token)
+		statusResp, err := client.Do(statusReq)
+		if err != nil {
+			return false
+		}
+		var status telemtReloadEnvelope
+		decodeErr := json.NewDecoder(statusResp.Body).Decode(&status)
+		_ = statusResp.Body.Close()
+		if statusResp.StatusCode != http.StatusOK || decodeErr != nil || !status.OK {
+			return false
+		}
+		switch strings.ToLower(status.Data.State) {
+		case "succeeded":
+			return true
+		case "failed", "rolled_back":
+			return false
+		case "accepted", "preparing", "activating", "draining":
+		default:
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+type secretPutEntry struct {
+	Secret  string `json:"secret"`
+	AdTag   string `json:"ad_tag,omitempty"`
+	Quota   string `json:"quota,omitempty"`
+	Expires string `json:"expires,omitempty"`
+}
+
+type secretsPutBody struct {
+	Secrets map[string]secretPutEntry `json:"secrets"`
+}
+
+func secretsPayload(inst Instance) secretsPutBody {
+	m := make(map[string]secretPutEntry, len(inst.Secrets))
+	for _, e := range inst.Secrets {
+		x := secretPutEntry{Secret: e.Secret, AdTag: e.AdTag}
+		if e.QuotaBytes > 0 {
+			x.Quota = quotaString(e.QuotaBytes)
+		}
+		if e.ExpiresUnix > 0 {
+			x.Expires = expiresString(e.ExpiresUnix)
+		}
+		m[e.Name] = x
+	}
+	return secretsPutBody{Secrets: m}
+}
+
+func applySecrets(port int, token string, inst Instance) bool {
+	return reloadTelemt(port, token)
+}
+
+type statsUser struct {
+	CurrentConnections int64 `json:"current_connections"`
+	TotalOctets        int64 `json:"total_octets"`
+}
+
+func scrapeStats(port int, token string) (map[string]statsUser, bool) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/v1/stats/users", port), nil)
+	if err != nil {
+		return nil, false
+	}
+	authorize(req, token)
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	if err != nil {
 		return nil, false
 	}
 	defer resp.Body.Close()
-	var parsed struct {
-		Users map[string]statsUser `json:"users"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+	if resp.StatusCode != http.StatusOK {
 		return nil, false
 	}
-	return parsed.Users, true
+	var env struct {
+		OK   bool `json:"ok"`
+		Data []struct {
+			Username           string `json:"username"`
+			CurrentConnections int64  `json:"current_connections"`
+			TotalOctets        int64  `json:"total_octets"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return nil, false
+	}
+	out := make(map[string]statsUser, len(env.Data))
+	for _, u := range env.Data {
+		out[u.Username] = statsUser{CurrentConnections: u.CurrentConnections, TotalOctets: u.TotalOctets}
+	}
+	return out, true
 }

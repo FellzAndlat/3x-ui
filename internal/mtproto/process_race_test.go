@@ -52,16 +52,16 @@ func TestProcessLifecycleFieldsRaceSafe(t *testing.T) {
 }
 
 func TestProcessStatusDuringExit(t *testing.T) {
-	pidFile := installFakeMtg(t)
+	pidFile := installFakeTelemt(t)
 	exitFile := filepath.Join(t.TempDir(), "exit")
-	t.Setenv("MTG_FAKE_EXIT_FILE", exitFile)
-	configPath := filepath.Join(t.TempDir(), "mtg.toml")
+	t.Setenv("TELEMT_FAKE_EXIT_FILE", exitFile)
+	configPath := filepath.Join(t.TempDir(), "telemt.toml")
 	if err := os.WriteFile(configPath, nil, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	proc := newProcess(configPath, "test")
 	if err := proc.Start(); err != nil {
-		t.Fatalf("start process: %v", err)
+		t.Fatalf("start Telemt process: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = proc.Stop()

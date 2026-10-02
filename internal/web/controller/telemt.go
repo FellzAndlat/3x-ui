@@ -26,6 +26,8 @@ func NewTelemtController(g *gin.RouterGroup, settingService service.SettingServi
 	g.POST("/webproxy/disable", a.disableWebProxy)
 	g.GET("/config", a.config)
 	g.POST("/config", a.saveConfig)
+	g.GET("/meko/config", a.mekoConfig)
+	g.POST("/meko/config", a.saveMekoConfig)
 	g.GET("/subscription-proxy", a.subscriptionProxySetting)
 	g.POST("/subscription-proxy", a.saveSubscriptionProxySetting)
 	g.GET("/proxy", a.listProxy)
@@ -154,6 +156,23 @@ func (a *TelemtController) saveConfig(c *gin.Context) {
 		return
 	}
 	jsonObj(c, a.service.Status(), nil)
+}
+
+func (a *TelemtController) mekoConfig(c *gin.Context) {
+	jsonObj(c, a.service.GetMekoConfig(), nil)
+}
+
+func (a *TelemtController) saveMekoConfig(c *gin.Context) {
+	var cfg service.TelemtMekoConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		jsonMsg(c, "invalid MEKO V3 configuration", err)
+		return
+	}
+	if err := a.service.SaveMekoConfig(cfg); err != nil {
+		jsonMsg(c, err.Error(), err)
+		return
+	}
+	jsonObj(c, a.service.GetMekoConfig(), nil)
 }
 
 func (a *TelemtController) subscriptionProxySetting(c *gin.Context) {
@@ -286,6 +305,22 @@ func (a *TelemtController) action(c *gin.Context) {
 		jsonMsg(c, "invalid Telemt action", err)
 		return
 	}
+
+	// Keep the legacy action endpoint compatible, but route MEKO mutations
+	// through the same persisted/validated configuration path as the modern UI.
+	// The old Apply implementation downloaded a separate script and could leave
+	// the service state out of sync with /meko/config.
+	if req.Action == "meko-enable" || req.Action == "meko-disable" {
+		cfg := a.service.GetMekoConfig()
+		cfg.Enabled = req.Action == "meko-enable"
+		if err := a.service.SaveMekoConfig(cfg); err != nil {
+			jsonMsg(c, err.Error(), err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "obj": a.service.Status()})
+		return
+	}
+
 	if err := a.service.Apply(req.Action); err != nil {
 		jsonMsg(c, err.Error(), err)
 		return

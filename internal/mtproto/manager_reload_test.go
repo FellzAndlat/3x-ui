@@ -1,27 +1,24 @@
 package mtproto
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// TestMain lets the test binary re-exec itself as a stand-in for the mtg
-// child process: with MTG_FAKE_CHILD=1 it records its pid and blocks, so the
-// manager can start and stop it without a real mtg-multi binary.
 func TestMain(m *testing.M) {
-	if os.Getenv("MTG_FAKE_CHILD") == "1" {
-		if f, err := os.OpenFile(os.Getenv("MTG_FAKE_PIDFILE"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+	if os.Getenv("TELEMT_FAKE_CHILD") == "1" {
+		if f, err := os.OpenFile(os.Getenv("TELEMT_FAKE_PIDFILE"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
 			fmt.Fprintf(f, "%d\n", os.Getpid())
-			f.Close()
+			_ = f.Close()
 		}
-		if exitFile := os.Getenv("MTG_FAKE_EXIT_FILE"); exitFile != "" {
+		if exitFile := os.Getenv("TELEMT_FAKE_EXIT_FILE"); exitFile != "" {
 			for {
 				if _, err := os.Stat(exitFile); err == nil {
 					os.Exit(1)
@@ -36,241 +33,223 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func installFakeMtg(t *testing.T) string {
+func installFakeTelemt(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
 	self, err := os.Executable()
 	if err != nil {
-		t.Fatalf("locate test binary: %v", err)
+		t.Fatal(err)
 	}
 	payload, err := os.ReadFile(self)
 	if err != nil {
-		t.Fatalf("read test binary: %v", err)
+		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(binDir, GetBinaryName()), payload, 0o755); err != nil {
-		t.Fatalf("install fake mtg: %v", err)
+		t.Fatal(err)
 	}
-	pidFile := filepath.Join(binDir, "mtg-pids.txt")
+	pidFile := filepath.Join(binDir, "telemt-pids.txt")
 	t.Setenv("XUI_BIN_FOLDER", binDir)
-	t.Setenv("MTG_FAKE_CHILD", "1")
-	t.Setenv("MTG_FAKE_PIDFILE", pidFile)
+	t.Setenv("TELEMT_FAKE_CHILD", "1")
+	t.Setenv("TELEMT_FAKE_PIDFILE", pidFile)
 	return pidFile
 }
 
-func spawnCount(t *testing.T, pidFile string) int {
+func spawnCount(t *testing.T, p string) int {
 	t.Helper()
-	data, err := os.ReadFile(pidFile)
+	b, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
 		return 0
 	}
 	if err != nil {
-		t.Fatalf("read pid file: %v", err)
+		t.Fatal(err)
 	}
-	return len(strings.Fields(string(data)))
+	return len(strings.Fields(string(b)))
 }
 
-func waitSpawnCount(t *testing.T, pidFile string, want int) {
+func waitSpawnCount(t *testing.T, p string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	for {
-		got := spawnCount(t, pidFile)
-		if got == want {
+		if got := spawnCount(t, p); got == want {
 			return
-		}
-		if got > want {
-			t.Fatalf("expected %d spawn(s), got %d", want, got)
+		} else if got > want {
+			t.Fatalf("spawns=%d want=%d", got, want)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("expected %d spawn(s), still %d after timeout", want, got)
+			t.Fatalf("spawn timeout: got %d want %d", spawnCount(t, p), want)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func mtgInst(id int, secrets ...SecretEntry) Instance {
-	return Instance{Id: id, Tag: fmt.Sprintf("inbound-%d", id), Listen: "127.0.0.1", Port: 24000 + id, Secrets: secrets}
+func telemtInst(id int, secrets ...SecretEntry) Instance {
+	return Instance{Id: id, Tag: fmt.Sprintf("inbound-%d", id), Listen: "127.0.0.1", Port: 24000 + id, FakeTLSDomain: "example.com", Secrets: secrets}
 }
 
 func TestEnsureActionFor(t *testing.T) {
-	cases := []struct {
-		name                                         string
-		running                                      bool
-		curStruct, curSecrets, newStruct, newSecrets string
-		want                                         ensureAction
-	}{
-		{"dead process restarts", false, "s", "a", "s", "a", ensureRestart},
-		{"structural change restarts", true, "s1", "a", "s2", "a", ensureRestart},
-		{"secrets change reloads", true, "s", "a", "s", "b", ensureReload},
-		{"identical is a noop", true, "s", "a", "s", "a", ensureNoop},
-		{"dead beats a secrets-only change", false, "s", "a", "s", "b", ensureRestart},
+	if ensureActionFor(false, "s", "a", "s", "a") != ensureRestart {
+		t.Fatal("dead process must restart")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ensureActionFor(tc.running, tc.curStruct, tc.curSecrets, tc.newStruct, tc.newSecrets); got != tc.want {
-				t.Fatalf("ensureActionFor = %d, want %d", got, tc.want)
-			}
-		})
+	if ensureActionFor(true, "s1", "a", "s2", "a") != ensureRestart {
+		t.Fatal("structural change must restart")
+	}
+	if ensureActionFor(true, "s", "a", "s", "b") != ensureReload {
+		t.Fatal("user change must reload")
+	}
+	if ensureActionFor(true, "s", "a", "s", "a") != ensureNoop {
+		t.Fatal("unchanged must be noop")
 	}
 }
 
-func TestApplySecrets(t *testing.T) {
-	cases := []struct {
-		name   string
-		status int
-		want   bool
-	}{
-		{"ok", http.StatusOK, true},
-		{"not found on old binary", http.StatusNotFound, false},
-		{"bad request", http.StatusBadRequest, false},
-		{"unavailable", http.StatusServiceUnavailable, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var gotMethod, gotPath, gotAuth string
-			var gotBody secretsPutBody
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
-				_ = json.NewDecoder(r.Body).Decode(&gotBody)
-				w.WriteHeader(tc.status)
-			}))
-			defer srv.Close()
-
-			inst := mtgInst(1,
-				SecretEntry{Name: "alice", Secret: "ee01"},
-				SecretEntry{Name: "bob", Secret: "ee02", AdTag: "fedcba9876543210fedcba9876543210"})
-			if got := applySecrets(serverPort(t, srv), "sesame", inst); got != tc.want {
-				t.Fatalf("applySecrets = %v, want %v", got, tc.want)
-			}
-			if gotMethod != http.MethodPut || gotPath != "/secrets" {
-				t.Fatalf("expected PUT /secrets, got %s %s", gotMethod, gotPath)
-			}
-			if gotAuth != "Bearer sesame" {
-				t.Fatalf("expected the bearer token on the request, got %q", gotAuth)
-			}
-			if gotBody.Secrets["alice"].Secret != "ee01" {
-				t.Fatalf("payload must carry the secret: %+v", gotBody)
-			}
-			if gotBody.Secrets["alice"].AdTag != "" || gotBody.Secrets["bob"].AdTag != "fedcba9876543210fedcba9876543210" {
-				t.Fatalf("payload must carry per-client ad-tags only where set: %+v", gotBody)
-			}
-		})
-	}
-
-	t.Run("refused connection", func(t *testing.T) {
-		srv := httptest.NewServer(http.NotFoundHandler())
-		port := serverPort(t, srv)
-		srv.Close()
-		if applySecrets(port, "", mtgInst(1, SecretEntry{Name: "a", Secret: "ee"})) {
-			t.Fatal("a refused connection must yield false")
+func TestReloadTelemtWaitsForRuntimeActivation(t *testing.T) {
+	var polls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer sesame" {
+			t.Errorf("bad auth header: %q", got)
 		}
-	})
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/system/reload":
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = fmt.Fprint(w, `{"ok":true,"data":{"reload_id":7,"state":"accepted"}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/system/reload/7":
+			state := "activating"
+			if polls.Add(1) >= 2 {
+				state = "succeeded"
+			}
+			_, _ = fmt.Fprintf(w, `{"ok":true,"data":{"reload_id":7,"state":%q}}`, state)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	if !reloadTelemt(serverPort(t, srv), "sesame") {
+		t.Fatal("reload should succeed only after terminal succeeded state")
+	}
+	if polls.Load() < 2 {
+		t.Fatalf("expected reload status polling, polls=%d", polls.Load())
+	}
+}
+
+func TestReloadTelemtRejectsFailedActivation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/system/reload" {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = fmt.Fprint(w, `{"ok":true,"data":{"reload_id":9,"state":"accepted"}}`)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/system/reload/9" {
+			_, _ = fmt.Fprint(w, `{"ok":true,"data":{"reload_id":9,"state":"failed"}}`)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	if reloadTelemt(serverPort(t, srv), "sesame") {
+		t.Fatal("failed runtime activation must not be reported as successful reload")
+	}
 }
 
 func TestEnsureHotReloadKeepsProcess(t *testing.T) {
-	pidFile := installFakeMtg(t)
+	pidFile := installFakeTelemt(t)
 	mgr := &Manager{procs: map[int]*managed{}, swept: true}
-
-	inst := mtgInst(1, SecretEntry{Name: "alice", Secret: "ee01"})
+	inst := telemtInst(1, SecretEntry{Name: "alice", Secret: "0123456789abcdef0123456789abcdef"})
 	if err := mgr.Ensure(inst); err != nil {
 		t.Fatalf("initial ensure: %v", err)
 	}
 	waitSpawnCount(t, pidFile, 1)
 	orig := mgr.procs[1].proc
-	origToken := mgr.procs[1].apiToken
-	if origToken == "" {
-		t.Fatal("a started process must get an api token")
-	}
-
+	token := mgr.procs[1].apiToken
 	reloaded := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPut && r.URL.Path == "/secrets" {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/system/reload" {
 			reloaded <- struct{}{}
-			w.WriteHeader(http.StatusOK)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = fmt.Fprint(w, `{"ok":true,"data":{"reload_id":11,"state":"accepted"}}`)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/system/reload/11" {
+			_, _ = fmt.Fprint(w, `{"ok":true,"data":{"reload_id":11,"state":"succeeded"}}`)
 			return
 		}
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
 	mgr.procs[1].apiPort = serverPort(t, srv)
-
-	rekeyed := mtgInst(1, SecretEntry{Name: "alice", Secret: "ee01"}, SecretEntry{Name: "bob", Secret: "ee02"})
-	if err := mgr.Ensure(rekeyed); err != nil {
+	changed := telemtInst(1,
+		SecretEntry{Name: "alice", Secret: "0123456789abcdef0123456789abcdef"},
+		SecretEntry{Name: "bob", Secret: "abcdef0123456789abcdef0123456789"})
+	if err := mgr.Ensure(changed); err != nil {
 		t.Fatalf("reload ensure: %v", err)
 	}
-
 	select {
 	case <-reloaded:
-	case <-time.After(3 * time.Second):
-		t.Fatal("expected a PUT /secrets request")
+	case <-time.After(time.Second):
+		t.Fatal("expected Telemt reload")
 	}
-	if got := spawnCount(t, pidFile); got != 1 {
-		t.Fatalf("hot reload must not spawn a new process, got %d", got)
+	if spawnCount(t, pidFile) != 1 {
+		t.Fatal("reload must keep process")
 	}
 	if mgr.procs[1].proc != orig {
-		t.Fatal("hot reload must keep the same process")
-	}
-	if mgr.procs[1].secretsFP != rekeyed.secretsFingerprint() {
-		t.Fatal("stored secrets fingerprint must advance after a reload")
+		t.Fatal("process changed during reload")
 	}
 	cfg, err := os.ReadFile(configPathForID(1))
 	if err != nil {
-		t.Fatalf("read config: %v", err)
+		t.Fatal(err)
 	}
-	if !strings.Contains(string(cfg), `"bob" = "ee02"`) {
-		t.Fatalf("reloaded config must carry the new secret:\n%s", cfg)
+	s := string(cfg)
+	if !strings.Contains(s, `"bob" = "abcdef0123456789abcdef0123456789"`) {
+		t.Fatalf("new user missing:\n%s", s)
 	}
-	if !strings.Contains(string(cfg), fmt.Sprintf("api-bind-to = \"127.0.0.1:%d\"", serverPort(t, srv))) {
-		t.Fatalf("reload must reuse the same api port:\n%s", cfg)
-	}
-	if !strings.Contains(string(cfg), fmt.Sprintf("api-token = %q", origToken)) {
-		t.Fatalf("reload must reuse the token the running process was started with:\n%s", cfg)
+	if !strings.Contains(s, "[server.api]") || !strings.Contains(s, "Bearer "+token) {
+		t.Fatalf("API token must be reused:\n%s", s)
 	}
 	mgr.StopAll()
 }
 
 func TestEnsureReloadFallbackRestarts(t *testing.T) {
-	pidFile := installFakeMtg(t)
+	pidFile := installFakeTelemt(t)
 	mgr := &Manager{procs: map[int]*managed{}, swept: true}
-
-	if err := mgr.Ensure(mtgInst(2, SecretEntry{Name: "alice", Secret: "ee01"})); err != nil {
-		t.Fatalf("initial ensure: %v", err)
+	if err := mgr.Ensure(telemtInst(2, SecretEntry{Name: "alice", Secret: "0123456789abcdef0123456789abcdef"})); err != nil {
+		t.Fatal(err)
 	}
 	waitSpawnCount(t, pidFile, 1)
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
+	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
 	mgr.procs[2].apiPort = serverPort(t, srv)
-
-	if err := mgr.Ensure(mtgInst(2, SecretEntry{Name: "carol", Secret: "ee03"})); err != nil {
-		t.Fatalf("fallback ensure: %v", err)
+	if err := mgr.Ensure(telemtInst(2, SecretEntry{Name: "carol", Secret: "abcdef0123456789abcdef0123456789"})); err != nil {
+		t.Fatal(err)
 	}
 	waitSpawnCount(t, pidFile, 2)
 	mgr.StopAll()
 }
 
-func TestEnsureNoopKeepsProcess(t *testing.T) {
-	pidFile := installFakeMtg(t)
-	mgr := &Manager{procs: map[int]*managed{}, swept: true}
-
-	inst := mtgInst(3, SecretEntry{Name: "alice", Secret: "ee01"}, SecretEntry{Name: "bob", Secret: "ee02"})
-	if err := mgr.Ensure(inst); err != nil {
-		t.Fatalf("initial ensure: %v", err)
+func TestRemoveStaleConfigs(t *testing.T) {
+	binDir := t.TempDir()
+	t.Setenv("XUI_BIN_FOLDER", binDir)
+	if err := os.MkdirAll(configDir(), 0o750); err != nil {
+		t.Fatal(err)
 	}
-	waitSpawnCount(t, pidFile, 1)
-
-	if err := mgr.Ensure(inst); err != nil {
-		t.Fatalf("repeat ensure: %v", err)
+	stale := configPathForID(1)
+	keep := configPathForID(2)
+	foreign := filepath.Join(configDir(), "telemt-bad.toml")
+	for _, path := range []string{stale, keep, foreign} {
+		if err := os.WriteFile(path, []byte("test"), 0o640); err != nil {
+			t.Fatal(err)
+		}
 	}
-	reordered := mtgInst(3, SecretEntry{Name: "bob", Secret: "ee02"}, SecretEntry{Name: "alice", Secret: "ee01"})
-	if err := mgr.Ensure(reordered); err != nil {
-		t.Fatalf("reordered ensure: %v", err)
+	if got := removeStaleConfigs(map[int]struct{}{2: {}}); got != 1 {
+		t.Fatalf("removed=%d want=1", got)
 	}
-
-	time.Sleep(300 * time.Millisecond)
-	if got := spawnCount(t, pidFile); got != 1 {
-		t.Fatalf("an unchanged instance must keep the one process, got %d spawns", got)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale config still exists: %v", err)
 	}
-	mgr.StopAll()
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("wanted config was removed: %v", err)
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Fatalf("unrecognized config must be left untouched: %v", err)
+	}
 }

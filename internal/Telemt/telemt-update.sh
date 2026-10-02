@@ -18,7 +18,7 @@ arch_name() {
 }
 
 get_latest_tag() {
-  curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /dev/null -w "%{redirect_url}" "https://github.com/${REPO}/releases/latest" | sed -n "s#.*/releases/tag/##p"
+  curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /dev/null -w "%{url_effective}" "https://github.com/${REPO}/releases/latest" | sed -n "s#.*/releases/tag/##p"
 }
 
 download_latest() {
@@ -49,13 +49,33 @@ install_latest() {
   chmod 0644 "$VERSION_FILE"
 }
 
+recycle_inbound_sidecars() {
+  # MTProto inbounds are child Telemt processes supervised by x-ui rather than
+  # systemd units. Terminating only processes whose config lives in the panel's
+  # mtproto directory makes the manager respawn them with the freshly installed
+  # binary on its next reconcile cycle, without restarting the panel itself.
+  local pattern="${BIN} run /usr/local/x-ui/bin/mtproto/telemt-"
+  local pids=""
+  if command -v pgrep >/dev/null 2>&1; then
+    pids="$(pgrep -f "$pattern" 2>/dev/null || true)"
+  else
+    pids="$(ps -eo pid=,args= 2>/dev/null | awk -v p="$pattern" 'index($0,p) {print $1}')"
+  fi
+  [[ -n "$pids" ]] || return 0
+  log "recycling MTProto Telemt sidecars: $(echo "$pids" | tr '\n' ' ')"
+  while read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    kill -TERM "$pid" 2>/dev/null || true
+  done <<< "$pids"
+}
+
 main() {
   [[ "$EUID" -eq 0 ]] || { echo "must run as root" >&2; exit 1; }
-  local arch tag current
+  local arch tag current was_active=0
   arch="$(arch_name)"
   [[ "$arch" != "unsupported" ]] || { echo "unsupported CPU architecture" >&2; exit 1; }
   tag="$(get_latest_tag)"
-  [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid latest Telemt tag: $tag" >&2; exit 1; }
+  [[ "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid latest Telemt tag: $tag" >&2; exit 1; }
   current="$(current_version || true)"
   if [[ "${1:-}" == "--check" ]]; then
     echo "current=${current:-unknown}"
@@ -66,11 +86,14 @@ main() {
   if [[ "${current#v}" == "${tag#v}" && -x "$BIN" ]]; then log "Telemt ${current#v} is already current."; exit 0; fi
   log "updating Telemt ${current:-unknown} -> ${tag#v}"
   download_latest "$arch" "$tag"
-  was_active=0
-  if systemctl is-active --quiet telemt.service 2>/dev/null; then was_active=1; systemctl stop telemt.service; fi
+  if systemctl is-active --quiet telemt.service 2>/dev/null; then
+    was_active=1
+    systemctl stop telemt.service
+  fi
   install_latest "$tag"
   systemctl daemon-reload
   if (( was_active )); then systemctl start telemt.service; fi
+  recycle_inbound_sidecars
   log "Telemt ${tag#v} installed."
 }
 main "$@"

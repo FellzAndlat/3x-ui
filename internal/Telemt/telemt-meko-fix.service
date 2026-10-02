@@ -1,14 +1,17 @@
 [Unit]
-Description=Telemt MEKO V3 TCP SYN fix
-Requires=telemt.service
-After=telemt.service
-PartOf=telemt.service
+Description=Telemt MEKO V3 TCP SYN fix for 3x-ui MTProto inbounds
+After=x-ui.service network-online.target
+Wants=network-online.target
+PartOf=x-ui.service
+ConditionPathExists=/etc/x-ui/telemt-meko-fix.env
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+EnvironmentFile=/etc/x-ui/telemt-meko-fix.env
 ExecStart=/usr/local/x-ui/telemt-meko-fix.sh apply
+ExecReload=/usr/local/x-ui/telemt-meko-fix.sh apply
 ExecStop=/usr/local/x-ui/telemt-meko-fix.sh remove
 
 [Install]
-WantedBy=telemt.service
+WantedBy=x-ui.service

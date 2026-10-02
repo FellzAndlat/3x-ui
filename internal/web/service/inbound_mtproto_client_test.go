@@ -43,12 +43,12 @@ func TestClientCrudMtprotoAppliesImmediately(t *testing.T) {
 		if needRestart {
 			t.Fatal("adding an mtproto client must not request an xray restart")
 		}
-		cfg := readMtgConfig(t, created.Id)
-		if !strings.Contains(cfg, `"second" = "`+mtprotoTestSecretB+`"`) {
-			t.Fatalf("new client must be in the served config:\n%s", cfg)
+		cfg := readTelemtConfig(t, created.Id)
+		if !strings.Contains(cfg, `"second" = "101112131415161718191a1b1c1d1e1f"`) {
+			t.Fatalf("new client must be in the Telemt config with its normalized base secret:\n%s", cfg)
 		}
-		if !strings.Contains(cfg, `"first" = "`+mtprotoTestSecretA+`"`) {
-			t.Fatalf("existing client must remain served:\n%s", cfg)
+		if !strings.Contains(cfg, `"first" = "00112233445566778899aabbccddeeff"`) {
+			t.Fatalf("existing client must remain served by Telemt:\n%s", cfg)
 		}
 	})
 
@@ -56,12 +56,12 @@ func TestClientCrudMtprotoAppliesImmediately(t *testing.T) {
 		if _, err := clientSvc.DelInboundClientByEmail(inboundSvc, created.Id, "second", false, true); err != nil {
 			t.Fatalf("DelInboundClientByEmail: %v", err)
 		}
-		cfg := readMtgConfig(t, created.Id)
-		if strings.Contains(cfg, mtprotoTestSecretB) {
-			t.Fatalf("deleted client must leave the served config:\n%s", cfg)
+		cfg := readTelemtConfig(t, created.Id)
+		if strings.Contains(cfg, "101112131415161718191a1b1c1d1e1f") {
+			t.Fatalf("deleted client must leave the Telemt config:\n%s", cfg)
 		}
-		if !strings.Contains(cfg, mtprotoTestSecretA) {
-			t.Fatalf("surviving client must stay served:\n%s", cfg)
+		if !strings.Contains(cfg, "00112233445566778899aabbccddeeff") {
+			t.Fatalf("surviving client must stay served by Telemt:\n%s", cfg)
 		}
 	})
 }

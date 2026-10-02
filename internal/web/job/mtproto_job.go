@@ -9,25 +9,25 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 )
 
-// MtprotoJob reconciles the running mtg sidecar processes against the enabled
-// mtproto inbounds in the database, restarts any that crashed, and folds the
-// per-client traffic scraped from each mtg /stats endpoint into the usual client
-// and inbound traffic accounting.
+// MtprotoJob reconciles the running Telemt sidecar processes against the enabled
+// MTProto inbounds in the database, restarts any that crashed, and folds the
+// per-client traffic scraped from each Telemt API into the usual client and
+// inbound traffic accounting.
 type MtprotoJob struct {
 	inboundService service.InboundService
 	mu             sync.Mutex
 	pending        pendingTrafficBatch
 }
 
-// NewMtprotoJob creates a new mtproto reconcile/traffic job instance.
+// NewMtprotoJob creates a new MTProto reconcile/traffic job instance.
 func NewMtprotoJob() *MtprotoJob {
 	return new(MtprotoJob)
 }
 
-// Run reconciles desired mtproto inbounds with running mtg processes and records
-// per-client traffic deltas and online status.
+// Run reconciles desired MTProto inbounds with running Telemt processes and
+// records per-client traffic deltas and online status.
 func (j *MtprotoJob) Run() {
-	// CollectTrafficConsistent advances mtg's per-client snapshot baseline.
+	// CollectTrafficConsistent advances Telemt's per-client snapshot baseline.
 	// Serialize the poll so two scheduler runs cannot consume overlapping snapshots.
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -49,6 +49,9 @@ func (j *MtprotoJob) Run() {
 
 	mgr := mtproto.GetManager()
 	mgr.Reconcile(desired)
+	if err := (service.TelemtService{}).RefreshMekoFix(); err != nil {
+		logger.Warning("mtproto job: reconcile MEKO V3 rules failed:", err)
+	}
 
 	// The manager advances its cumulative-counter baseline when traffic collection
 	// returns. Retry an uncommitted batch before sampling again so a transient DB
@@ -64,7 +67,7 @@ func (j *MtprotoJob) Run() {
 
 	// A routed inbound's total is already metered through the Xray bridge by
 	// xray_traffic_job, so only non-routed inbounds are rolled up here; per-client
-	// deltas are always kept, since the bridge cannot tell mtproto users apart.
+	// deltas are always kept, since the bridge cannot tell MTProto users apart.
 	clientTraffics := make([]*xray.ClientTraffic, 0, len(deltas))
 	inboundUp := make(map[string]int64)
 	inboundDown := make(map[string]int64)
@@ -92,7 +95,7 @@ func (j *MtprotoJob) Run() {
 
 	if len(traffics) > 0 || len(clientTraffics) > 0 {
 		if _, _, err := j.inboundService.AddTraffic(traffics, clientTraffics); err != nil {
-			// The collector has already moved mtg's baseline. Preserve the exact
+			// The collector has already moved Telemt's baseline. Preserve the exact
 			// delta batch and retry it before collecting a newer snapshot.
 			j.pending.remember(traffics, clientTraffics)
 			logger.Warning("mtproto job: add traffic failed; batch queued for retry:", err)
