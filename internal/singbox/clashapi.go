@@ -255,8 +255,8 @@ func (c *ClashStatsClient) Connections(ctx context.Context) ([]ClashConnection, 
 }
 
 // ProxyDelay performs an on-demand URL test through one running sing-box
-// outbound. The timeout is passed to sing-box and also enforced client-side so
-// a broken proxy cannot leave a panel request blocked indefinitely.
+// outbound. sing-box's Clash API currently ignores explicit http:// targets,
+// so accepting them here would report latency for a different fallback URL.
 func (c *ClashStatsClient) ProxyDelay(ctx context.Context, tag, testURL string, timeout time.Duration) (*ClashProxyDelay, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
@@ -264,8 +264,8 @@ func (c *ClashStatsClient) ProxyDelay(ctx context.Context, tag, testURL string, 
 	}
 	testURL = strings.TrimSpace(testURL)
 	parsed, err := url.Parse(testURL)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return nil, fmt.Errorf("test URL must be an absolute HTTP or HTTPS URL")
+	if err != nil || parsed.Hostname() == "" || !strings.EqualFold(parsed.Scheme, "https") {
+		return nil, fmt.Errorf("test URL must be an absolute HTTPS URL")
 	}
 	if timeout <= 0 {
 		timeout = 5 * time.Second

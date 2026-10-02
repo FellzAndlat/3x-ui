@@ -175,7 +175,7 @@ func TestConnectionsReportsAPIError(t *testing.T) {
 
 func TestProxyDelayRejectsInvalidURL(t *testing.T) {
 	client := &ClashStatsClient{client: &http.Client{}, baseURL: "http://127.0.0.1:10090"}
-	for _, raw := range []string{"", "example.com", "file:///etc/passwd", "ftp://example.com/file"} {
+	for _, raw := range []string{"", "example.com", "http://example.com", "https://:443", "file:///etc/passwd", "ftp://example.com/file"} {
 		if _, err := client.ProxyDelay(context.Background(), "proxy", raw, time.Second); err == nil {
 			t.Fatalf("expected URL %q to be rejected", raw)
 		}

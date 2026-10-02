@@ -39,7 +39,7 @@ const coreDiagnostics: Section = {
           name: 'url',
           in: 'body (form)',
           type: 'string',
-          desc: 'HTTP(S) URL used by sing-box for the probe.',
+          desc: 'HTTPS URL used by sing-box for the probe.',
           optional: true,
           defaultValue: 'https://www.gstatic.com/generate_204',
         },
@@ -55,7 +55,7 @@ const coreDiagnostics: Section = {
       response:
         '{\n  "success": true,\n  "obj": {\n    "tag": "proxy",\n    "url": "https://www.gstatic.com/generate_204",\n    "delay": 82,\n    "delay2": 0,\n    "timeout": 5000\n  }\n}',
       errorResponse:
-        '{\n  "success": false,\n  "msg": "selected core does not support outbound delay probes | sing-box is not running | outbound tag is required | timeout must be between 1 and 30000 milliseconds | <Clash API error>"\n}',
+        '{\n  "success": false,\n  "msg": "selected core does not support outbound delay probes | sing-box is not running | outbound tag is required | test URL must be an absolute HTTPS URL | timeout must be between 1 and 30000 milliseconds | <Clash API error>"\n}',
     },
   ],
 };
