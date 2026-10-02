@@ -210,13 +210,9 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 		if version == 0 {
 			version = 2
 		}
-		isHysteria2 := protocol == "hysteria2" || (protocol == "hysteria" && version == 2)
-		serverPorts := []string(nil)
-		if isHysteria2 {
-			serverPorts = compatStringSlice(hySettings["server_ports"])
-			if len(serverPorts) == 0 {
-				serverPorts = compatStringSlice(hySettings["serverPorts"])
-			}
+		serverPorts := compatStringSlice(hySettings["server_ports"])
+		if len(serverPorts) == 0 {
+			serverPorts = compatStringSlice(hySettings["serverPorts"])
 		}
 		out["server"] = address
 		if len(serverPorts) > 0 {
@@ -303,6 +299,14 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 			return nil, fmt.Errorf("outbound %q has unsupported Hysteria version %d", tag, version)
 		}
 	}
+	if singProtocol == "hysteria" {
+		hySettings := rawObject(streamSettings, "hysteriaSettings")
+		if value, ok := hySettings["hop_interval"]; ok {
+			out["hop_interval"] = value
+		} else if value, ok := hySettings["hopInterval"]; ok {
+			out["hop_interval"] = value
+		}
+	}
 	if singProtocol == "hysteria2" {
 		hySettings := rawObject(streamSettings, "hysteriaSettings")
 		for _, key := range []string{"hop_interval", "hop_interval_max", "disable_chrome_parrot"} {
@@ -327,6 +331,9 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 		}
 	}
 	if err := translateStream(out, singProtocol, streamSettings, false); err != nil {
+		return nil, err
+	}
+	if err := applyXrayOutboundCompatibility(out, raw, streamSettings); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -370,7 +377,7 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 	if privateKey == "" {
 		return nil, fmt.Errorf("wireguard outbound %q has no private key", tag)
 	}
-	addresses, err := normalizeWireGuardAddresses(compatStringSlice(settings["address"]))
+	addresses, err := normalizeWireGuardLocalAddresses(compatStringSlice(settings["address"]))
 	if err != nil {
 		return nil, fmt.Errorf("wireguard outbound %q: %w", tag, err)
 	}
@@ -408,7 +415,11 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 			"public_key":  publicKey,
 			"allowed_ips": allowed,
 		}
-		if psk := strings.TrimSpace(rawString(peer, "psk")); psk != "" {
+		psk := strings.TrimSpace(rawString(peer, "preSharedKey"))
+		if psk == "" {
+			psk = strings.TrimSpace(rawString(peer, "psk"))
+		}
+		if psk != "" {
 			p["pre_shared_key"] = psk
 		}
 		if keepAlive := rawInt(peer, "keepAlive"); keepAlive > 0 {
@@ -419,8 +430,6 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 	endpoint := map[string]any{
 		"type":        "wireguard",
 		"tag":         tag,
-		"system":      !rawBool(settings, "noKernelTun"),
-		"name":        tag,
 		"address":     addresses,
 		"private_key": privateKey,
 		"peers":       peers,
@@ -428,11 +437,17 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 	if mtu := rawInt(settings, "mtu"); mtu > 0 {
 		endpoint["mtu"] = mtu
 	}
-	if reserved := compatIntSlice(settings["reserved"]); len(reserved) > 0 {
-		endpoint["reserved"] = reserved
+	reserved, err := normalizeWireGuardReserved(settings["reserved"])
+	if err != nil {
+		return nil, fmt.Errorf("wireguard outbound %q: %w", tag, err)
+	}
+	if len(reserved) > 0 {
 		for _, peer := range peers {
 			peer["reserved"] = reserved
 		}
+	}
+	if err := applyXrayWireGuardEndpointCompatibility(endpoint, raw); err != nil {
+		return nil, err
 	}
 	return endpoint, nil
 }
@@ -464,6 +479,35 @@ func parseWireGuardEndpoint(value string) (string, int, error) {
 	return host, port, nil
 }
 
+func normalizeWireGuardLocalAddresses(values []string) ([]string, error) {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if ip, network, err := net.ParseCIDR(value); err == nil {
+			ones, _ := network.Mask.Size()
+			value = ip.String() + "/" + strconv.Itoa(ones)
+		} else if ip := net.ParseIP(value); ip != nil {
+			if ip.To4() != nil {
+				value = ip.String() + "/32"
+			} else {
+				value = ip.String() + "/128"
+			}
+		} else {
+			return nil, fmt.Errorf("invalid address %q", value)
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
 func normalizeWireGuardAddresses(values []string) ([]string, error) {
 	out := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
@@ -490,6 +534,22 @@ func normalizeWireGuardAddresses(values []string) ([]string, error) {
 		out = append(out, value)
 	}
 	return out, nil
+}
+
+func normalizeWireGuardReserved(v any) ([]int, error) {
+	reserved := compatIntSlice(v)
+	if len(reserved) == 0 {
+		return nil, nil
+	}
+	if len(reserved) != 3 {
+		return nil, fmt.Errorf("reserved must contain exactly 3 bytes")
+	}
+	for _, value := range reserved {
+		if value < 0 || value > 255 {
+			return nil, fmt.Errorf("reserved byte %d is outside 0..255", value)
+		}
+	}
+	return reserved, nil
 }
 
 func compatIntSlice(v any) []int {
@@ -722,7 +782,7 @@ func TranslateShadowTLSWrappedInbound(raw map[string]any) (map[string]any, map[s
 	delete(inner, "network")
 	if users, ok := inner["users"].([]map[string]any); ok {
 		for _, user := range users {
-			delete(user, "flow") // Vision requires inner TLS/REALITY, removed by this wrapper.
+			delete(user, "flow")
 		}
 	}
 	outerRaw := map[string]any{
@@ -831,9 +891,6 @@ func translateUsers(out map[string]any, protocol string, settings map[string]any
 	}
 	switch protocol {
 	case "vless", "vmess", "trojan", "naive", "hysteria", "hysteria2", "anytls", "shadowtls", "tuic", "http", "socks", "mixed":
-		// Emit an explicit users array even when there are no active clients.
-		// sing-box requires the field for authenticated inbounds and accepts an
-		// empty array for the unauthenticated SOCKS/HTTP variants.
 		out["users"] = users
 	default:
 		if len(users) > 0 {
@@ -883,8 +940,6 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 		} else {
 			switch security {
 			case "":
-				// Legacy/flat panel outbounds may omit the security marker.
-				// Both Hysteria versions require a client TLS block.
 				out["tls"] = map[string]any{"enabled": true}
 			case "tls":
 			default:
@@ -1034,8 +1089,6 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 	}
 	switch network {
 	case "", "tcp", "raw":
-		// Xray's "raw" is its current name for the plain TCP transport.
-		// sing-box represents the same stream without an explicit transport.
 		return nil
 	case "ws":
 		ws := rawObject(stream, "wsSettings")
@@ -1103,7 +1156,11 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 		}
 		out["transport"] = transport
 	default:
-		return fmt.Errorf("inbound %q uses unsupported Xray transport %q", rawString(out, "tag"), network)
+		direction := "outbound"
+		if inbound {
+			direction = "inbound"
+		}
+		return fmt.Errorf("%s %q uses unsupported Xray transport %q", direction, rawString(out, "tag"), network)
 	}
 	return nil
 }
@@ -1246,7 +1303,6 @@ func translateHysteriaStream(out map[string]any, protocol string, stream map[str
 				}
 				out["obfs"] = normalized
 			case "":
-				// Empty type means obfuscation disabled.
 			default:
 				return fmt.Errorf("%s %q has invalid Hysteria2 obfs type %q", direction, rawString(out, "tag"), kind)
 			}
@@ -1288,7 +1344,6 @@ func translateHysteriaStream(out map[string]any, protocol string, stream map[str
 				m["headers"] = headers
 			}
 		case "":
-			// Keep the default sing-box 404 behavior when masquerade is disabled.
 		default:
 			return fmt.Errorf("inbound %q has invalid Hysteria2 masquerade type %q", rawString(out, "tag"), rawString(masquerade, "type"))
 		}
@@ -1349,6 +1404,9 @@ func rawObject(m map[string]any, key string) map[string]any {
 func firstObject(m map[string]any, key string) map[string]any {
 	values, _ := m[key].([]any)
 	if len(values) == 0 {
+		if key == "servers" && strings.TrimSpace(rawString(m, "address")) != "" {
+			return m
+		}
 		return nil
 	}
 	value, _ := values[0].(map[string]any)
