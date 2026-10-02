@@ -442,6 +442,9 @@ func TranslateXrayWireGuardEndpoint(raw map[string]any) (map[string]any, error) 
 			peer["reserved"] = reserved
 		}
 	}
+	if err := applyXrayWireGuardEndpointCompatibility(endpoint, raw); err != nil {
+		return nil, err
+	}
 	return endpoint, nil
 }
 
