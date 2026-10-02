@@ -13,8 +13,6 @@ func validateSingBoxOutboundType(protocol, tag string) error {
 	switch protocol {
 	case "":
 		return fmt.Errorf("sing-box outbound %q has an empty type", tag)
-	case "dns":
-		return fmt.Errorf("sing-box outbound %q uses removed DNS outbound; sing-box 1.13+ requires DNS rule actions instead", tag)
 	case "tun", "redirect", "tproxy":
 		return fmt.Errorf("sing-box outbound %q uses %q, which is an inbound type, not an outbound", tag, protocol)
 	case "wireguard":
