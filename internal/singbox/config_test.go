@@ -119,8 +119,14 @@ func TestTranslateXrayWireGuardToEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["type"] != "wireguard" || got["tag"] != "warp" || got["system"] != true {
+	if got["type"] != "wireguard" || got["tag"] != "warp" {
 		t.Fatalf("unexpected endpoint: %#v", got)
+	}
+	if system, _ := got["system"].(bool); system {
+		t.Fatalf("translated WireGuard outbound must remain in userspace mode: %#v", got)
+	}
+	if got["domain_resolver"] != "local" {
+		t.Fatalf("domain peer must use the local resolver: %#v", got)
 	}
 	addresses, ok := got["address"].([]string)
 	if !ok || len(addresses) != 2 || addresses[0] != "10.0.0.2/32" {
