@@ -117,16 +117,19 @@ func translateRoutingMark(out map[string]any, sockopt map[string]any, tag string
 		if mark == "" || mark == "0" || strings.EqualFold(mark, "0x0") {
 			return nil
 		}
-		number := mark
-		base := 10
-		if strings.HasPrefix(strings.ToLower(number), "0x") {
-			number = number[2:]
-			base = 16
+		if strings.HasPrefix(strings.ToLower(mark), "0x") {
+			number := mark[2:]
+			if _, err := strconv.ParseUint(number, 16, 32); err != nil {
+				return fmt.Errorf("outbound %q has invalid routing mark %q", tag, mark)
+			}
+			out["routing_mark"] = mark
+			return nil
 		}
-		if _, err := strconv.ParseUint(number, base, 32); err != nil {
+		parsed, err := strconv.ParseUint(mark, 10, 32)
+		if err != nil {
 			return fmt.Errorf("outbound %q has invalid routing mark %q", tag, mark)
 		}
-		out["routing_mark"] = mark
+		out["routing_mark"] = int(parsed)
 	default:
 		mark := rawInt(sockopt, "mark")
 		if mark < 0 {
