@@ -292,11 +292,16 @@ func validateWireGuardReserved(peer map[string]any, tag string, index int) error
 	return nil
 }
 
-func validateSingBoxEndpoint(endpoint map[string]any) error {
-	if rawString(endpoint, "type") != "wireguard" {
-		return nil
+func isKnownSingBoxEndpoint(protocol string) bool {
+	switch protocol {
+	case "wireguard", "tailscale", "openconnect", "openvpn-client", "openvpn-server", "masque-client", "masque-server":
+		return true
+	default:
+		return false
 	}
-	tag := rawString(endpoint, "tag")
+}
+
+func validateWireGuardEndpoint(endpoint map[string]any, tag string) error {
 	if stringSliceLength(endpoint["address"]) == 0 {
 		return fmt.Errorf("sing-box WireGuard endpoint %q requires an interface address", tag)
 	}
@@ -340,6 +345,26 @@ func validateSingBoxEndpoint(endpoint map[string]any) error {
 		}
 	}
 	return nil
+}
+
+func validateSingBoxEndpoint(endpoint map[string]any) error {
+	protocol := strings.ToLower(strings.TrimSpace(rawString(endpoint, "type")))
+	tag := rawString(endpoint, "tag")
+	switch {
+	case protocol == "":
+		return fmt.Errorf("sing-box endpoint %q has an empty type", tag)
+	case protocol == "wireguard":
+		return validateWireGuardEndpoint(endpoint, tag)
+	case isKnownSingBoxEndpoint(protocol):
+		return nil
+	case isKnownSingBoxOutbound(protocol):
+		return fmt.Errorf("sing-box endpoint %q uses outbound type %q", tag, protocol)
+	default:
+		// Unknown endpoint types are passed through so newer sing-box releases can
+		// be used before the panel learns their schema. sing-box check validates
+		// the final configuration before the process starts.
+		return nil
+	}
 }
 
 func (c *Config) MarshalJSON() ([]byte, error) {
