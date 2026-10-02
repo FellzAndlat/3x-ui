@@ -252,6 +252,29 @@ func translateOutboundTLSCompatibility(out map[string]any, stream map[string]any
 		out["tls"] = tlsOut
 	}
 
+	fingerprint := strings.ToLower(strings.TrimSpace(rawString(tlsIn, "fingerprint")))
+	switch fingerprint {
+	case "":
+		// Xray defaults to the Chrome fingerprint when no explicit value is set.
+		tlsOut["utls"] = map[string]any{"enabled": true, "fingerprint": "chrome"}
+	case "unsafe":
+		// Xray's special unsafe value means native Go TLS, not a uTLS fingerprint.
+		delete(tlsOut, "utls")
+	case "chrome", "firefox", "edge", "safari", "360", "qq", "ios", "android", "random", "randomized":
+		tlsOut["utls"] = map[string]any{"enabled": true, "fingerprint": fingerprint}
+	default:
+		return fmt.Errorf("outbound %q uses Xray TLS fingerprint %q which sing-box uTLS cannot represent", tag, rawString(tlsIn, "fingerprint"))
+	}
+	if masterKeyLog := strings.TrimSpace(rawString(tlsIn, "masterKeyLog")); masterKeyLog != "" {
+		return fmt.Errorf("outbound %q uses Xray TLS masterKeyLog which sing-box outbound TLS cannot represent", tag)
+	}
+	if echConfig := strings.TrimSpace(rawString(tlsIn, "echConfigList")); echConfig != "" {
+		return fmt.Errorf("outbound %q uses Xray ECH configuration whose format is not compatible with sing-box TLS ECH", tag)
+	}
+	if echSockopt := rawObject(tlsIn, "echSockopt"); len(echSockopt) > 0 {
+		return fmt.Errorf("outbound %q uses Xray ECH socket options which sing-box TLS cannot translate safely", tag)
+	}
+
 	if minVersion := strings.TrimSpace(rawString(tlsIn, "minVersion")); minVersion != "" {
 		tlsOut["min_version"] = minVersion
 	}
