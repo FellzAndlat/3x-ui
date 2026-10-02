@@ -3,14 +3,13 @@ package singbox
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 )
 
 const panelClashController = "127.0.0.1:10090"
 
 // MarshalJSON keeps the local Clash controller available for panel-side
-// diagnostics such as outbound delay checks. User-provided experimental
-// settings are preserved, including an explicit controller address or secret.
+// diagnostics while preserving an explicitly configured controller, secret,
+// or disabled controller (empty external_controller).
 func (c Config) MarshalJSON() ([]byte, error) {
 	type configAlias Config
 	copyConfig := configAlias(c)
@@ -20,21 +19,31 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		experimental[key] = value
 	}
 
-	clashAPI := map[string]any{}
-	if raw, exists := experimental["clash_api"]; exists && raw != nil {
-		configured, ok := raw.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("experimental.clash_api must be an object")
+	rawClashAPI, exists := experimental["clash_api"]
+	if !exists {
+		experimental["clash_api"] = map[string]any{
+			"external_controller": panelClashController,
 		}
-		for key, value := range configured {
-			clashAPI[key] = value
-		}
+		copyConfig.Experimental = experimental
+		return json.Marshal(copyConfig)
 	}
-	if controller, _ := clashAPI["external_controller"].(string); strings.TrimSpace(controller) == "" {
+
+	configured, ok := rawClashAPI.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("experimental.clash_api must be an object")
+	}
+
+	clashAPI := make(map[string]any, len(configured)+1)
+	for key, value := range configured {
+		clashAPI[key] = value
+	}
+	if controller, exists := clashAPI["external_controller"]; !exists {
 		clashAPI["external_controller"] = panelClashController
+	} else if _, ok := controller.(string); !ok {
+		return nil, fmt.Errorf("experimental.clash_api.external_controller must be a string")
 	}
+
 	experimental["clash_api"] = clashAPI
 	copyConfig.Experimental = experimental
-
 	return json.Marshal(copyConfig)
 }

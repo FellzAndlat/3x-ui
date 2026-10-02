@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,21 +11,68 @@ import (
 	"time"
 )
 
-func TestClashControllerURLUsesLoopback(t *testing.T) {
-	tests := map[string]string{
-		"":                 clashAPIAddress,
-		":9090":            "http://127.0.0.1:9090",
-		"0.0.0.0:9091":     "http://127.0.0.1:9091",
-		"[::]:9092":         "http://127.0.0.1:9092",
-		"127.0.0.1:9093":   "http://127.0.0.1:9093",
-		"192.0.2.10:9094":  "http://127.0.0.1:9094",
-		"http://0.0.0.0:90": "http://127.0.0.1:90",
+func TestClashControllerURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr string
+	}{
+		{name: "shorthand wildcard", input: ":9090", want: "http://127.0.0.1:9090"},
+		{name: "ipv4 wildcard", input: "0.0.0.0:9091", want: "http://127.0.0.1:9091"},
+		{name: "ipv6 wildcard", input: "[::]:9092", want: "http://[::1]:9092"},
+		{name: "ipv4 loopback", input: "127.0.0.1:9093", want: "http://127.0.0.1:9093"},
+		{name: "ipv6 loopback", input: "[::1]:9094", want: "http://[::1]:9094"},
+		{name: "localhost", input: "localhost:9095", want: "http://127.0.0.1:9095"},
+		{name: "disabled", input: "", wantErr: "disabled"},
+		{name: "URL is not a bind address", input: "http://127.0.0.1:9090", wantErr: "bind address"},
+		{name: "remote address", input: "192.0.2.10:9090", wantErr: "not assigned to this host"},
+		{name: "hostname", input: "example.com:9090", wantErr: "must be an IP address or localhost"},
+		{name: "missing port", input: "127.0.0.1", wantErr: "invalid sing-box Clash API controller"},
+		{name: "zero port", input: "127.0.0.1:0", wantErr: "invalid sing-box Clash API controller port"},
+		{name: "invalid port", input: "127.0.0.1:not-a-port", wantErr: "invalid sing-box Clash API controller port"},
 	}
-	for input, want := range tests {
-		if got := clashControllerURL(input); got != want {
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := clashControllerURL(tc.input)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("clashControllerURL(%q) error = %v, want containing %q", tc.input, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("clashControllerURL(%q) returned error: %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("clashControllerURL(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClashControllerURLAllowsAssignedAddress(t *testing.T) {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range addresses {
+		ipNet, ok := address.(*net.IPNet)
+		if !ok || ipNet.IP == nil || ipNet.IP.IsLoopback() || ipNet.IP.IsUnspecified() {
+			continue
+		}
+		input := net.JoinHostPort(ipNet.IP.String(), "19090")
+		want := "http://" + input
+		got, err := clashControllerURL(input)
+		if err != nil {
+			t.Fatalf("clashControllerURL(%q) returned error: %v", input, err)
+		}
+		if got != want {
 			t.Fatalf("clashControllerURL(%q) = %q, want %q", input, got, want)
 		}
+		return
 	}
+	t.Skip("no non-loopback IP address available")
 }
 
 func TestProxyDelay(t *testing.T) {
@@ -76,12 +124,70 @@ func TestProxyDelayReportsAPIError(t *testing.T) {
 	}
 }
 
+func TestConnectionsReportsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"unauthorized"}`))
+	}))
+	defer server.Close()
+
+	client := &ClashStatsClient{client: server.Client(), baseURL: server.URL}
+	_, err := client.Connections(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "unauthorized") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestProxyDelayRejectsInvalidURL(t *testing.T) {
 	client := NewClashStatsClient()
 	for _, raw := range []string{"", "example.com", "file:///etc/passwd", "ftp://example.com/file"} {
 		if _, err := client.ProxyDelay(context.Background(), "proxy", raw, time.Second); err == nil {
 			t.Fatalf("expected URL %q to be rejected", raw)
 		}
+	}
+}
+
+func TestProxyDelayRejectsDisabledClashAPI(t *testing.T) {
+	client := &ClashStatsClient{client: &http.Client{}, baseURL: ""}
+	_, err := client.ProxyDelay(context.Background(), "proxy", "https://example.com", time.Second)
+	if err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestProxyDelayReportsConfigurationError(t *testing.T) {
+	client := &ClashStatsClient{client: &http.Client{}, configErr: net.InvalidAddrError("bad controller")}
+	_, err := client.ProxyDelay(context.Background(), "proxy", "https://example.com", time.Second)
+	if err == nil || !strings.Contains(err.Error(), "bad controller") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestClashClientDoesNotFollowRedirect(t *testing.T) {
+	targetHit := false
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetHit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"delay":1}`))
+	}))
+	defer target.Close()
+
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer redirect.Close()
+
+	client := &ClashStatsClient{
+		client:  redirect.Client(),
+		baseURL: redirect.URL,
+		secret:  "panel-secret",
+	}
+	_, err := client.ProxyDelay(context.Background(), "proxy", "https://example.com", time.Second)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 302") {
+		t.Fatalf("unexpected redirect result: %v", err)
+	}
+	if targetHit {
+		t.Fatal("Clash API client followed a redirect and could have leaked its Authorization header")
 	}
 }
 
