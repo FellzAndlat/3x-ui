@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"strings"
 )
 
 type configJSON Config
@@ -63,6 +64,31 @@ func validateSingBoxServer(outbound map[string]any, protocol, tag string) error 
 	return nil
 }
 
+func validateTUICOutboundOptions(outbound map[string]any, tag string) error {
+	if value := strings.ToLower(strings.TrimSpace(rawString(outbound, "congestion_control"))); value != "" {
+		switch value {
+		case "cubic", "new_reno", "bbr":
+		default:
+			return fmt.Errorf("sing-box outbound %q TUIC has invalid congestion_control %q", tag, value)
+		}
+	}
+	mode := strings.ToLower(strings.TrimSpace(rawString(outbound, "udp_relay_mode")))
+	if mode != "" {
+		switch mode {
+		case "native", "quic":
+		default:
+			return fmt.Errorf("sing-box outbound %q TUIC has invalid udp_relay_mode %q", tag, mode)
+		}
+	}
+	if enabled, _ := outbound["udp_over_stream"].(bool); enabled && mode != "" {
+		return fmt.Errorf("sing-box outbound %q TUIC cannot combine udp_over_stream with udp_relay_mode", tag)
+	}
+	if network := strings.ToLower(strings.TrimSpace(rawString(outbound, "network"))); network != "" && network != "tcp" && network != "udp" {
+		return fmt.Errorf("sing-box outbound %q TUIC has invalid network %q", tag, network)
+	}
+	return nil
+}
+
 func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string) error {
 	switch protocol {
 	case "socks", "http", "shadowsocks", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic":
@@ -91,6 +117,9 @@ func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string
 	case "tuic":
 		if rawString(outbound, "uuid") == "" {
 			return fmt.Errorf("sing-box outbound %q TUIC requires UUID", tag)
+		}
+		if err := validateTUICOutboundOptions(outbound, tag); err != nil {
+			return err
 		}
 	}
 	return nil
