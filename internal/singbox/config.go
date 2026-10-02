@@ -1397,6 +1397,9 @@ func rawObject(m map[string]any, key string) map[string]any {
 func firstObject(m map[string]any, key string) map[string]any {
 	values, _ := m[key].([]any)
 	if len(values) == 0 {
+		if key == "servers" && strings.TrimSpace(rawString(m, "address")) != "" {
+			return m
+		}
 		return nil
 	}
 	value, _ := values[0].(map[string]any)
