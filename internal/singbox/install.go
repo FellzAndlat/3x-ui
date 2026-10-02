@@ -41,6 +41,11 @@ type ReleaseVersion struct {
 	Prerelease bool   `json:"prerelease"`
 }
 
+type extractedRelease struct {
+	Binary       string
+	RuntimeFiles []string
+}
+
 func releaseVersions(releases []releaseListInfo) []ReleaseVersion {
 	versions := make([]ReleaseVersion, 0, len(releases))
 	for _, release := range releases {
@@ -216,16 +221,28 @@ func installRelease(ctx context.Context, rel releaseInfo) (string, error) {
 			return "", err
 		}
 	}
-	extracted, err := extractBinary(archivePath, tmpDir)
+	extracted, err := extractReleaseFiles(archivePath, tmpDir)
 	if err != nil {
 		return "", err
 	}
 	dest := GetBinaryPath()
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	destDir := filepath.Dir(dest)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return "", err
 	}
+	for _, runtimeFile := range extracted.RuntimeFiles {
+		runtimeDest := filepath.Join(destDir, filepath.Base(runtimeFile))
+		stagedRuntime := runtimeDest + ".new"
+		if err := copyFile(runtimeFile, stagedRuntime); err != nil {
+			return "", err
+		}
+		if err := os.Rename(stagedRuntime, runtimeDest); err != nil {
+			_ = os.Remove(stagedRuntime)
+			return "", err
+		}
+	}
 	staged := dest + ".new"
-	if err := copyFile(extracted, staged); err != nil {
+	if err := copyFile(extracted.Binary, staged); err != nil {
 		return "", err
 	}
 	if err := os.Chmod(staged, 0o755); err != nil {
@@ -240,7 +257,31 @@ func installRelease(ctx context.Context, rel releaseInfo) (string, error) {
 }
 
 func Uninstall() error {
-	return os.Remove(GetBinaryPath())
+	dest := GetBinaryPath()
+	paths := []string{
+		dest,
+		filepath.Join(filepath.Dir(dest), "libcronet.so"),
+		filepath.Join(filepath.Dir(dest), "libcronet.dll"),
+	}
+	var firstErr error
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func releaseArchiveName(rel releaseInfo, target string) string {
+	version := strings.TrimPrefix(strings.TrimSpace(rel.TagName), "v")
+	if version == "" {
+		return ""
+	}
+	ext := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		ext = ".zip"
+	}
+	return fmt.Sprintf("sing-box-%s-%s%s", version, target, ext)
 }
 
 func selectAssets(ctx context.Context, rel releaseInfo) (struct{ Name, URL string }, map[string]string, error) {
@@ -251,16 +292,25 @@ func selectAssets(ctx context.Context, rel releaseInfo) (struct{ Name, URL strin
 	target := runtime.GOOS + "-" + arch
 	var archive struct{ Name, URL string }
 	sums := map[string]string{}
-	for _, a := range rel.Assets {
-		n := a.Name
-		l := strings.ToLower(n)
-		if strings.Contains(l, "sha256") && (strings.Contains(l, "sum") || strings.Contains(l, "checksums")) {
-			// Parsed below after the release asset is downloaded.
-			continue
+	canonical := strings.ToLower(releaseArchiveName(rel, target))
+	if canonical != "" {
+		for _, a := range rel.Assets {
+			if strings.ToLower(a.Name) == canonical {
+				archive.Name, archive.URL = a.Name, a.URL
+				break
+			}
 		}
-		if strings.Contains(l, "linux") || strings.Contains(l, "windows") || strings.Contains(l, "darwin") {
+	}
+	if archive.Name == "" {
+		for _, a := range rel.Assets {
+			n := a.Name
+			l := strings.ToLower(n)
+			if strings.Contains(l, "sha256") && (strings.Contains(l, "sum") || strings.Contains(l, "checksums")) {
+				continue
+			}
 			if strings.Contains(l, strings.ToLower(target)) && (strings.HasSuffix(l, ".tar.gz") || strings.HasSuffix(l, ".zip")) {
 				archive.Name, archive.URL = a.Name, a.URL
+				break
 			}
 		}
 	}
@@ -353,32 +403,51 @@ func verifySHA256(path, expected string) error {
 	return nil
 }
 
-func extractBinary(archivePath, dir string) (string, error) {
+func archiveRuntimeFile(name string) bool {
+	switch strings.ToLower(filepath.Base(name)) {
+	case "libcronet.so", "libcronet.dll":
+		return true
+	default:
+		return false
+	}
+}
+
+func extractReleaseFiles(archivePath, dir string) (extractedRelease, error) {
+	result := extractedRelease{}
 	if strings.HasSuffix(strings.ToLower(archivePath), ".zip") {
 		z, err := zip.OpenReader(archivePath)
 		if err != nil {
-			return "", err
+			return result, err
 		}
 		defer z.Close()
 		for _, f := range z.File {
-			if filepath.Base(f.Name) == "sing-box" || filepath.Base(f.Name) == "sing-box.exe" {
-				dst := filepath.Join(dir, filepath.Base(f.Name))
-				if err := extractZipFile(f, dst); err != nil {
-					return "", err
-				}
-				return dst, nil
+			base := filepath.Base(f.Name)
+			if base != "sing-box" && base != "sing-box.exe" && !archiveRuntimeFile(base) {
+				continue
+			}
+			dst := filepath.Join(dir, base)
+			if err := extractZipFile(f, dst); err != nil {
+				return result, err
+			}
+			if base == "sing-box" || base == "sing-box.exe" {
+				result.Binary = dst
+			} else {
+				result.RuntimeFiles = append(result.RuntimeFiles, dst)
 			}
 		}
-		return "", fmt.Errorf("sing-box binary not found in archive")
+		if result.Binary == "" {
+			return result, fmt.Errorf("sing-box binary not found in archive")
+		}
+		return result, nil
 	}
 	f, err := os.Open(archivePath)
 	if err != nil {
-		return "", err
+		return result, err
 	}
 	defer f.Close()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return "", err
+		return result, err
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
@@ -388,26 +457,34 @@ func extractBinary(archivePath, dir string) (string, error) {
 			break
 		}
 		if err != nil {
-			return "", err
+			return result, err
 		}
-		if filepath.Base(h.Name) != "sing-box" {
+		base := filepath.Base(h.Name)
+		if base != "sing-box" && !archiveRuntimeFile(base) {
 			continue
 		}
-		dst := filepath.Join(dir, "sing-box")
+		dst := filepath.Join(dir, base)
 		out, err := os.Create(dst)
 		if err != nil {
-			return "", err
+			return result, err
 		}
 		if _, err = io.Copy(out, tr); err != nil {
-			out.Close()
-			return "", err
+			_ = out.Close()
+			return result, err
 		}
 		if err = out.Close(); err != nil {
-			return "", err
+			return result, err
 		}
-		return dst, nil
+		if base == "sing-box" {
+			result.Binary = dst
+		} else {
+			result.RuntimeFiles = append(result.RuntimeFiles, dst)
+		}
 	}
-	return "", fmt.Errorf("sing-box binary not found in archive")
+	if result.Binary == "" {
+		return result, fmt.Errorf("sing-box binary not found in archive")
+	}
+	return result, nil
 }
 
 func extractZipFile(f *zip.File, dst string) error {
