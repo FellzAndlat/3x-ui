@@ -175,6 +175,20 @@ func translateOutboundSockopt(out map[string]any, stream map[string]any, tag str
 	return nil
 }
 
+func ensureRequiredOutboundTLS(out map[string]any, protocol string) {
+	if protocol != "tuic" {
+		return
+	}
+	tls, ok := out["tls"].(map[string]any)
+	if !ok || tls == nil {
+		tls = map[string]any{}
+		out["tls"] = tls
+	}
+	if _, exists := tls["enabled"]; !exists {
+		tls["enabled"] = true
+	}
+}
+
 func validateXrayOutboundOnlyOptions(raw map[string]any, protocol, tag string) error {
 	mux := rawObject(raw, "mux")
 	if xrayBool(mux, "enabled") {
@@ -203,6 +217,7 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 			return err
 		}
 	}
+	ensureRequiredOutboundTLS(out, protocol)
 	if rawString(out, "type") == "block" {
 		return nil
 	}
