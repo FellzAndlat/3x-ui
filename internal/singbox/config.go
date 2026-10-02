@@ -99,6 +99,11 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 				out["password"] = password
 			}
 		}
+		if protocol == "http" {
+			if headers, ok := settings["headers"].(map[string]any); ok && len(headers) > 0 {
+				out["headers"] = maps.Clone(headers)
+			}
+		}
 	case "shadowsocks":
 		server := firstObject(settings, "servers")
 		if server == nil {
