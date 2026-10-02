@@ -9,9 +9,27 @@ import (
 
 type configJSON Config
 
+func validateSingBoxOutboundType(protocol, tag string) error {
+	switch protocol {
+	case "":
+		return fmt.Errorf("sing-box outbound %q has an empty type", tag)
+	case "dns":
+		return fmt.Errorf("sing-box outbound %q uses removed DNS outbound; sing-box 1.13+ requires DNS rule actions instead", tag)
+	case "tun", "redirect", "tproxy":
+		return fmt.Errorf("sing-box outbound %q uses %q, which is an inbound type, not an outbound", tag, protocol)
+	case "wireguard":
+		return fmt.Errorf("sing-box outbound %q uses legacy WireGuard outbound; sing-box 1.13+ requires a WireGuard endpoint", tag)
+	default:
+		// Keep unknown future outbound types pass-through compatible. The installed
+		// sing-box binary remains the source of truth for types introduced after
+		// the panel version, while known removed/invalid types are rejected above.
+		return nil
+	}
+}
+
 func singBoxOutboundSupportsTLS(protocol string) bool {
 	switch protocol {
-	case "http", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic":
+	case "http", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic", "shadowtls", "anytls", "naive":
 		return true
 	default:
 		return false
@@ -20,7 +38,7 @@ func singBoxOutboundSupportsTLS(protocol string) bool {
 
 func singBoxOutboundRequiresTLS(protocol string) bool {
 	switch protocol {
-	case "hysteria", "hysteria2", "tuic":
+	case "hysteria", "hysteria2", "tuic", "shadowtls", "anytls", "naive":
 		return true
 	default:
 		return false
@@ -29,7 +47,7 @@ func singBoxOutboundRequiresTLS(protocol string) bool {
 
 func singBoxOutboundSupportsReality(protocol string) bool {
 	switch protocol {
-	case "http", "vmess", "vless", "trojan":
+	case "http", "vmess", "vless", "trojan", "anytls":
 		return true
 	default:
 		return false
@@ -58,6 +76,10 @@ func validateSingBoxServer(outbound map[string]any, protocol, tag string) error 
 		}
 	}
 	port := rawInt(outbound, "server_port")
+	if protocol == "ssh" && port == 0 {
+		// sing-box defaults SSH to port 22.
+		return nil
+	}
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("sing-box outbound %q protocol %s has an invalid server port", tag, protocol)
 	}
@@ -89,9 +111,46 @@ func validateTUICOutboundOptions(outbound map[string]any, tag string) error {
 	return nil
 }
 
+func validateNaiveOutboundTLS(outbound map[string]any, tag string) error {
+	tls := rawObject(outbound, "tls")
+	if insecure, _ := tls["insecure"].(bool); insecure {
+		return fmt.Errorf("sing-box outbound %q Naive does not support tls.insecure", tag)
+	}
+	if stringSliceLength(tls["alpn"]) > 0 {
+		return fmt.Errorf("sing-box outbound %q Naive does not support custom TLS ALPN", tag)
+	}
+	for _, key := range []string{"min_version", "max_version"} {
+		if rawString(tls, key) != "" {
+			return fmt.Errorf("sing-box outbound %q Naive does not support tls.%s", tag, key)
+		}
+	}
+	for _, key := range []string{"cipher_suites", "curve_preferences", "client_certificate", "client_key"} {
+		if stringSliceLength(tls[key]) > 0 {
+			return fmt.Errorf("sing-box outbound %q Naive does not support tls.%s", tag, key)
+		}
+	}
+	for _, key := range []string{"client_certificate_path", "client_key_path"} {
+		if rawString(tls, key) != "" {
+			return fmt.Errorf("sing-box outbound %q Naive does not support tls.%s", tag, key)
+		}
+	}
+	for _, key := range []string{"disable_sni", "fragment", "record_fragment", "kernel_tx", "kernel_rx"} {
+		if enabled, _ := tls[key].(bool); enabled {
+			return fmt.Errorf("sing-box outbound %q Naive does not support tls.%s", tag, key)
+		}
+	}
+	if utls := rawObject(tls, "utls"); xrayBool(utls, "enabled") {
+		return fmt.Errorf("sing-box outbound %q Naive does not support uTLS", tag)
+	}
+	if reality := rawObject(tls, "reality"); xrayBool(reality, "enabled") {
+		return fmt.Errorf("sing-box outbound %q Naive does not support REALITY", tag)
+	}
+	return nil
+}
+
 func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string) error {
 	switch protocol {
-	case "socks", "http", "shadowsocks", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic":
+	case "socks", "http", "shadowsocks", "vmess", "vless", "trojan", "hysteria", "hysteria2", "tuic", "shadowtls", "anytls", "naive", "snell", "ssh":
 		if err := validateSingBoxServer(outbound, protocol, tag); err != nil {
 			return err
 		}
@@ -121,13 +180,39 @@ func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string
 		if err := validateTUICOutboundOptions(outbound, tag); err != nil {
 			return err
 		}
+	case "shadowtls":
+		if version := rawInt(outbound, "version"); version != 0 && (version < 1 || version > 3) {
+			return fmt.Errorf("sing-box outbound %q ShadowTLS has unsupported version %d", tag, version)
+		}
+	case "anytls":
+		if rawString(outbound, "password") == "" {
+			return fmt.Errorf("sing-box outbound %q AnyTLS requires password", tag)
+		}
+		if enabled, _ := outbound["tcp_fast_open"].(bool); enabled {
+			return fmt.Errorf("sing-box outbound %q AnyTLS does not support tcp_fast_open", tag)
+		}
+	case "naive":
+		if err := validateNaiveOutboundTLS(outbound, tag); err != nil {
+			return err
+		}
+	case "snell":
+		version := rawInt(outbound, "version")
+		if version != 4 && version != 6 {
+			return fmt.Errorf("sing-box outbound %q Snell requires version 4 or 6", tag)
+		}
+		if rawString(outbound, "psk") == "" {
+			return fmt.Errorf("sing-box outbound %q Snell requires PSK", tag)
+		}
 	}
 	return nil
 }
 
 func validateSingBoxOutbound(outbound map[string]any) error {
-	protocol := rawString(outbound, "type")
+	protocol := strings.ToLower(strings.TrimSpace(rawString(outbound, "type")))
 	tag := rawString(outbound, "tag")
+	if err := validateSingBoxOutboundType(protocol, tag); err != nil {
+		return err
+	}
 	if err := validateSingBoxRequiredFields(outbound, protocol, tag); err != nil {
 		return err
 	}
