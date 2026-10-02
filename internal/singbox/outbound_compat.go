@@ -274,11 +274,17 @@ func translateOutboundSockopt(out map[string]any, stream map[string]any, tag str
 	if xrayEnabled(sockopt["tcpMptcp"]) {
 		out["tcp_multi_path"] = true
 	}
-	if idle := rawInt(sockopt, "tcpKeepAliveIdle"); idle > 0 {
-		out["tcp_keep_alive"] = fmt.Sprintf("%ds", idle)
-	}
-	if interval := rawInt(sockopt, "tcpKeepAliveInterval"); interval > 0 {
-		out["tcp_keep_alive_interval"] = fmt.Sprintf("%ds", interval)
+	idle := rawInt(sockopt, "tcpKeepAliveIdle")
+	interval := rawInt(sockopt, "tcpKeepAliveInterval")
+	if idle < 0 || interval < 0 {
+		out["disable_tcp_keep_alive"] = true
+	} else {
+		if idle > 0 {
+			out["tcp_keep_alive"] = fmt.Sprintf("%ds", idle)
+		}
+		if interval > 0 {
+			out["tcp_keep_alive_interval"] = fmt.Sprintf("%ds", interval)
+		}
 	}
 	if detour := strings.TrimSpace(rawString(sockopt, "dialerProxy")); detour != "" {
 		out["detour"] = detour
