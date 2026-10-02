@@ -64,6 +64,45 @@ func translateShadowsocksOutboundOptions(out map[string]any, settings map[string
 	return nil
 }
 
+func compatStringOption(settings map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(rawString(settings, key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func compatBoolOption(settings map[string]any, keys ...string) (bool, bool) {
+	for _, key := range keys {
+		if value, ok := settings[key].(bool); ok {
+			return value, true
+		}
+	}
+	return false, false
+}
+
+func translateTUICOutboundOptions(out map[string]any, settings map[string]any) {
+	if value := compatStringOption(settings, "congestion_control", "congestionControl"); value != "" {
+		out["congestion_control"] = strings.ToLower(value)
+	}
+	if value := compatStringOption(settings, "udp_relay_mode", "udpRelayMode"); value != "" {
+		out["udp_relay_mode"] = strings.ToLower(value)
+	}
+	if value, ok := compatBoolOption(settings, "udp_over_stream", "udpOverStream"); ok {
+		out["udp_over_stream"] = value
+	}
+	if value, ok := compatBoolOption(settings, "zero_rtt_handshake", "zeroRttHandshake"); ok {
+		out["zero_rtt_handshake"] = value
+	}
+	if value := compatStringOption(settings, "heartbeat"); value != "" {
+		out["heartbeat"] = value
+	}
+	if value := compatStringOption(settings, "network"); value != "" {
+		out["network"] = strings.ToLower(value)
+	}
+}
+
 func translateSendThrough(out map[string]any, raw map[string]any, tag string) error {
 	value := strings.TrimSpace(rawString(raw, "sendThrough"))
 	if value == "" || value == "0.0.0.0" || value == "::" {
@@ -219,6 +258,8 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 		if err := translateShadowsocksOutboundOptions(out, settings, tag); err != nil {
 			return err
 		}
+	case "tuic":
+		translateTUICOutboundOptions(out, settings)
 	}
 	ensureRequiredOutboundTLS(out, protocol)
 	if rawString(out, "type") == "block" {
