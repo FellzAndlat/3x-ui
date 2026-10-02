@@ -11,10 +11,17 @@ const panelClashController = "127.0.0.1:10090"
 
 // MarshalJSON keeps the local Clash controller available for panel-side
 // diagnostics while preserving an explicitly configured controller, secret,
-// or disabled controller (empty external_controller).
+// or disabled controller (empty external_controller). It also converts the
+// panel editor's route conveniences into the strict runtime sing-box schema.
 func (c Config) MarshalJSON() ([]byte, error) {
 	type configAlias Config
 	copyConfig := configAlias(c)
+
+	route, err := normalizeRouteForRuntime(c.Route)
+	if err != nil {
+		return nil, fmt.Errorf("normalize sing-box route: %w", err)
+	}
+	copyConfig.Route = route
 
 	experimental := make(map[string]any, len(c.Experimental)+1)
 	for key, value := range c.Experimental {
