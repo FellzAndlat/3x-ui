@@ -58,25 +58,34 @@ func TestNormalizeOutboundsForRuntimeConvertsHTTPTransportHost(t *testing.T) {
 	}
 }
 
-func TestNormalizeOutboundsForRuntimeDropsQuicServiceName(t *testing.T) {
+func TestNormalizeOutboundsForRuntimeStripsStaleQuicOptions(t *testing.T) {
 	outbounds := []map[string]any{{
 		"type": "vless",
 		"tag":  "proxy",
 		"transport": map[string]any{
-			"type":         "quic",
-			"service_name": "not-a-quic-option",
+			"type":                  "quic",
+			"service_name":          "old-grpc",
+			"path":                  "/old-http",
+			"host":                  []any{"cdn.example.com"},
+			"headers":               map[string]any{"User-Agent": "panel-test"},
+			"idle_timeout":          "30s",
+			"permit_without_stream": true,
 		},
 	}}
+	original, _ := json.Marshal(outbounds)
+
 	normalized, err := normalizeOutboundsForRuntime(outbounds)
 	if err != nil {
 		t.Fatal(err)
 	}
 	transport := normalized[0]["transport"].(map[string]any)
-	if _, exists := transport["service_name"]; exists {
-		t.Fatalf("QUIC service_name leaked into runtime: %#v", transport)
+	if len(transport) != 1 || transport["type"] != "quic" {
+		t.Fatalf("stale QUIC options leaked into runtime: %#v", transport)
 	}
-	if got := outbounds[0]["transport"].(map[string]any)["service_name"]; got != "not-a-quic-option" {
-		t.Fatalf("stored outbound was mutated: %v", got)
+
+	after, _ := json.Marshal(outbounds)
+	if string(after) != string(original) {
+		t.Fatalf("normalization mutated stored outbound: before=%s after=%s", original, after)
 	}
 }
 
