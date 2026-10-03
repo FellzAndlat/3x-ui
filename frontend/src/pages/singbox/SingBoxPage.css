@@ -54,6 +54,29 @@
 .singbox-page .singbox-main-tabs > .ant-tabs-nav .ant-tabs-tab {
   padding: 10px 12px;
 }
+
+/*
+ * Keep a single navigation level on the sing-box page. Routing and AdBlock
+ * remain selectable from the sing-box sidebar, so the nested Tabs header is
+ * redundant and only repeats the same destinations.
+ */
+.singbox-page .singbox-main-tabs > .ant-tabs-content-holder .ant-tabs > .ant-tabs-nav {
+  display: none;
+}
+
+/*
+ * The former Advanced page repeated Endpoints, certificates and network
+ * sections inside a Collapse. Those sections are now promoted to menu items;
+ * keep Advanced only for Experimental/full JSON controls.
+ */
+.singbox-page
+  .singbox-main-tabs
+  > .ant-tabs-content-holder
+  .ant-tabs-tabpane[aria-labelledby$='-tab-advanced']
+  .ant-collapse {
+  display: none;
+}
+
 .singbox-page .ant-card {
   border-radius: 12px;
 }
