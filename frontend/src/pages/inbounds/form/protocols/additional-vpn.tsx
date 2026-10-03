@@ -141,9 +141,10 @@ export function OpenFluxFields() {
           >
             <Select
               style={{ width: 150 }}
-              options={['direct', 'yandex', 'vyandex', 'boards', 'mailru'].map(
-                (value) => ({ value, label: value }),
-              )}
+              options={['direct', 'yandex', 'vyandex', 'boards', 'mailru'].map((value) => ({
+                value,
+                label: value,
+              }))}
             />
           </FormField>
           <FormField
