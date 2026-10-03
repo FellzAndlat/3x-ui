@@ -32,6 +32,7 @@ type OutboundSettings struct {
 }
 
 type managedOutbound struct {
+	probe       bool
 	raw         map[string]any
 	fingerprint string
 	port        int
@@ -94,7 +95,9 @@ func ValidateAdditionalOutbound(raw map[string]any) error {
 	return nil
 }
 
-func EnsureOutbound(raw map[string]any) (map[string]any, error) {
+func EnsureOutbound(raw map[string]any) (map[string]any, error) { return ensureOutbound(raw, false) }
+
+func ensureOutbound(raw map[string]any, probe bool) (map[string]any, error) {
 	if err := ValidateAdditionalOutbound(raw); err != nil {
 		return nil, err
 	}
@@ -120,7 +123,7 @@ func EnsureOutbound(raw map[string]any) (map[string]any, error) {
 		}
 		stopOutbound(old)
 	}
-	proc := &managedOutbound{fingerprint: fingerprint}
+	proc := &managedOutbound{fingerprint: fingerprint, probe: probe}
 	if err := json.Unmarshal(data, &proc.raw); err != nil {
 		return nil, err
 	}
@@ -290,7 +293,7 @@ func KeepOutbounds(tags map[string]bool) {
 	outboundMu.Lock()
 	defer outboundMu.Unlock()
 	for tag, proc := range outboundProcesses {
-		if !tags[tag] {
+		if !tags[tag] && (!proc.probe || tags == nil) {
 			stopOutbound(proc)
 			delete(outboundProcesses, tag)
 		}
@@ -300,6 +303,9 @@ func RefreshOutbounds() {
 	outboundMu.Lock()
 	defer outboundMu.Unlock()
 	for tag, proc := range outboundProcesses {
+		if proc.probe {
+			continue
+		}
 		select {
 		case <-proc.done:
 		default:
@@ -348,7 +354,7 @@ func EnsureProbeOutbound(raw map[string]any) (map[string]any, func(), error) {
 	tag, _ := raw["tag"].(string)
 	probeTag := "__probe_" + uuid.NewString()
 	isolated["tag"] = probeTag
-	bridge, err := EnsureOutbound(isolated)
+	bridge, err := ensureOutbound(isolated, true)
 	if err != nil {
 		return nil, nil, err
 	}
