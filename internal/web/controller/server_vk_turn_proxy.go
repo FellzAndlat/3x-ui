@@ -14,6 +14,7 @@ func (a *ServerController) initVKTurnProxyRouter(g *gin.RouterGroup) {
 	a.initExternalVPNRouter(g)
 	a.initHiddifyExportRouter(g)
 	a.initOutboundProbeRouter(g)
+	a.initSingBoxSessionRouter(g)
 }
 
 func (a *ServerController) getVKTurnProxyLogs(c *gin.Context) {
