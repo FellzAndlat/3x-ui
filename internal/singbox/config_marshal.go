@@ -421,10 +421,24 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		return []byte("null"), nil
 	}
 
+	normalizedOutbounds, err := normalizeOutboundsForRuntime(c.Outbounds)
+	if err != nil {
+		return nil, fmt.Errorf("normalize sing-box outbounds: %w", err)
+	}
+	normalizedRoute, err := normalizeRouteForRuntime(c.Route)
+	if err != nil {
+		return nil, fmt.Errorf("normalize sing-box route: %w", err)
+	}
+	experimental, err := prepareClashAPIExperimental(c.Experimental)
+	if err != nil {
+		return nil, err
+	}
+
 	clone := configJSON(*c)
-	clone.Outbounds = make([]map[string]any, 0, len(c.Outbounds))
+	clone.Outbounds = make([]map[string]any, 0, len(normalizedOutbounds))
 	clone.Endpoints = make([]map[string]any, 0, len(c.Endpoints))
-	clone.Route = maps.Clone(c.Route)
+	clone.Route = normalizedRoute
+	clone.Experimental = experimental
 	if hasDNSServerTag(c.DNS, "local") {
 		if clone.Route == nil {
 			clone.Route = map[string]any{}
@@ -433,9 +447,9 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 			clone.Route["default_domain_resolver"] = "local"
 		}
 	}
-	seen := make(map[string]string, len(c.Outbounds)+len(c.Endpoints))
+	seen := make(map[string]string, len(normalizedOutbounds)+len(c.Endpoints))
 
-	for _, source := range c.Outbounds {
+	for _, source := range normalizedOutbounds {
 		outbound := maps.Clone(source)
 		if err := validateSingBoxOutbound(outbound); err != nil {
 			return nil, err
