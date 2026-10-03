@@ -414,8 +414,8 @@ export default function AdBlockTab() {
           <div>
             <Typography.Text strong>Свои источники</Typography.Text>
             <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-              Для большинства пользователей этот раздел не нужен. Один HTTP/HTTPS URL на строку.
-              При ручном изменении набор становится пользовательским.
+              Для большинства пользователей этот раздел не нужен. Один HTTP/HTTPS URL на строку. При
+              ручном изменении набор становится пользовательским.
             </Typography.Paragraph>
             <Input.TextArea
               disabled={busy}
@@ -470,11 +470,11 @@ export default function AdBlockTab() {
           <div>
             <Typography.Text strong>Где применять AdBlock</Typography.Text>
             <Typography.Paragraph type="secondary">
-              По умолчанию фильтрация работает для всех подключений. Меняйте этот раздел только
-              если нужно исключить отдельный inbound или клиента.
+              По умолчанию фильтрация работает для всех подключений. Меняйте этот раздел только если
+              нужно исключить отдельный inbound или клиента.
             </Typography.Paragraph>
             {scopeEditor(status.scope, status.scopeOptions, busy, (scope) =>
-              setStatus((prev) => ({ ...prev, scope }))
+              setStatus((prev) => ({ ...prev, scope })),
             )}
           </div>
 
@@ -542,17 +542,14 @@ export default function AdBlockTab() {
                           style={{ width: '100%', marginTop: 8 }}
                           disabled={busy}
                           value={policy.profile}
-                          options={[
-                            ...profileOptions,
-                            { label: 'Без фильтрации', value: 'off' },
-                          ]}
+                          options={[...profileOptions, { label: 'Без фильтрации', value: 'off' }]}
                           onChange={(profile) => patchPolicy({ profile })}
                         />
                       </Col>
                     </Row>
                     <div style={{ marginTop: 16 }}>
                       {scopeEditor(policy.scope, status.scopeOptions, busy, (scope) =>
-                        patchPolicy({ scope })
+                        patchPolicy({ scope }),
                       )}
                     </div>
                   </Card>
@@ -793,16 +790,15 @@ export default function AdBlockTab() {
                           style={{
                             height: '100%',
                             borderColor:
-                              status.profile === profile.id ? 'var(--ant-color-primary)' : undefined,
+                              status.profile === profile.id
+                                ? 'var(--ant-color-primary)'
+                                : undefined,
                           }}
                         >
                           <Radio value={profile.id}>
                             <Typography.Text strong>{profile.name}</Typography.Text>
                           </Radio>
-                          <Typography.Paragraph
-                            type="secondary"
-                            style={{ margin: '6px 0 0 24px' }}
-                          >
+                          <Typography.Paragraph type="secondary" style={{ margin: '6px 0 0 24px' }}>
                             {profile.description}
                           </Typography.Paragraph>
                         </Card>
@@ -863,7 +859,9 @@ export default function AdBlockTab() {
                 )}
               </Space>
 
-              {dirty && <Typography.Text type="warning">Есть несохранённые изменения.</Typography.Text>}
+              {dirty && (
+                <Typography.Text type="warning">Есть несохранённые изменения.</Typography.Text>
+              )}
             </Space>
           </Card>
 
