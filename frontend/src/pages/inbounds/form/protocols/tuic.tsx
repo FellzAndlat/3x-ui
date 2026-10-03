@@ -28,8 +28,16 @@ export default function TuicFields() {
   const privateKey = (useWatch({ control, name: 'settings.server.private_key' }) ?? '') as string;
   const nodeId = useWatch({ control, name: 'nodeId' }) as number | null | undefined;
 
+  const updateServerValue = (field: string, value: unknown) => {
+    setValue(`settings.server.${field}`, value, {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    });
+  };
+
   const handleSniChange = (newSni: string) => {
-    setValue('settings.server.sni', newSni);
+    updateServerValue('sni', newSni);
     const cleanSni = newSni.trim();
     if (!cleanSni) return;
 
@@ -37,21 +45,35 @@ export default function TuicFields() {
     const currentKey = String(getValues('settings.server.private_key') || '');
 
     if (!currentCert || currentCert.startsWith('/root/cert/')) {
-      setValue('settings.server.certificate', `/root/cert/${cleanSni}/fullchain.pem`);
+      updateServerValue('certificate', `/root/cert/${cleanSni}/fullchain.pem`);
     }
     if (!currentKey || currentKey.startsWith('/root/cert/')) {
-      setValue('settings.server.private_key', `/root/cert/${cleanSni}/privkey.pem`);
+      updateServerValue('private_key', `/root/cert/${cleanSni}/privkey.pem`);
     }
   };
 
   const autofillFromSni = () => {
-    const cleanSni = (sni || '').trim();
+    // A blank SNI used to make the button effectively a no-op. The panel host
+    // is the best available default for a local inbound and can still be
+    // replaced manually before saving.
+    const cleanSni = (sni || window.location.hostname || '').trim();
     if (!cleanSni) {
       message.warning(t('pages.xray.tuic.sniHint'));
       return;
     }
-    setValue('settings.server.certificate', `/root/cert/${cleanSni}/fullchain.pem`);
-    setValue('settings.server.private_key', `/root/cert/${cleanSni}/privkey.pem`);
+
+    updateServerValue('sni', cleanSni);
+    updateServerValue('certificate', `/root/cert/${cleanSni}/fullchain.pem`);
+    updateServerValue('private_key', `/root/cert/${cleanSni}/privkey.pem`);
+    updateServerValue('congestion_control', 'bbr');
+    updateServerValue('alpn', ['h3', 'spdy/3.1']);
+    updateServerValue('udp_relay_mode', 'native');
+    updateServerValue('zero_rtt_handshake', false);
+    updateServerValue('log_level', 'info');
+    updateServerValue('max_idle_time', 15);
+    updateServerValue('authentication_timeout', 3);
+    updateServerValue('max_udp_relay_packet_size', 1500);
+    message.success(t('pages.inbounds.setSuccess'));
   };
 
   const setCertFromPanel = async () => {
@@ -71,10 +93,10 @@ export default function TuicFields() {
         return;
       }
       if (obj.webCertFile) {
-        setValue('settings.server.certificate', obj.webCertFile);
+        updateServerValue('certificate', obj.webCertFile);
       }
       if (obj.webKeyFile) {
-        setValue('settings.server.private_key', obj.webKeyFile);
+        updateServerValue('private_key', obj.webKeyFile);
       }
       message.success(t('pages.inbounds.setSuccess'));
     } catch {
@@ -174,7 +196,7 @@ export default function TuicFields() {
         <AutoComplete
           value={certificate}
           options={certOptions}
-          onChange={(v) => setValue('settings.server.certificate', v)}
+          onChange={(v) => updateServerValue('certificate', v)}
           placeholder="/root/cert.pem"
         />
       </Form.Item>
@@ -183,7 +205,7 @@ export default function TuicFields() {
         <AutoComplete
           value={privateKey}
           options={keyOptions}
-          onChange={(v) => setValue('settings.server.private_key', v)}
+          onChange={(v) => updateServerValue('private_key', v)}
           placeholder="/root/privkey.pem"
         />
       </Form.Item>
@@ -201,8 +223,8 @@ export default function TuicFields() {
           <Button
             danger
             onClick={() => {
-              setValue('settings.server.certificate', '');
-              setValue('settings.server.private_key', '');
+              updateServerValue('certificate', '');
+              updateServerValue('private_key', '');
             }}
           >
             {t('clear')}

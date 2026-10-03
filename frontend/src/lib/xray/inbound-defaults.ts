@@ -448,7 +448,7 @@ export function createDefaultTuicInboundSettings(): TuicInboundSettings {
       congestion_control: 'bbr',
       alpn: ['h3', 'spdy/3.1'],
       udp_relay_mode: 'native',
-      zero_rtt_handshake: true,
+      zero_rtt_handshake: false,
       log_level: 'info',
       max_idle_time: 15,
       authentication_timeout: 3,

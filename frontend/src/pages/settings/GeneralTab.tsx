@@ -671,15 +671,6 @@ export default function GeneralTab({
                           </div>
                         )}
                       <Space wrap style={{ width: '100%' }}>
-                        {allSetting.coreType === 'sing-box' && (
-                          <Button
-                            onClick={() => {
-                              setHiddifyOpen(true);
-                            }}
-                          >
-                            Импорт пользователей Hiddify
-                          </Button>
-                        )}
                         <Button icon={<SwapOutlined />} onClick={() => onOpenSwap?.()}>
                           {t('pages.settings.swap.openFromCore')}
                         </Button>

@@ -191,7 +191,7 @@ func files(inst Instance, metricsAddr string) ([]string, error) {
 		return nil, err
 	}
 	vpn := filepath.Join(folder, "vpn.toml")
-	settings := fmt.Sprintf("listen_address = %s\ncredentials_file = %s\nallow_private_network_connections = false\n[listen_protocols.http2]\n[listen_protocols.quic]\n[forward_protocol]\ndirect = {}\n[metrics]\naddress = %s\nper_client_metrics = true\n", tomlString(inst.Bind()), tomlString(credentials), tomlString(metricsAddr))
+	settings := fmt.Sprintf("listen_address = %s\ncredentials_file = %s\nallow_private_network_connections = false\n[listen_protocols.http1]\n[listen_protocols.http2]\n[listen_protocols.quic]\n[forward_protocol]\ndirect = {}\n[metrics]\naddress = %s\nper_client_metrics = true\n", tomlString(inst.Bind()), tomlString(credentials), tomlString(metricsAddr))
 	if err := writePrivate(vpn, []byte(settings)); err != nil {
 		return nil, err
 	}
