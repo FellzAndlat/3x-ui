@@ -171,9 +171,13 @@ export default function QrCodeModal({
   }
 
   const serverLinks = useServerLinks(open, dbInbound?.id, dbInbound?.protocol, client?.email);
-  const displayLinks = ['fptn', 'openflux', 'trusttunnel'].includes(dbInbound?.protocol ?? '')
-    ? (serverLinks.data ?? [])
-    : links;
+  const displayLinks = useMemo(
+    () =>
+      ['fptn', 'openflux', 'trusttunnel'].includes(dbInbound?.protocol ?? '')
+        ? (serverLinks.data ?? [])
+        : links,
+    [dbInbound?.protocol, serverLinks.data, links],
+  );
 
   const qrItems = useMemo<QrItem[]>(() => {
     const items: QrItem[] = [];
