@@ -218,6 +218,11 @@ function AppSidebar() {
         icon: <GlobalOutlined />,
         label: 'Сеть и HTTP-клиенты',
       },
+      {
+        key: '/singbox#advanced',
+        icon: <CodeOutlined />,
+        label: 'Дополнительно / JSON',
+      },
     ],
     [t],
   );
