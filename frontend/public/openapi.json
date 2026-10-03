@@ -2773,6 +2773,9 @@
               "amneziawg",
               "tuic",
               "naive",
+              "snell",
+              "fptn",
+              "openflux",
               "anytls",
               "shadowtls",
               "mieru",
@@ -4705,9 +4708,68 @@
     {
       "name": "Runtime services",
       "description": "Administrative runtime endpoints for core status, version information, and VK TURN proxy management."
+    },
+    {
+      "name": "Sing-box sessions",
+      "description": "Inspect active sing-box connections and revoke sessions without replacing the existing traffic collector. Omit nodeId (or use 0) for the local panel; provide a positive nodeId to dispatch through the multi-node runtime."
     }
   ],
   "paths": {
+    "/panel/api/server/externalvpn/parse-link": {
+      "post": {
+        "tags": [
+          "External VPN"
+        ],
+        "summary": "Parse a connection link into an outbound configuration.",
+        "operationId": "post_panel_api_server_externalvpn_parse_link",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "link": {
+                    "type": "string",
+                    "description": "Connection URL, at most 64 KiB."
+                  }
+                },
+                "required": [
+                  "link"
+                ]
+              },
+              "example": {
+                "link": "snell://psk@example.com:443?version=4"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/server/externalvpn/status": {
       "get": {
         "tags": [
@@ -5696,6 +5758,62 @@
                       "type": "string"
                     },
                     "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/inbounds/get/{id}/links": {
+      "get": {
+        "tags": [
+          "Inbounds"
+        ],
+        "summary": "Return subscription links for an inbound owned by the authenticated user.",
+        "operationId": "get_panel_api_inbounds_get_id_links",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Inbound ID.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "description": "Filter links to one client email.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {
+                      "type": "array",
+                      "nullable": true,
+                      "items": {
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
@@ -18553,6 +18671,233 @@
         ],
         "summary": "Disable the Telemt Web Proxy.",
         "operationId": "post_panel_api_telemt_webproxy_disable",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/singbox/sessions": {
+      "get": {
+        "tags": [
+          "Sing-box sessions"
+        ],
+        "summary": "List active sing-box sessions with inbound, user, outbound, destination, and traffic metadata.",
+        "operationId": "get_panel_api_server_singbox_sessions",
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "query",
+            "required": false,
+            "description": "Optional remote node ID. Omit or use 0 for the local panel.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/singbox/sessions/disconnect-user": {
+      "post": {
+        "tags": [
+          "Sing-box sessions"
+        ],
+        "summary": "Disconnect active sing-box sessions for a user, optionally scoped to one inbound and/or remote node.",
+        "operationId": "post_panel_api_server_singbox_sessions_disconnect_user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nodeId": {
+                    "type": "integer",
+                    "description": "Optional remote node ID. Omit or use 0 for the local panel."
+                  },
+                  "inbound": {
+                    "type": "string",
+                    "description": "Optional inbound tag used to scope the disconnect."
+                  },
+                  "user": {
+                    "type": "string",
+                    "description": "Authenticated sing-box user identifier."
+                  }
+                },
+                "required": [
+                  "user"
+                ]
+              },
+              "example": {
+                "nodeId": 2,
+                "inbound": "in-443-tcp",
+                "user": "alice@example.com"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/singbox/sessions/disconnect-users": {
+      "post": {
+        "tags": [
+          "Sing-box sessions"
+        ],
+        "summary": "Disconnect active sing-box sessions for several users using one connection snapshot, optionally scoped to an inbound and/or remote node.",
+        "operationId": "post_panel_api_server_singbox_sessions_disconnect_users",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nodeId": {
+                    "type": "integer",
+                    "description": "Optional remote node ID. Omit or use 0 for the local panel."
+                  },
+                  "inbound": {
+                    "type": "string",
+                    "description": "Optional inbound tag used to scope the disconnect."
+                  },
+                  "users": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Authenticated sing-box user identifiers to revoke."
+                  }
+                },
+                "required": [
+                  "users"
+                ]
+              },
+              "example": {
+                "nodeId": 2,
+                "users": [
+                  "alice@example.com",
+                  "bob@example.com"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/singbox/sessions/disconnect-inbound": {
+      "post": {
+        "tags": [
+          "Sing-box sessions"
+        ],
+        "summary": "Disconnect all active sing-box sessions for an inbound on the local panel or a selected remote node.",
+        "operationId": "post_panel_api_server_singbox_sessions_disconnect_inbound",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nodeId": {
+                    "type": "integer",
+                    "description": "Optional remote node ID. Omit or use 0 for the local panel."
+                  },
+                  "inbound": {
+                    "type": "string",
+                    "description": "Inbound tag whose active sing-box sessions should be closed."
+                  }
+                },
+                "required": [
+                  "inbound"
+                ]
+              },
+              "example": {
+                "nodeId": 2,
+                "inbound": "in-443-tcp"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",

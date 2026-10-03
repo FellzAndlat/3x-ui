@@ -203,6 +203,21 @@ export const sections: readonly Section[] = [
     description: 'Inspect and update standalone external VPN components.',
     endpoints: [
       {
+        method: 'POST',
+        path: '/panel/api/server/externalvpn/parse-link',
+        summary: 'Parse a connection link into an outbound configuration.',
+        params: [
+          {
+            name: 'link',
+            in: 'body (json)',
+            type: 'string',
+            desc: 'Connection URL, at most 64 KiB.',
+          },
+        ],
+        body: '{"link":"snell://psk@example.com:443?version=4"}',
+        responseObjectSchema: { type: 'object', additionalProperties: true },
+      },
+      {
         method: 'GET',
         path: '/panel/api/server/externalvpn/status',
         summary: 'Return external VPN component installation and update status.',
@@ -404,6 +419,22 @@ export const sections: readonly Section[] = [
         path: '/panel/api/inbounds/get/:id',
         summary: 'Fetch a single inbound by numeric ID.',
         params: [{ name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' }],
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/inbounds/get/:id/links',
+        summary: 'Return subscription links for an inbound owned by the authenticated user.',
+        params: [
+          { name: 'id', in: 'path', type: 'number', desc: 'Inbound ID.' },
+          {
+            name: 'email',
+            in: 'query',
+            type: 'string',
+            optional: true,
+            desc: 'Filter links to one client email.',
+          },
+        ],
+        responseObjectSchema: { type: 'array', nullable: true, items: { type: 'string' } },
       },
       {
         method: 'POST',
