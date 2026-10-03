@@ -120,21 +120,27 @@ export function buildNativeSingBoxOutbound(protocol: string, tag = ''): NativeSi
 // Accept an outbound copied directly from the official sing-box docs. The
 // panel stores a shared Xray-shaped wrapper, so native { type, tag, ... }
 // objects are converted to { protocol: "singbox:<type>", tag, settings }.
-// Existing panel wrappers are only normalized to lowercase and otherwise
-// preserved.
+// The type is intentionally not checked against a panel-side allow-list:
+// installed sing-box is the source of truth, so future/custom outbound types
+// can be pasted in JSON mode without waiting for a panel release. Known
+// removed/invalid types are still rejected by the backend validator.
+// Existing panel wrappers without a native `type` are only normalized to
+// lowercase and otherwise preserved.
 export function normalizeOutboundJsonForPanel(
   raw: Record<string, unknown>,
 ): Record<string, unknown> {
+  const type = typeof raw.type === 'string' ? raw.type.trim().toLowerCase() : '';
+  if (type) {
+    const { type: _type, tag, ...settings } = raw;
+    return {
+      protocol: `singbox:${type}`,
+      tag,
+      settings,
+    };
+  }
+
   const protocol = typeof raw.protocol === 'string' ? raw.protocol.trim().toLowerCase() : '';
   if (protocol) return { ...raw, protocol };
 
-  const type = typeof raw.type === 'string' ? raw.type.trim().toLowerCase() : '';
-  if (!type) return raw;
-
-  const { type: _type, tag, ...settings } = raw;
-  return {
-    protocol: `singbox:${type}`,
-    tag,
-    settings,
-  };
+  return raw;
 }

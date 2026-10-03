@@ -34,6 +34,39 @@ describe('native sing-box outbound templates', () => {
       settings,
     });
   });
+  it('accepts future native sing-box types without a panel allow-list', () => {
+    expect(
+      normalizeOutboundJsonForPanel({
+        type: 'Future-Transport',
+        tag: 'future',
+        server: 'example.com',
+        server_port: 443,
+        experimental_option: { enabled: true },
+      }),
+    ).toEqual({
+      protocol: 'singbox:future-transport',
+      tag: 'future',
+      settings: {
+        server: 'example.com',
+        server_port: 443,
+        experimental_option: { enabled: true },
+      },
+    });
+  });
+  it('treats a typed native object as sing-box even if that type has a protocol option', () => {
+    expect(
+      normalizeOutboundJsonForPanel({
+        type: 'future-transport',
+        tag: 'future',
+        protocol: 'udp',
+        server: 'example.com',
+      }),
+    ).toEqual({
+      protocol: 'singbox:future-transport',
+      tag: 'future',
+      settings: { protocol: 'udp', server: 'example.com' },
+    });
+  });
   it.each(['singbox:hysteria', 'singbox:hysteria2', 'singbox:tuic', 'selector', 'singbox:urltest'])(
     'uses a handshake probe for %s',
     (protocol) => {
