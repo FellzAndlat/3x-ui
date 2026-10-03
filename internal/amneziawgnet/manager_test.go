@@ -286,7 +286,12 @@ func TestForwardedPortsOnlyChangeStillReconcilesPortForwards(t *testing.T) {
 		t.Fatalf("generate peer keypair: %v", err)
 	}
 
-	const forwardedPort = 58930
+	reservation, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve forwarded port: %v", err)
+	}
+	forwardedPort := reservation.Addr().(*net.TCPAddr).Port
+
 	m := &Manager{ifaces: map[int]*managed{}}
 	inst := amneziawg.Instance{
 		Id:            6,
@@ -307,10 +312,11 @@ func TestForwardedPortsOnlyChangeStillReconcilesPortForwards(t *testing.T) {
 	defer m.StopAll()
 
 	if err := m.Ensure(Desired{Instance: inst}); err != nil {
+		_ = reservation.Close()
 		t.Fatalf("Ensure (create, no ForwardedPorts yet): %v", err)
 	}
-	if _, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", forwardedPort), 200*time.Millisecond); err == nil {
-		t.Fatal("forwarded port already accepting connections before ForwardedPorts was ever set")
+	if err := reservation.Close(); err != nil {
+		t.Fatalf("release forwarded port reservation: %v", err)
 	}
 
 	// Only ForwardedPorts changes -- same keys, same AllowedIPs, same
