@@ -78,7 +78,7 @@ func findAdBlockProfile(id string) (AdBlockProfile, bool) {
 }
 
 func init() {
-	defaultValueMap["adBlockProfile"] = "custom"
+	defaultValueMap["adBlockProfile"] = "balanced"
 	defaultValueMap["adBlockYoutubeMode"] = "off"
 	defaultValueMap["adBlockSourceDomains"] = ""
 	defaultValueMap["adBlockDownloadedSources"] = ""
