@@ -51,7 +51,7 @@ func (m *Manager) additionalCommand(inst Instance, metricsAddr string) (*exec.Cm
 			}
 		}
 		var conf strings.Builder
-		fmt.Fprintf(&conf, "[Interface]\nRole = exit\nMode = l4\nCodec = batched\nEncryptionKeyFile = %s\nURL = %s\nIPCSocket = %s\n", secret, inst.Settings.Context, socket)
+		fmt.Fprintf(&conf, "[Interface]\nRole = exit\nMode = l4\nCodec = batched\nEncryptionKeyFile = %s\nSessionContext = %s\nIPCSocket = %s\n", secret, inst.Settings.Context, socket)
 		for _, t := range inst.Settings.Transports {
 			fmt.Fprintf(&conf, "\n[Transport \"%s\"]\nType = %s\nPriority = %d\n", t.Type, t.Type, t.Priority)
 			if t.Type == "direct" {
@@ -64,7 +64,7 @@ func (m *Manager) additionalCommand(inst Instance, metricsAddr string) (*exec.Cm
 		if err := writePrivate(path, []byte(conf.String())); err != nil {
 			return fail(err)
 		}
-		return exec.CommandContext(ctx, binary(inst.Protocol), "--config", path), cancel, nil
+		return exec.CommandContext(ctx, binary(inst.Protocol), "--config", path, "--negotiate"), cancel, nil
 	}
 	if _, err := exec.LookPath("docker"); err != nil {
 		return fail(fmt.Errorf("FPTN requires Docker for isolated networking: %w", err))

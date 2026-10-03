@@ -144,7 +144,7 @@ func (inst Instance) Validate() error {
 }
 
 func (inst Instance) Bind() string {
-	addr := inst.Listen
+	addr := strings.Trim(inst.Listen, "[]")
 	if addr == "" {
 		addr = "0.0.0.0"
 	}

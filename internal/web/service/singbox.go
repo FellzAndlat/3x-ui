@@ -330,6 +330,23 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 			raw["listen"] = "0.0.0.0"
 		}
 		dbClients := clientsByInbound[inbound.Id]
+		// Snell user keys belong to this inbound. Keep the runtime credentials
+		// identical to the native subscription even when the global client has
+		// a different password for another protocol.
+		snellKeys := map[string]string{}
+		if inbound.Protocol == model.Snell {
+			var local struct {
+				Clients []model.Client `json:"clients"`
+			}
+			if err := json.Unmarshal([]byte(inbound.Settings), &local); err != nil {
+				return nil, err
+			}
+			for _, client := range local.Clients {
+				if client.Enable {
+					snellKeys[client.Email] = client.Password
+				}
+			}
+		}
 
 		enableMap := make(map[string]bool, len(inbound.ClientStats))
 		for _, stat := range inbound.ClientStats {
@@ -360,6 +377,12 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 				if client.Security != "" {
 					entry["security"] = client.Security
 				}
+			case model.Snell:
+				password, present := snellKeys[client.Email]
+				if !present {
+					continue
+				}
+				entry["password"] = password
 			case model.Trojan:
 				if client.Password != "" {
 					entry["password"] = client.Password

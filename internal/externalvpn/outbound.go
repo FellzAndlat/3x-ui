@@ -83,7 +83,7 @@ func ValidateAdditionalOutbound(raw map[string]any) error {
 		if t.Type == "direct" {
 			host, port, err := net.SplitHostPort(t.Dial)
 			n, e := strconv.Atoi(port)
-			if err != nil || e != nil || host == "" || n < 1 || n > 65535 {
+			if err != nil || e != nil || host == "" || strings.ContainsAny(t.Dial, "\r\n\x00#; \t") || n < 1 || n > 65535 {
 				return fmt.Errorf("OpenFlux direct outbound requires host:port")
 			}
 		}
@@ -174,7 +174,7 @@ func startOutbound(tag string, proc *managedOutbound) error {
 			return err
 		}
 		var conf strings.Builder
-		fmt.Fprintf(&conf, "[Interface]\nRole = client\nInbound = socks5\nSocks5 = 127.0.0.1:%d\nCodec = batched\nEncryptionKeyFile = %s\nURL = %s\n", proc.port, secret, s.Context)
+		fmt.Fprintf(&conf, "[Interface]\nRole = client\nInbound = socks5\nSocks5 = 127.0.0.1:%d\nCodec = batched\nEncryptionKeyFile = %s\nSessionContext = %s\n", proc.port, secret, s.Context)
 		for _, t := range s.Transports {
 			fmt.Fprintf(&conf, "\n[Transport \"%s\"]\nType = %s\nPriority = %d\n", t.Type, t.Type, t.Priority)
 			if t.Type == "direct" {
@@ -188,7 +188,7 @@ func startOutbound(tag string, proc *managedOutbound) error {
 			cancel()
 			return err
 		}
-		proc.cmd = exec.CommandContext(ctx, binary(model.OpenFlux), "--config", path)
+		proc.cmd = exec.CommandContext(ctx, binary(model.OpenFlux), "--config", path, "--negotiate")
 	} else {
 		checkCtx, checkCancel := context.WithTimeout(ctx, 10*time.Second)
 		checkErr := exec.CommandContext(checkCtx, "docker", "image", "inspect", "3x-ui-fptn-client:0.4.6").Run()
