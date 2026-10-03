@@ -2,16 +2,17 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"crypto/tls"
-	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
@@ -20,7 +21,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/util/link"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-	"net/http"
 )
 
 // filterOutboundsRejectedByCore drops outbounds the vendored xray-core config

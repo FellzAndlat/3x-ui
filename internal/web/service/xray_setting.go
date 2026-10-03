@@ -2,15 +2,16 @@ package service
 
 import (
 	_ "embed"
+	"encoding/base64"
+	"encoding/json"
 	"slices"
 	"strconv"
 	"strings"
 
-	"encoding/base64"
-	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
+	"github.com/SawaMEN/3x-ui/v3/internal/singbox"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 )
@@ -67,6 +68,20 @@ func (s *XraySettingService) CheckXrayConfig(XrayTemplateConfig string) error {
 			var managed map[string]any
 			if err := json.Unmarshal(outbound, &managed); err != nil {
 				return err
+			}
+			protocol, _ := managed["protocol"].(string)
+			if strings.EqualFold(protocol, "snell") || strings.EqualFold(protocol, "singbox:snell") {
+				core, err := s.GetCoreType()
+				if err != nil {
+					return err
+				}
+				if core != CoreTypeSingBox {
+					return common.NewError("Snell outbounds require sing-box 1.14+")
+				}
+				if _, err := singbox.TranslateXrayOutbound(managed); err != nil {
+					return err
+				}
+				continue
 			}
 			if externalvpn.IsAdditionalOutbound(managed) {
 				if err := externalvpn.ValidateAdditionalOutbound(managed); err != nil {

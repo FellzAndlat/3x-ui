@@ -14,9 +14,8 @@ import (
 	"sync"
 	"time"
 
-	gprocess "github.com/shirou/gopsutil/v4/process"
-
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
+	gprocess "github.com/shirou/gopsutil/v4/process"
 )
 
 const (

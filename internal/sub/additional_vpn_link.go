@@ -1,9 +1,10 @@
 package sub
 
 import (
+	"strings"
+
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
-	"strings"
 )
 
 func (s *SubService) genAdditionalVPNLink(ib *model.Inbound, email string) string {

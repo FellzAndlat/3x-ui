@@ -1,12 +1,13 @@
 package sub
 
 import (
-	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
-	"github.com/SawaMEN/3x-ui/v3/internal/snell"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/SawaMEN/3x-ui/v3/internal/snell"
 )
 
 // Raw links are a portable credential export; native sing-box JSON is the

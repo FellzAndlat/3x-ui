@@ -11,18 +11,18 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 	"crypto/tls"
 	"encoding/json"
+	"io/fs"
+	"net/http"
+	"net/http/httptrace"
+	"net/url"
+
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/json_util"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-	"io/fs"
-	"net/http"
-	"net/http/httptrace"
-	"net/url"
 )
 
 // HTTP-mode probing works by spinning up ONE temporary xray instance per

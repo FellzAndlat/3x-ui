@@ -2,19 +2,19 @@ package externalvpn
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"crypto/sha256"
-	"encoding/hex"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
-	"os/exec"
-	"path/filepath"
 )
 
 func containerName(id int) string {

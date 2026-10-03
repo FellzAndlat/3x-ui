@@ -5,17 +5,16 @@
 package link
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"encoding/base64"
-	"encoding/json"
-	"net/url"
 )
 
 // Outbound is the minimal shape we emit for each parsed link.

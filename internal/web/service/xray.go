@@ -10,8 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 	"encoding/json"
+	"path/filepath"
+
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
@@ -20,7 +21,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/util/json_util"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 	"go.uber.org/atomic"
-	"path/filepath"
 )
 
 var (

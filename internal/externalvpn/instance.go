@@ -1,15 +1,15 @@
 package externalvpn
 
 import (
+	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 
-	"crypto/rand"
-	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
-	"net/url"
 )
 
 type Client struct {

@@ -2,13 +2,6 @@ package externalvpn
 
 import (
 	"bytes"
-	"fmt"
-	"net"
-	"os"
-	"regexp"
-	"strings"
-	"time"
-
 	"compress/flate"
 	"crypto/md5" // FPTN's token format requires MD5 certificate fingerprints.
 	"crypto/sha256"
@@ -18,9 +11,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"fmt"
+	"net"
 	"net/url"
+	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 )
 
 const DefaultFPTNImage = "fptnvpn/fptn-vpn-server:0.4.4"

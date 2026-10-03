@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
@@ -26,7 +25,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"
 	wgutil "github.com/SawaMEN/3x-ui/v3/internal/util/wireguard"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

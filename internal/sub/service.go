@@ -1,10 +1,14 @@
 package sub
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
 	"net"
+	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -12,12 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"net/url"
-	"github.com/gin-gonic/gin"
-	"github.com/goccy/go-json"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
@@ -31,6 +29,8 @@ import (
 	wgutil "github.com/SawaMEN/3x-ui/v3/internal/util/wireguard"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
+	"github.com/gin-gonic/gin"
+	"github.com/goccy/go-json"
 )
 
 const salamanderWarningCacheSize = 2048
