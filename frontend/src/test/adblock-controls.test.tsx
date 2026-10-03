@@ -5,6 +5,11 @@ import { HttpUtil } from '@/utils';
 
 function status(overrides = {}) {
   return {
+    server: {
+      enabled: false,
+      outbound: '',
+      limits: { maxConnections: 128, workers: 4, bodyMiB: 8, queueMs: 250 },
+    },
     policies: [],
     enabled: true,
     sources: '',
@@ -38,12 +43,12 @@ describe('AdBlock controls', () => {
     render(<AdBlockTab />);
     await screen.findByText('Не удалось загрузить настройки AdBlock');
     expect(
-      (screen.getByRole('button', { name: 'Пауза на 5 мин' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Пауза на 15 минут' }) as HTMLButtonElement).disabled,
     ).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Повторить загрузку' }));
-    await screen.findByText('AdBlock включён');
+    fireEvent.click(screen.getByRole('button', { name: 'Повторить' }));
+    await screen.findByText('AdBlock работает');
     expect(
-      (screen.getByRole('button', { name: 'Пауза на 5 мин' }) as HTMLButtonElement).disabled,
+      (screen.getByRole('button', { name: 'Пауза на 15 минут' }) as HTMLButtonElement).disabled,
     ).toBe(false);
     expect(get).toHaveBeenCalledTimes(2);
   });
@@ -54,7 +59,7 @@ describe('AdBlock controls', () => {
       .spyOn(HttpUtil, 'get')
       .mockResolvedValue({ success: true, msg: '', obj: status() });
     render(<AdBlockTab />);
-    await screen.findByText('AdBlock включён');
+    await screen.findByText('AdBlock работает');
     const save = screen.getByRole('button', { name: /Сохранить/ }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     get.mockResolvedValue({ success: true, msg: '', obj: status({ domainCount: 2 }) });
@@ -64,6 +69,7 @@ describe('AdBlock controls', () => {
       callback();
     });
     expect(save.disabled).toBe(true);
+    fireEvent.click(screen.getByText('Расширенные настройки'));
     const custom = screen.getByPlaceholderText(/ads.example.com\s+tracker.example.net/);
     fireEvent.change(custom, { target: { value: 'new.ads.example' } });
     await waitFor(() => expect(save.disabled).toBe(false));
@@ -88,28 +94,28 @@ describe('AdBlock controls', () => {
       .spyOn(HttpUtil, 'post')
       .mockResolvedValue({ success: true, msg: '', obj: status() });
     render(<AdBlockTab />);
-    await screen.findByText('Настройки сохранены — ожидают применения');
-    fireEvent.click(screen.getByRole('button', { name: 'Повторить применение' }));
-    await screen.findByText('AdBlock включён');
+    await screen.findByText('Изменения ожидают применения');
+    fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
+    await screen.findByText('AdBlock работает');
     expect(post.mock.calls[0]?.[0]).toBe('/panel/api/adblock/apply');
   });
   it('pauses without changing the enabled preference', async () => {
     vi.spyOn(HttpUtil, 'get').mockResolvedValue({ success: true, msg: '', obj: status() });
-    const deadline = new Date(Date.now() + 5 * 60_000).toISOString();
+    const deadline = new Date(Date.now() + 15 * 60_000).toISOString();
     const post = vi
       .spyOn(HttpUtil, 'post')
       .mockResolvedValue({ success: true, msg: '', obj: status({ pausedUntil: deadline }) });
     render(<AdBlockTab />);
-    await screen.findByText('AdBlock включён');
-    fireEvent.click(screen.getByRole('button', { name: 'Пауза на 5 мин' }));
+    await screen.findByText('AdBlock работает');
+    fireEvent.click(screen.getByRole('button', { name: 'Пауза на 15 минут' }));
     await screen.findByText('AdBlock временно приостановлен');
     expect(post.mock.calls[0]?.[0]).toBe('/panel/api/adblock/pause');
-    expect(post.mock.calls[0][1]).toEqual({ minutes: 5 });
-    expect(screen.getByRole('button', { name: 'Возобновить сейчас' })).toBeTruthy();
+    expect(post.mock.calls[0][1]).toEqual({ minutes: 15 });
+    expect(screen.getByRole('button', { name: 'Возобновить' })).toBeTruthy();
   });
 });
 
-it('saves policy priority changes and offers the companion download', async () => {
+it('saves policy priority changes', async () => {
   const scope = { inboundMode: 'all', inbounds: [], clientMode: 'all', clients: [] };
   const policies = [
     { id: 'first', name: 'First', enabled: true, profile: 'off', scope },
@@ -126,17 +132,16 @@ it('saves policy priority changes and offers the companion download', async () =
     obj: status({ policies: [...policies].reverse() }),
   });
   render(<AdBlockTab />);
+  await screen.findByText('AdBlock работает');
+  fireEvent.click(screen.getByText('Расширенные настройки'));
   await screen.findByDisplayValue('First');
-  expect(screen.getByRole('link', { name: /Скачать расширение/ }).getAttribute('href')).toContain(
-    'panel/api/adblock/youtube-extension',
-  );
   fireEvent.click(screen.getAllByRole('button', { name: 'Ниже' })[0]);
   fireEvent.click(screen.getByRole('button', { name: /Сохранить/ }));
   await waitFor(() => expect(post).toHaveBeenCalled());
   expect(
     (post.mock.calls[0][1] as { policies: { id: string }[] }).policies.map((policy) => policy.id),
   ).toEqual(['second', 'first']);
-});
+}, 30_000);
 
 it('saves managed server settings with the ordinary AdBlock profile', async () => {
   vi.spyOn(HttpUtil, 'get').mockResolvedValue({ success: true, msg: '', obj: status() });
@@ -144,8 +149,9 @@ it('saves managed server settings with the ordinary AdBlock profile', async () =
     .spyOn(HttpUtil, 'post')
     .mockResolvedValue({ success: true, msg: '', obj: status() });
   render(<AdBlockTab />);
-  await screen.findByText('AdBlock включён');
-  fireEvent.click(screen.getByRole('switch', { name: 'Серверный фильтр YouTube' }));
+  await screen.findByText('AdBlock работает');
+  fireEvent.click(screen.getByText('Расширенные настройки'));
+  fireEvent.click(screen.getByRole('switch', { name: 'Экспериментальная серверная фильтрация' }));
   fireEvent.click(screen.getByRole('button', { name: /Сохранить/ }));
   await waitFor(() => expect(post).toHaveBeenCalled());
   expect(

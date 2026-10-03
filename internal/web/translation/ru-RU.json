@@ -2612,9 +2612,6 @@
         "dns": "DNS",
         "route": "Маршрутизация",
         "outbounds": "Исходящие",
-        "endpoints": "Endpoints",
-        "certificates": "Сертификаты",
-        "network": "Сеть",
         "advanced": "Расширенные"
       },
       "running": "Запущено",

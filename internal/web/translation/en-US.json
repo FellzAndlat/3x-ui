@@ -2612,9 +2612,6 @@
         "dns": "DNS",
         "route": "Routing",
         "outbounds": "Outbounds",
-        "endpoints": "Endpoints",
-        "certificates": "Certificates",
-        "network": "Network",
         "advanced": "Advanced"
       },
       "running": "Running",

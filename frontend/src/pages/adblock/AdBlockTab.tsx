@@ -482,7 +482,7 @@ export default function AdBlockTab() {
             <Typography.Text strong>Индивидуальные правила</Typography.Text>
             <Typography.Paragraph type="secondary">
               Необязательно. Позволяет назначить другой готовый набор конкретному inbound или
-              клиенту.
+              клиенту. Первое подходящее правило имеет приоритет.
             </Typography.Paragraph>
             <Space orientation="vertical" style={{ width: '100%' }}>
               {status.policies.map((policy, index) => {
@@ -493,6 +493,14 @@ export default function AdBlockTab() {
                       item.id === policy.id ? { ...item, ...update } : item,
                     ),
                   }));
+                const movePolicy = (offset: number) =>
+                  setStatus((prev) => {
+                    const policies = [...prev.policies];
+                    const target = index + offset;
+                    if (target < 0 || target >= policies.length) return prev;
+                    [policies[index], policies[target]] = [policies[target], policies[index]];
+                    return { ...prev, policies };
+                  });
 
                 return (
                   <Card
@@ -510,19 +518,35 @@ export default function AdBlockTab() {
                       </Space>
                     }
                     extra={
-                      <Button
-                        size="small"
-                        danger
-                        disabled={busy}
-                        onClick={() =>
-                          setStatus((prev) => ({
-                            ...prev,
-                            policies: prev.policies.filter((item) => item.id !== policy.id),
-                          }))
-                        }
-                      >
-                        Удалить
-                      </Button>
+                      <Space>
+                        <Button
+                          size="small"
+                          disabled={busy || index === 0}
+                          onClick={() => movePolicy(-1)}
+                        >
+                          Выше
+                        </Button>
+                        <Button
+                          size="small"
+                          disabled={busy || index === status.policies.length - 1}
+                          onClick={() => movePolicy(1)}
+                        >
+                          Ниже
+                        </Button>
+                        <Button
+                          size="small"
+                          danger
+                          disabled={busy}
+                          onClick={() =>
+                            setStatus((prev) => ({
+                              ...prev,
+                              policies: prev.policies.filter((item) => item.id !== policy.id),
+                            }))
+                          }
+                        >
+                          Удалить
+                        </Button>
+                      </Space>
                     }
                   >
                     <Row gutter={[16, 12]}>
@@ -593,6 +617,7 @@ export default function AdBlockTab() {
               </Typography.Paragraph>
               <Space>
                 <Switch
+                  aria-label="Экспериментальная серверная фильтрация"
                   disabled={busy}
                   checked={status.server.enabled}
                   onChange={(enabled) =>
