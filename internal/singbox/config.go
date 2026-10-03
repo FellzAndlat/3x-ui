@@ -15,14 +15,20 @@ import (
 )
 
 type Config struct {
-	Log          map[string]any   `json:"log,omitempty"`
-	DNS          map[string]any   `json:"dns,omitempty"`
-	Inbounds     []map[string]any `json:"inbounds,omitempty"`
-	Outbounds    []map[string]any `json:"outbounds,omitempty"`
-	Route        map[string]any   `json:"route,omitempty"`
-	Endpoints    []map[string]any `json:"endpoints,omitempty"`
-	Services     []map[string]any `json:"services,omitempty"`
-	Experimental map[string]any   `json:"experimental,omitempty"`
+	Schema               string           `json:"$schema,omitempty"`
+	NTP                  map[string]any   `json:"ntp,omitempty"`
+	Certificate          map[string]any   `json:"certificate,omitempty"`
+	CertificateProviders []map[string]any `json:"certificate_providers,omitempty"`
+	HTTPClients          []map[string]any `json:"http_clients,omitempty"`
+	NetworkNamespaces    []map[string]any `json:"network_namespaces,omitempty"`
+	Log                  map[string]any   `json:"log,omitempty"`
+	DNS                  map[string]any   `json:"dns,omitempty"`
+	Inbounds             []map[string]any `json:"inbounds,omitempty"`
+	Outbounds            []map[string]any `json:"outbounds,omitempty"`
+	Route                map[string]any   `json:"route,omitempty"`
+	Endpoints            []map[string]any `json:"endpoints,omitempty"`
+	Services             []map[string]any `json:"services,omitempty"`
+	Experimental         map[string]any   `json:"experimental,omitempty"`
 }
 
 func NewConfig() *Config {

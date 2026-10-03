@@ -199,21 +199,6 @@ function AppSidebar() {
         label: t('pages.singBox.sections.outbounds'),
       },
       {
-        key: '/singbox#endpoints',
-        icon: <GlobalOutlined />,
-        label: t('pages.singBox.sections.endpoints'),
-      },
-      {
-        key: '/singbox#certificates',
-        icon: <SafetyOutlined />,
-        label: t('pages.singBox.sections.certificates'),
-      },
-      {
-        key: '/singbox#network',
-        icon: <CloudServerOutlined />,
-        label: t('pages.singBox.sections.network'),
-      },
-      {
         key: '/singbox#advanced',
         icon: <CodeOutlined />,
         label: t('pages.singBox.sections.advanced'),
