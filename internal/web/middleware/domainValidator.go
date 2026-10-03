@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/SawaMEN/3x-ui/v3/internal/web/global"
 	"github.com/gin-gonic/gin"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/web/global"
 )
 
 type legacySubscriptionMatcher interface {

@@ -39,7 +39,9 @@ func (p *LinkProvider) LinksForClient(host string, inbound *model.Inbound, email
 		return nil
 	}
 	svc := p.build(host)
-	svc.refreshSudokuCredentials(inbound)
+	if !svc.refreshSudokuCredentials(inbound) {
+		return nil
+	}
 	svc.projectThroughFallbackMaster(inbound)
 	if endpoints := svc.hostEndpoints(inbound, "raw"); len(endpoints) > 0 {
 		if client, ok := svc.clientForLink(inbound, email); ok {
@@ -56,7 +58,9 @@ func (p *LinkProvider) LinksForInbounds(host string, inbounds []*model.Inbound) 
 		if !sudokuInboundUsable(inbound) {
 			continue
 		}
-		svc.refreshSudokuCredentials(inbound)
+		if !svc.refreshSudokuCredentials(inbound) {
+			continue
+		}
 		raw = append(raw, svc.inboundLinks(inbound)...)
 	}
 	return normalizeGeneratedLinks(raw)

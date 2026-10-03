@@ -114,7 +114,7 @@ func pickTelemtWebListenPort(primaryPort int) (int, error) {
 		if port == primaryPort {
 			continue
 		}
-		listener, err := net.Listen("tcp", net.JoinHostPort(telemtWebListenIP, fmt.Sprint(port)))
+		listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", net.JoinHostPort(telemtWebListenIP, fmt.Sprint(port)))
 		if err == nil {
 			_ = listener.Close()
 			return port, nil
@@ -416,9 +416,15 @@ func telemtWebLink(domain, secret string) string {
 }
 
 func resolveTelemtWebPublicAddr(domain string) (string, error) {
-	ips, err := net.LookupIP(domain)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	addresses, err := net.DefaultResolver.LookupIPAddr(ctx, domain)
 	if err != nil {
 		return "", fmt.Errorf("WEB Proxy domain %s cannot be resolved: %w", domain, err)
+	}
+	ips := make([]net.IP, 0, len(addresses))
+	for _, address := range addresses {
+		ips = append(ips, address.IP)
 	}
 	isPublic := func(ip net.IP) bool {
 		return ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsUnspecified()
@@ -644,7 +650,7 @@ func telemtWebNginxEnabled() bool {
 }
 
 func telemtWebEnsureNginxRunning() error {
-	if err := exec.Command("nginx", "-t").Run(); err != nil {
+	if err := exec.CommandContext(context.Background(), "nginx", "-t").Run(); err != nil {
 		return errors.New("nginx configuration test failed")
 	}
 	if telemtWebNginxActive() {

@@ -67,11 +67,16 @@ func TranslateXrayRoutingWithGeoData(raw map[string]any, store *geodata.Store) (
 					}
 					for _, entry := range entries {
 						switch entry.Kind {
-						case "domain": expanded = append(expanded, "domain:"+entry.Value)
-						case "full": expanded = append(expanded, "full:"+entry.Value)
-						case "keyword": expanded = append(expanded, "keyword:"+entry.Value)
-						case "regexp": expanded = append(expanded, "regexp:"+entry.Value)
-						default: return nil, fmt.Errorf("routing rule %d: domain %q has invalid entry %q", i, domain, entry.Value)
+						case "domain":
+							expanded = append(expanded, "domain:"+entry.Value)
+						case "full":
+							expanded = append(expanded, "full:"+entry.Value)
+						case "keyword":
+							expanded = append(expanded, "keyword:"+entry.Value)
+						case "regexp":
+							expanded = append(expanded, "regexp:"+entry.Value)
+						default:
+							return nil, fmt.Errorf("routing rule %d: domain %q has invalid entry %q", i, domain, entry.Value)
 						}
 					}
 				} else {
@@ -91,7 +96,9 @@ func TranslateXrayRoutingWithGeoData(raw map[string]any, store *geodata.Store) (
 					if err != nil {
 						return nil, fmt.Errorf("routing rule %d: IP %q: %w", i, ip, err)
 					}
-					for _, entry := range entries { cidrs = append(cidrs, entry.Value) }
+					for _, entry := range entries {
+						cidrs = append(cidrs, entry.Value)
+					}
 					continue
 				}
 				if strings.EqualFold(ip, "geoip:private") {
@@ -127,7 +134,9 @@ func TranslateXrayRoutingWithGeoData(raw map[string]any, store *geodata.Store) (
 				if err != nil {
 					return nil, fmt.Errorf("routing rule %d: sourceIP %q: %w", i, source, err)
 				}
-				for _, entry := range entries { sourceCIDRs = append(sourceCIDRs, entry.Value) }
+				for _, entry := range entries {
+					sourceCIDRs = append(sourceCIDRs, entry.Value)
+				}
 				continue
 			}
 			if strings.EqualFold(source, "geoip:private") {

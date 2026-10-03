@@ -1432,7 +1432,6 @@ func TestBuildAmneziaWGProxyForClashEffectiveMTU(t *testing.T) {
 	})
 }
 
-
 func TestGetProxiesPartialExternalProxyFallsBack(t *testing.T) {
 	svc := &SubClashService{SubService: &SubService{address: "sub.example.com"}}
 	inbound := &model.Inbound{
@@ -1460,10 +1459,10 @@ func TestGetProxiesPartialExternalProxyFallsBack(t *testing.T) {
 func TestBuildHysteriaProxyExternalTLSOverrides(t *testing.T) {
 	svc := &SubClashService{SubService: &SubService{}}
 	inbound := &model.Inbound{
-		Protocol: model.Hysteria,
-		Listen:   "198.51.100.10",
-		Port:     443,
-		Settings: `{"version":2,"clients":[{"email":"user@example.com","auth":"secret","enable":true}]}`,
+		Protocol:       model.Hysteria,
+		Listen:         "198.51.100.10",
+		Port:           443,
+		Settings:       `{"version":2,"clients":[{"email":"user@example.com","auth":"secret","enable":true}]}`,
 		StreamSettings: `{"security":"tls","tlsSettings":{"serverName":"base.example.com","alpn":["h3"],"settings":{"fingerprint":"chrome"}},"finalmask":{"udp":[{"type":"salamander","settings":{"password":"obfs"}}]}}`,
 	}
 	client := model.Client{Email: "user@example.com", Auth: "secret"}
@@ -1492,18 +1491,17 @@ func TestBuildHysteriaProxyExternalTLSOverrides(t *testing.T) {
 	}
 	if proxy["obfs"] != "salamander" || proxy["obfs-password"] != "obfs" {
 		t.Fatalf("salamander obfs lost: %#v", proxy)
+	}
 }
-}
-
 
 func TestGetProxiesSkipsPlaintextHysteriaExternalProxy(t *testing.T) {
 	inbound := &model.Inbound{
 		Protocol: model.Hysteria, Listen: "203.0.113.1", Port: 443,
-		Settings: `{"version":2,"clients":[{"email":"user","auth":"secret","enable":true}]}`,
+		Settings:       `{"version":2,"clients":[{"email":"user","auth":"secret","enable":true}]}`,
 		StreamSettings: `{"security":"tls","externalProxy":[{"forceTls":"none","dest":"plain.example.com","port":80}]}`,
 	}
-	client := model.Client{Email:"user", Auth:"secret", Enable:true}
-	svc := &SubClashService{SubService:&SubService{address:"sub.example.com"}}
+	client := model.Client{Email: "user", Auth: "secret", Enable: true}
+	svc := &SubClashService{SubService: &SubService{address: "sub.example.com"}}
 	proxies := svc.getProxies(svc.SubService, inbound, client, "sub.example.com")
 	if len(proxies) != 0 {
 		t.Fatalf("plaintext Hysteria external endpoint must be skipped from Clash output, got %d proxies", len(proxies))

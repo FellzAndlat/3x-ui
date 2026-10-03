@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
@@ -49,7 +50,8 @@ func managedIPTablesJumpExists(ctx context.Context, binary string) (bool, error)
 	cmd := exec.CommandContext(ctx, binary, "-C", "INPUT", "-j", managedIPTablesChain)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	if err := cmd.Run(); err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			return false, nil
 		}
 		return false, err

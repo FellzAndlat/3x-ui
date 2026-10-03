@@ -52,8 +52,10 @@ func TestSingBoxExcludesLocalSidecarInbounds(t *testing.T) {
 }
 
 func TestSingBoxTUICInboundPreservesUsersAndTLS(t *testing.T) {
-	ib := &model.Inbound{Tag: "tuic-443", Protocol: model.TUIC, Port: 443,
-		Settings: `{"server":{"certificate":"/tls/cert.pem","private_key":"/tls/key.pem","congestion_control":"bbr","alpn":["h3"],"authentication_timeout":5}}`}
+	ib := &model.Inbound{
+		Tag: "tuic-443", Protocol: model.TUIC, Port: 443,
+		Settings: `{"server":{"certificate":"/tls/cert.pem","private_key":"/tls/key.pem","congestion_control":"bbr","alpn":["h3"],"authentication_timeout":5}}`,
+	}
 	clients := []any{map[string]any{"email": "alice", "uuid": "768e8bdd-bee3-4442-9006-b26464148aaa", "password": "secret"}}
 	got, err := singBoxTUICInbound(ib, clients)
 	if err != nil {

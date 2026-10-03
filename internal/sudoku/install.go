@@ -167,7 +167,8 @@ func pickAsset(assets []struct {
 }) (struct {
 	Name string
 	URL  string
-}, error) {
+}, error,
+) {
 	arch := runtime.GOARCH
 	switch arch {
 	case "amd64", "arm64":

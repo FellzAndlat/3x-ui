@@ -9,8 +9,8 @@ import (
 func TestPingtunnelSettingsValidation(t *testing.T) {
 	base := Settings{Key: 123456, Encrypt: "chacha20", EncryptKey: "secret", ConnectTimeout: 1000, Congestion: "bb"}
 	for _, tc := range []struct {
-		name string
-		edit func(*Settings)
+		name  string
+		edit  func(*Settings)
 		valid bool
 	}{
 		{"encrypted", func(*Settings) {}, true},

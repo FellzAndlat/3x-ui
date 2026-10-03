@@ -18,10 +18,10 @@ type telemtSubscriptionProfile struct {
 }
 
 type telemtSubscriptionPayload struct {
-	Enabled         bool                        `json:"enabled"`
+	Enabled         bool                       `json:"enabled"`
 	Personal        *telemtSubscriptionProfile `json:"personal,omitempty"`
-	WebProxyEnabled bool                        `json:"webProxyEnabled"`
-	WebProxy        string                      `json:"webProxy,omitempty"`
+	WebProxyEnabled bool                       `json:"webProxyEnabled"`
+	WebProxy        string                     `json:"webProxy,omitempty"`
 }
 
 func registerTelemtSubscriptionRoute(g *gin.RouterGroup) {

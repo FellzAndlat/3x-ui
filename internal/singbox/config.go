@@ -206,10 +206,6 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 			return nil, fmt.Errorf("outbound %q has an empty server address", tag)
 		}
 		hySettings := rawObject(streamSettings, "hysteriaSettings")
-		version := rawInt(hySettings, "version")
-		if version == 0 {
-			version = 2
-		}
 		serverPorts := compatStringSlice(hySettings["server_ports"])
 		if len(serverPorts) == 0 {
 			serverPorts = compatStringSlice(hySettings["serverPorts"])
@@ -791,7 +787,7 @@ func TranslateShadowTLSWrappedInbound(raw map[string]any) (map[string]any, map[s
 		"settings": map[string]any{
 			"version": 3, "handshake": transport["handshake"],
 			"handshakeForServerName": transport["handshakeForServerName"],
-			"strictMode": transport["strictMode"], "wildcardSni": transport["wildcardSni"],
+			"strictMode":             transport["strictMode"], "wildcardSni": transport["wildcardSni"],
 			"clients": []any{map[string]any{"email": "panel", "password": password}},
 		},
 	}

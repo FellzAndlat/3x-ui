@@ -72,10 +72,12 @@ func TestJsonAndClashServeExternalLinkOnlySub(t *testing.T) {
 func TestStructuredSubscriptionsRejectUnrenderableInbound(t *testing.T) {
 	initSubDB(t)
 	db := database.GetDB()
-	inbound := &model.Inbound{UserId: 1, Tag: "hysteria-plain", Enable: true,
+	inbound := &model.Inbound{
+		UserId: 1, Tag: "hysteria-plain", Enable: true,
 		Listen: "example.com", Port: 443, Protocol: model.Hysteria,
-		Settings: `{"version":2,"clients":[{"email":"user@example.com","auth":"secret","subId":"plain-sub","enable":true}]}`,
-		StreamSettings: `{"network":"hysteria","security":"tls","hysteriaSettings":{"version":2},"externalProxy":[{"forceTls":"none","dest":"plain.example.com","port":80}]}`}
+		Settings:       `{"version":2,"clients":[{"email":"user@example.com","auth":"secret","subId":"plain-sub","enable":true}]}`,
+		StreamSettings: `{"network":"hysteria","security":"tls","hysteriaSettings":{"version":2},"externalProxy":[{"forceTls":"none","dest":"plain.example.com","port":80}]}`,
+	}
 	if err := db.Create(inbound).Error; err != nil {
 		t.Fatal(err)
 	}

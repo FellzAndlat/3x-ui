@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -173,7 +174,7 @@ func (TelemtService) DeleteSubscriptionProxy(subID string) error {
 
 	if err := deleteTelemtSubscriptionUserLegacy(username, active); err != nil {
 		if apiErr != nil {
-			return fmt.Errorf("telemt: revoke subscription user via API (%v) and config fallback: %w", apiErr, err)
+			return fmt.Errorf("telemt: revoke subscription user via API (%w) and config fallback: %w", apiErr, err)
 		}
 		return err
 	}
@@ -192,7 +193,7 @@ func createTelemtSubscriptionUser(username, secret string) error {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:9091/v1/users", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://127.0.0.1:9091/v1/users", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("telemt: create subscription user request: %w", err)
 	}
@@ -222,7 +223,7 @@ func createTelemtSubscriptionUser(username, secret string) error {
 }
 
 func deleteTelemtSubscriptionUser(username string) error {
-	req, err := http.NewRequest(http.MethodDelete, "http://127.0.0.1:9091/v1/users/"+url.PathEscape(username), nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, "http://127.0.0.1:9091/v1/users/"+url.PathEscape(username), nil)
 	if err != nil {
 		return fmt.Errorf("telemt: delete subscription user request: %w", err)
 	}

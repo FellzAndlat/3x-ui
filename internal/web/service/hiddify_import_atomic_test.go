@@ -15,7 +15,7 @@ func TestHiddifyTwentyUsersImportWithoutInbounds(t *testing.T) {
 	var users strings.Builder
 	users.WriteString(`{"users":[{"uuid":"00000000-0000-4000-8000-000000000000","name":"default","enable":true,"is_active":true}`)
 	for i := 1; i <= 20; i++ {
-		users.WriteString(fmt.Sprintf(`,{"uuid":"00000000-0000-4000-8000-%012d","name":"User%d","enable":true,"is_active":true}`, i, i))
+		fmt.Fprintf(&users, `,{"uuid":"00000000-0000-4000-8000-%012d","name":"User%d","enable":true,"is_active":true}`, i, i)
 	}
 	users.WriteString(`]}`)
 

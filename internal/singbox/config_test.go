@@ -678,7 +678,7 @@ func TestTranslateXrayShadowTLSInbound(t *testing.T) {
 		"listen":   "0.0.0.0",
 		"port":     443,
 		"settings": map[string]any{
-			"version": 3,
+			"version":  3,
 			"innerKey": "MDEyMzQ1Njc4OWFiY2RlZg==",
 			"handshake": map[string]any{
 				"server":     "cloudflare.com",

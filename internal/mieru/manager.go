@@ -1,18 +1,18 @@
 package mieru
 
 import (
-  "encoding/json"
-  "fmt"
-  "os"
-  "path/filepath"
-  "slices"
-  "strconv"
-  "strings"
-  "sync"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
 
-  "github.com/SawaMEN/3x-ui/v3/internal/config"
-  "github.com/SawaMEN/3x-ui/v3/internal/database/model"
-  "github.com/SawaMEN/3x-ui/v3/internal/logger"
+	"github.com/SawaMEN/3x-ui/v3/internal/config"
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 )
 
 type PortBinding struct {
@@ -27,14 +27,14 @@ type User struct {
 }
 
 type Instance struct {
-	Id                    int
-	Tag                   string
-	Listen                string
-	PortBindings          []PortBinding
-	Users                 []User
-	MTU                   int
-	LoggingLevel          string
-	UserHintIsMandatory   bool
+	Id                  int
+	Tag                 string
+	Listen              string
+	PortBindings        []PortBinding
+	Users               []User
+	MTU                 int
+	LoggingLevel        string
+	UserHintIsMandatory bool
 }
 
 func stringSlice(v any) []string {
@@ -230,7 +230,6 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 	}
 	mandatory, _ := raw["userHintIsMandatory"].(bool)
 
-
 	return Instance{
 		Id:                  ib.Id,
 		Tag:                 ib.Tag,
@@ -269,22 +268,45 @@ func (inst Instance) fingerprint() string {
 	return strings.Join(parts, "|")
 }
 
-type managed struct { proc *Process; tag string; fp string; restartFP string }
-type Manager struct { mu sync.Mutex; procs map[int]*managed; lastErr map[int]string; traffic map[int]map[string]trafficCursor }
-var ( once sync.Once; singleton *Manager )
+type (
+	managed struct {
+		proc      *Process
+		tag       string
+		fp        string
+		restartFP string
+	}
+	Manager struct {
+		mu      sync.Mutex
+		procs   map[int]*managed
+		lastErr map[int]string
+		traffic map[int]map[string]trafficCursor
+	}
+)
+
+var (
+	once      sync.Once
+	singleton *Manager
+)
+
 func GetManager() *Manager {
-  once.Do(func(){
-    singleton=&Manager{
-      procs: map[int]*managed{},
-      lastErr: map[int]string{},
-      traffic: map[int]map[string]trafficCursor{},
-    }
-  })
-  return singleton
+	once.Do(func() {
+		singleton = &Manager{
+			procs:   map[int]*managed{},
+			lastErr: map[int]string{},
+			traffic: map[int]map[string]trafficCursor{},
+		}
+	})
+	return singleton
 }
 func configDir() string { return filepath.Join(config.GetBinFolderPath(), "mieru") }
-func configPathForID(id int) string { return filepath.Join(configDir(), fmt.Sprintf("mita-%d.json", id)) }
-func socketPathForID(id int) string { return filepath.Join(configDir(), fmt.Sprintf("mita-%d.sock", id)) }
+func configPathForID(id int) string {
+	return filepath.Join(configDir(), fmt.Sprintf("mita-%d.json", id))
+}
+
+func socketPathForID(id int) string {
+	return filepath.Join(configDir(), fmt.Sprintf("mita-%d.sock", id))
+}
+
 func renderConfig(inst Instance) map[string]any {
 	bindings := make([]any, 0, len(inst.PortBindings))
 	for _, b := range inst.PortBindings {
@@ -302,9 +324,9 @@ func renderConfig(inst Instance) map[string]any {
 	}
 	out := map[string]any{
 		"portBindings": bindings,
-		"users": users,
+		"users":        users,
 		"loggingLevel": inst.LoggingLevel,
-		"mtu": inst.MTU,
+		"mtu":          inst.MTU,
 		"dns": map[string]any{
 			"dualStack": "PREFER_IPv4",
 		},
@@ -323,61 +345,128 @@ func renderConfig(inst Instance) map[string]any {
 	}
 	return out
 }
-func writeConfig(inst Instance) (string,error) {
-  if err:=os.MkdirAll(configDir(),0750); err!=nil{return "",err}
-  data,err:=json.MarshalIndent(renderConfig(inst),"","  "); if err!=nil{return "",err}
-  path:=configPathForID(inst.Id); if err:=os.WriteFile(path,append(data,'\n'),0640);err!=nil{return "",err}; return path,nil
-}
-func (m *Manager) ensureLocked(inst Instance) error {
-  fp := inst.fingerprint()
-  restartFP := inst.restartFingerprint()
-  if cur := m.procs[inst.Id]; cur != nil && cur.proc != nil && cur.proc.IsRunning() {
-    if cur.fp == fp {
-      cur.tag = inst.Tag
-      return nil
-    }
-    // Upstream mita allows users and loggingLevel to be reloaded without
-    // disturbing active connections. Reuse that path when no restart-only
-    // server setting changed (ports/MTU/listen/advanced settings).
-    if cur.restartFP == restartFP {
-      if _, err := writeConfig(inst); err == nil {
-        if err := cur.proc.Reload(); err == nil {
-          cur.tag = inst.Tag
-          cur.fp = fp
-          delete(m.lastErr, inst.Id)
-          logger.Debugf("mieru: reloaded mita for inbound %d (%s)", inst.Id, inst.Tag)
-          return nil
-        } else {
-          logger.Debug("mieru: mita reload failed, falling back to restart:", err)
-        }
-      }
-    }
-  }
 
-  if cur := m.procs[inst.Id]; cur != nil {
-    _ = cur.proc.Stop()
-    delete(m.procs, inst.Id)
-    delete(m.traffic, inst.Id)
-  }
-  path, err := writeConfig(inst)
-  if err != nil {
-    return err
-  }
-  proc := newProcess(path, inst.Tag, socketPathForID(inst.Id))
-  if err := proc.Start(); err != nil {
-    return err
-  }
-  m.procs[inst.Id] = &managed{proc: proc, tag: inst.Tag, fp: fp, restartFP: restartFP}
-  delete(m.lastErr, inst.Id)
-  logger.Infof("mieru: started mita for inbound %d (%s)", inst.Id, inst.Tag)
-  return nil
+func writeConfig(inst Instance) (string, error) {
+	if err := os.MkdirAll(configDir(), 0o750); err != nil {
+		return "", err
+	}
+	data, err := json.MarshalIndent(renderConfig(inst), "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path := configPathForID(inst.Id)
+	if err := os.WriteFile(path, append(data, '\n'), 0o640); err != nil {
+		return "", err
+	}
+	return path, nil
 }
-func (m *Manager) Ensure(inst Instance) error {m.mu.Lock();defer m.mu.Unlock();return m.ensureLocked(inst)}
+
+func (m *Manager) ensureLocked(inst Instance) error {
+	fp := inst.fingerprint()
+	restartFP := inst.restartFingerprint()
+	if cur := m.procs[inst.Id]; cur != nil && cur.proc != nil && cur.proc.IsRunning() {
+		if cur.fp == fp {
+			cur.tag = inst.Tag
+			return nil
+		}
+		// Upstream mita allows users and loggingLevel to be reloaded without
+		// disturbing active connections. Reuse that path when no restart-only
+		// server setting changed (ports/MTU/listen/advanced settings).
+		if cur.restartFP == restartFP {
+			if _, err := writeConfig(inst); err == nil {
+				if err := cur.proc.Reload(); err == nil {
+					cur.tag = inst.Tag
+					cur.fp = fp
+					delete(m.lastErr, inst.Id)
+					logger.Debugf("mieru: reloaded mita for inbound %d (%s)", inst.Id, inst.Tag)
+					return nil
+				} else {
+					logger.Debug("mieru: mita reload failed, falling back to restart:", err)
+				}
+			}
+		}
+	}
+
+	if cur := m.procs[inst.Id]; cur != nil {
+		_ = cur.proc.Stop()
+		delete(m.procs, inst.Id)
+		delete(m.traffic, inst.Id)
+	}
+	path, err := writeConfig(inst)
+	if err != nil {
+		return err
+	}
+	proc := newProcess(path, inst.Tag, socketPathForID(inst.Id))
+	if err := proc.Start(); err != nil {
+		return err
+	}
+	m.procs[inst.Id] = &managed{proc: proc, tag: inst.Tag, fp: fp, restartFP: restartFP}
+	delete(m.lastErr, inst.Id)
+	logger.Infof("mieru: started mita for inbound %d (%s)", inst.Id, inst.Tag)
+	return nil
+}
+
+func (m *Manager) Ensure(inst Instance) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ensureLocked(inst)
+}
+
 func (m *Manager) Reconcile(desired []Instance) {
-  m.mu.Lock();defer m.mu.Unlock(); want:=map[int]Instance{}; for _,inst:=range desired{want[inst.Id]=inst}
-  for id,cur:=range m.procs { if _,ok:=want[id];!ok { _=cur.proc.Stop(); delete(m.procs,id); delete(m.traffic,id); _=os.Remove(configPathForID(id)); _=os.Remove(socketPathForID(id)) } }
-  for _,inst:=range desired { if err:=m.ensureLocked(inst);err!=nil && m.lastErr[inst.Id]!=err.Error(){m.lastErr[inst.Id]=err.Error();logger.Warningf("mieru: failed to start inbound %d (%s): %v",inst.Id,inst.Tag,err)} }
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	want := map[int]Instance{}
+	for _, inst := range desired {
+		want[inst.Id] = inst
+	}
+	for id, cur := range m.procs {
+		if _, ok := want[id]; !ok {
+			_ = cur.proc.Stop()
+			delete(m.procs, id)
+			delete(m.traffic, id)
+			_ = os.Remove(configPathForID(id))
+			_ = os.Remove(socketPathForID(id))
+		}
+	}
+	for _, inst := range desired {
+		if err := m.ensureLocked(inst); err != nil && m.lastErr[inst.Id] != err.Error() {
+			m.lastErr[inst.Id] = err.Error()
+			logger.Warningf("mieru: failed to start inbound %d (%s): %v", inst.Id, inst.Tag, err)
+		}
+	}
 }
-func (m *Manager) Remove(id int) {m.mu.Lock();defer m.mu.Unlock();if cur:=m.procs[id];cur!=nil{_ = cur.proc.Stop();delete(m.procs,id)};delete(m.traffic,id);_ = os.Remove(configPathForID(id));_ = os.Remove(socketPathForID(id))}
-func (m *Manager) StopAll() {m.mu.Lock();defer m.mu.Unlock();for id,cur:=range m.procs{_=cur.proc.Stop();_=os.Remove(configPathForID(id));_=os.Remove(socketPathForID(id));delete(m.procs,id);delete(m.traffic,id)}}
-func (m *Manager) HasRunning() bool {m.mu.Lock();defer m.mu.Unlock();for _,cur:=range m.procs{if cur.proc!=nil&&cur.proc.IsRunning(){return true}};return false}
+
+func (m *Manager) Remove(id int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cur := m.procs[id]; cur != nil {
+		_ = cur.proc.Stop()
+		delete(m.procs, id)
+	}
+	delete(m.traffic, id)
+	_ = os.Remove(configPathForID(id))
+	_ = os.Remove(socketPathForID(id))
+}
+
+func (m *Manager) StopAll() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, cur := range m.procs {
+		_ = cur.proc.Stop()
+		_ = os.Remove(configPathForID(id))
+		_ = os.Remove(socketPathForID(id))
+		delete(m.procs, id)
+		delete(m.traffic, id)
+	}
+}
+
+func (m *Manager) HasRunning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, cur := range m.procs {
+		if cur.proc != nil && cur.proc.IsRunning() {
+			return true
+		}
+	}
+	return false
+}

@@ -14,10 +14,9 @@ import (
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
-	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 	wgutil "github.com/SawaMEN/3x-ui/v3/internal/util/wireguard"
+	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 )
-
 
 // Subscription traffic is indexed once per subscriber so traffic-aware
 // remark templates do not fall back to one DB query per client/link.
@@ -33,7 +32,7 @@ func TestGetInboundsBySubIdIndexesTrafficByEmail(t *testing.T) {
 	db := database.GetDB()
 	inbound := &model.Inbound{
 		UserId: 1, Tag: "stats-index", Enable: true, Port: 43101, Protocol: model.VLESS,
-		Settings: `{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"stats@example.com","subId":"sub-stats-index","enable":true}]}`,
+		Settings:       `{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"stats@example.com","subId":"sub-stats-index","enable":true}]}`,
 		StreamSettings: `{"network":"tcp","security":"none"}`,
 	}
 	if err := db.Create(inbound).Error; err != nil {
@@ -73,7 +72,6 @@ func TestGetInboundsBySubIdIndexesTrafficByEmail(t *testing.T) {
 	}
 }
 
-
 func TestGetSingBoxJsonKeepsTUIC(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
@@ -86,7 +84,7 @@ func TestGetSingBoxJsonKeepsTUIC(t *testing.T) {
 	db := database.GetDB()
 	inbound := &model.Inbound{
 		UserId: 1, Tag: "tuic-singbox", Enable: true, Port: 443, Protocol: model.TUIC,
-		Settings: `{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"tuic@example.com","subId":"sub-tuic-singbox","password":"secret","enable":true}]}`,
+		Settings:       `{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"tuic@example.com","subId":"sub-tuic-singbox","password":"secret","enable":true}]}`,
 		StreamSettings: `{"network":"tcp","security":"tls","tlsSettings":{"serverName":"tuic.example.com"}}`,
 	}
 	if err := db.Create(inbound).Error; err != nil {
@@ -121,29 +119,48 @@ func TestGetSingBoxJsonDoesNotCollapseMultipleWireGuardInbounds(t *testing.T) {
 	t.Cleanup(func() { _ = database.CloseDB() })
 
 	serverPrivA, _, err := wgutil.GenerateWireguardKeypair()
-	if err != nil { t.Fatalf("server keypair A: %v", err) }
+	if err != nil {
+		t.Fatalf("server keypair A: %v", err)
+	}
 	serverPrivB, _, err := wgutil.GenerateWireguardKeypair()
-	if err != nil { t.Fatalf("server keypair B: %v", err) }
+	if err != nil {
+		t.Fatalf("server keypair B: %v", err)
+	}
 	clientPriv, _, err := wgutil.GenerateWireguardKeypair()
-	if err != nil { t.Fatalf("client keypair: %v", err) }
+	if err != nil {
+		t.Fatalf("client keypair: %v", err)
+	}
 
 	const subID = "sub-wg-singbox"
 	db := database.GetDB()
 	inboundA := &model.Inbound{UserId: 1, Tag: "wg-a", Enable: true, Listen: "0.0.0.0", Port: 51820, Protocol: model.WireGuard, Settings: `{"secretKey":"` + serverPrivA + `"}`}
 	inboundB := &model.Inbound{UserId: 1, Tag: "wg-b", Enable: true, Listen: "0.0.0.0", Port: 51821, Protocol: model.WireGuard, Settings: `{"secretKey":"` + serverPrivB + `"}`}
-	if err := db.Create(inboundA).Error; err != nil { t.Fatalf("seed inbound A: %v", err) }
-	if err := db.Create(inboundB).Error; err != nil { t.Fatalf("seed inbound B: %v", err) }
+	if err := db.Create(inboundA).Error; err != nil {
+		t.Fatalf("seed inbound A: %v", err)
+	}
+	if err := db.Create(inboundB).Error; err != nil {
+		t.Fatalf("seed inbound B: %v", err)
+	}
 	client := &model.ClientRecord{Email: "wg@example.com", SubID: subID, UUID: "11111111-2222-4333-8444-555555555555", PrivateKey: clientPriv, AllowedIPs: "10.0.0.2/32", Enable: true}
-	if err := db.Create(client).Error; err != nil { t.Fatalf("seed client: %v", err) }
-	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: inboundA.Id}).Error; err != nil { t.Fatalf("attach A: %v", err) }
-	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: inboundB.Id}).Error; err != nil { t.Fatalf("attach B: %v", err) }
+	if err := db.Create(client).Error; err != nil {
+		t.Fatalf("seed client: %v", err)
+	}
+	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: inboundA.Id}).Error; err != nil {
+		t.Fatalf("attach A: %v", err)
+	}
+	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: inboundB.Id}).Error; err != nil {
+		t.Fatalf("attach B: %v", err)
+	}
 
 	out, _, err := NewSubJsonService("", "", "", "", NewSubService("")).GetSingBoxJson(subID, "wg.example.com", false)
-	if err != nil { t.Fatalf("GetSingBoxJson: %v", err) }
+	if err != nil {
+		t.Fatalf("GetSingBoxJson: %v", err)
+	}
 	if got := strings.Count(out, `"type": "wireguard"`); got < 2 {
 		t.Fatalf("sing-box subscription collapsed WireGuard inbounds: found %d wireguard outbounds\n%s", got, out)
 	}
 }
+
 func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
@@ -157,12 +174,12 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 
 	anytls := &model.Inbound{
 		UserId: 1, Tag: "anytls", Enable: true, Listen: "anytls.example.com", Port: 8443, Protocol: model.AnyTLS,
-		Settings: fmt.Sprintf(`{"tls":{"serverName":"anytls.example.com"},"clients":[{"email":"anytls@example.com","password":"anytls-pass","subId":%q,"enable":true}]}`, subID),
+		Settings:       fmt.Sprintf(`{"tls":{"serverName":"anytls.example.com"},"clients":[{"email":"anytls@example.com","password":"anytls-pass","subId":%q,"enable":true}]}`, subID),
 		StreamSettings: `{}`,
 	}
 	shadowtls := &model.Inbound{
 		UserId: 1, Tag: "shadowtls", Enable: true, Listen: "shadowtls.example.com", Port: 9443, Protocol: model.ShadowTLS,
-		Settings: fmt.Sprintf(`{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
+		Settings:       fmt.Sprintf(`{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","handshake":{},"clients":[{"email":"shadowtls@example.com","password":"shadow-pass","subId":%q,"enable":true}]}`, subID),
 		StreamSettings: `{}`,
 	}
 	for _, inbound := range []*model.Inbound{anytls, shadowtls} {
@@ -235,6 +252,7 @@ func TestGetSubsIncludesAnyTLSAndShadowTLS(t *testing.T) {
 		t.Fatalf("Hiddify is missing its visible proxy or transport: %s", response.Body.String())
 	}
 }
+
 func TestGetSubsSkipsEmptyRenderedLinksButKeepsTraffic(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
@@ -247,7 +265,7 @@ func TestGetSubsSkipsEmptyRenderedLinksButKeepsTraffic(t *testing.T) {
 	db := database.GetDB()
 	inbound := &model.Inbound{
 		UserId: 1, Tag: "naive-empty", Enable: true, Port: 8443, Protocol: model.NaiveProxy,
-		Settings: `{"network":"tcp"}`,
+		Settings:       `{"network":"tcp"}`,
 		StreamSettings: `{"security":"tls","tlsSettings":{"serverName":"naive.example.com"}}`,
 	}
 	if err := db.Create(inbound).Error; err != nil {
@@ -278,6 +296,7 @@ func TestGetSubsSkipsEmptyRenderedLinksButKeepsTraffic(t *testing.T) {
 		t.Fatalf("traffic = up:%d down:%d, want up:10 down:20", traffic.Up, traffic.Down)
 	}
 }
+
 func TestGetSubs_MixedNormalizedProtocols(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
@@ -291,12 +310,12 @@ func TestGetSubs_MixedNormalizedProtocols(t *testing.T) {
 
 	vless := &model.Inbound{
 		UserId: 1, Tag: "multi-vless", Enable: true, Port: 42101, Protocol: model.VLESS,
-		Settings: `{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"vless@example.com","subId":"sub-mixed","enable":true}]}`,
+		Settings:       `{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"vless@example.com","subId":"sub-mixed","enable":true}]}`,
 		StreamSettings: `{"network":"tcp","security":"none"}`,
 	}
 	trojan := &model.Inbound{
 		UserId: 1, Tag: "multi-trojan", Enable: true, Port: 42102, Protocol: model.Trojan,
-		Settings: `{"clients":[{"id":"66666666-7777-4888-8999-000000000000","email":"trojan@example.com","password":"secret","subId":"sub-mixed","enable":true}]}`,
+		Settings:       `{"clients":[{"id":"66666666-7777-4888-8999-000000000000","email":"trojan@example.com","password":"secret","subId":"sub-mixed","enable":true}]}`,
 		StreamSettings: `{"network":"tcp","security":"none"}`,
 	}
 	if err := db.Create(vless).Error; err != nil {
@@ -337,7 +356,6 @@ func TestGetSubs_MixedNormalizedProtocols(t *testing.T) {
 	}
 }
 
-
 func TestGetSubs_Hysteria2AndNaiveKeepSeparateConnections(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
@@ -354,13 +372,13 @@ func TestGetSubs_Hysteria2AndNaiveKeepSeparateConnections(t *testing.T) {
 	hysteria := &model.Inbound{
 		UserId: 1, Tag: "shared", Remark: "shared", Enable: true,
 		Port: 42131, Listen: "hy.example.com", Protocol: model.Hysteria,
-		Settings: fmt.Sprintf(`{"version":2,"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
+		Settings:       fmt.Sprintf(`{"version":2,"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
 		StreamSettings: `{"network":"hysteria","security":"tls","tlsSettings":{"serverName":"hy.example.com"}}`,
 	}
 	naive := &model.Inbound{
 		UserId: 1, Tag: "shared-naive", Remark: "shared", Enable: true,
 		Port: 42132, Listen: "naive.example.com", Protocol: model.NaiveProxy,
-		Settings: fmt.Sprintf(`{"network":"tcp","tls":{"serverName":"naive.example.com"},"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
+		Settings:       fmt.Sprintf(`{"network":"tcp","tls":{"serverName":"naive.example.com"},"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
 		StreamSettings: `{}`,
 	}
 	for _, inbound := range []*model.Inbound{hysteria, naive} {
@@ -430,19 +448,19 @@ func TestGetSubs_VlessHysteria2AndNaiveStayIndependent(t *testing.T) {
 		{
 			UserId: 1, Tag: "vless", Remark: "shared", Enable: true,
 			Port: 42130, Listen: "vless.example.com", Protocol: model.VLESS,
-			Settings: fmt.Sprintf(`{"encryption":"none","clients":[{"id":%q,"email":%q,"subId":%q,"enable":true}]}`, uuid, email, subID),
+			Settings:       fmt.Sprintf(`{"encryption":"none","clients":[{"id":%q,"email":%q,"subId":%q,"enable":true}]}`, uuid, email, subID),
 			StreamSettings: `{"network":"tcp","security":"none"}`,
 		},
 		{
 			UserId: 1, Tag: "hysteria", Remark: "shared", Enable: true,
 			Port: 42131, Listen: "hy.example.com", Protocol: model.Hysteria,
-			Settings: fmt.Sprintf(`{"version":2,"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
+			Settings:       fmt.Sprintf(`{"version":2,"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
 			StreamSettings: `{"network":"hysteria","security":"tls","tlsSettings":{"serverName":"hy.example.com"}}`,
 		},
 		{
 			UserId: 1, Tag: "naive", Remark: "shared", Enable: true,
 			Port: 42132, Listen: "naive.example.com", Protocol: model.NaiveProxy,
-			Settings: fmt.Sprintf(`{"network":"tcp","tls":{"serverName":"naive.example.com"},"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
+			Settings:       fmt.Sprintf(`{"network":"tcp","tls":{"serverName":"naive.example.com"},"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
 			StreamSettings: `{}`,
 		},
 	}
@@ -529,7 +547,7 @@ func TestGetSubs_MultipleConnectionsSameProtocol(t *testing.T) {
 	} {
 		ib := &model.Inbound{
 			UserId: 1, Tag: seed.tag, Enable: true, Port: seed.port, Protocol: model.VLESS,
-			Settings: fmt.Sprintf(`{"clients":[{"id":%q,"email":%q,"subId":%q,"enable":true}]}`, uuid, client.Email, subID),
+			Settings:       fmt.Sprintf(`{"clients":[{"id":%q,"email":%q,"subId":%q,"enable":true}]}`, uuid, client.Email, subID),
 			StreamSettings: `{"network":"tcp","security":"none"}`,
 		}
 		if err := db.Create(ib).Error; err != nil {
@@ -574,12 +592,12 @@ func TestGetSubs_DoesNotIncludeUnattachedSettingsOnlyInbound(t *testing.T) {
 
 	working := &model.Inbound{
 		UserId: 1, Tag: "working-vless", Enable: true, Port: 42121, Protocol: model.VLESS,
-		Settings: fmt.Sprintf(`{"clients":[{"id":%q,"email":"user@example.com","subId":%q,"enable":true}]}`, uuid, subID),
+		Settings:       fmt.Sprintf(`{"clients":[{"id":%q,"email":"user@example.com","subId":%q,"enable":true}]}`, uuid, subID),
 		StreamSettings: `{"network":"tcp","security":"none"}`,
 	}
 	stale := &model.Inbound{
 		UserId: 1, Tag: "stale-trojan", Enable: true, Port: 42122, Protocol: model.Trojan,
-		Settings: fmt.Sprintf(`{"clients":[{"id":%q,"email":"user@example.com","enable":true,"password":"stale-secret"}]}`, uuid),
+		Settings:       fmt.Sprintf(`{"clients":[{"id":%q,"email":"user@example.com","enable":true,"password":"stale-secret"}]}`, uuid),
 		StreamSettings: `{"network":"tcp","security":"none"}`,
 	}
 	if err := db.Create(working).Error; err != nil {
@@ -634,7 +652,7 @@ func TestGetSubs_NaiveUsesHostEndpoints(t *testing.T) {
 	inbound := &model.Inbound{
 		UserId: 1, Tag: "naive-hosts", Remark: "naive", Enable: true,
 		Port: 443, Listen: "origin.example.com", Protocol: model.NaiveProxy,
-		Settings: fmt.Sprintf(`{"network":"tcp","shareLinkFormat":"hiddify","tls":{"serverName":"origin.example.com"},"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
+		Settings:       fmt.Sprintf(`{"network":"tcp","shareLinkFormat":"hiddify","tls":{"serverName":"origin.example.com"},"clients":[{"email":%q,"subId":%q,"enable":true}]}`, email, subID),
 		StreamSettings: `{}`,
 	}
 	if err := db.Create(inbound).Error; err != nil {
@@ -688,7 +706,6 @@ func TestGetSubs_NaiveUsesHostEndpoints(t *testing.T) {
 	}
 }
 
-
 func TestGetSingBoxJsonResolvesTUICWildcardListen(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
@@ -701,8 +718,8 @@ func TestGetSingBoxJsonResolvesTUICWildcardListen(t *testing.T) {
 	db := database.GetDB()
 	inbound := &model.Inbound{
 		UserId: 1, Tag: "tuic-wildcard", Enable: true, Listen: "0.0.0.0", Port: 443,
-		Protocol: model.TUIC,
-		Settings: `{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"tuic-wildcard@example.com","password":"secret","enable":true}]}`,
+		Protocol:       model.TUIC,
+		Settings:       `{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"tuic-wildcard@example.com","password":"secret","enable":true}]}`,
 		StreamSettings: `{"network":"tcp","security":"tls","tlsSettings":{"serverName":"tuic.example.com"}}`,
 	}
 	if err := db.Create(inbound).Error; err != nil {
@@ -749,8 +766,8 @@ func TestGetJsonFallsBackFromPartialExternalProxy(t *testing.T) {
 	db := database.GetDB()
 	inbound := &model.Inbound{
 		UserId: 1, Tag: "vless-partial", Enable: true, Listen: "0.0.0.0", Port: 443,
-		Protocol: model.VLESS,
-		Settings: `{"clients":[{"id":"22222222-3333-4444-8555-666666666666","email":"partial@example.com","subId":"sub-partial-external","enable":true}]}`,
+		Protocol:       model.VLESS,
+		Settings:       `{"clients":[{"id":"22222222-3333-4444-8555-666666666666","email":"partial@example.com","subId":"sub-partial-external","enable":true}]}`,
 		StreamSettings: `{"network":"tcp","security":"tls","tlsSettings":{"serverName":"partial.example.com"},"externalProxy":[{"remark":"fallback"}]}`,
 	}
 	if err := db.Create(inbound).Error; err != nil {
@@ -789,7 +806,6 @@ func TestGetJsonFallsBackFromPartialExternalProxy(t *testing.T) {
 	}
 }
 
-
 func TestGetSingBoxJsonRejectsMixedWireGuard(t *testing.T) {
 	dbDir := t.TempDir()
 	t.Setenv("XUI_DB_FOLDER", dbDir)
@@ -799,9 +815,13 @@ func TestGetSingBoxJsonRejectsMixedWireGuard(t *testing.T) {
 	t.Cleanup(func() { _ = database.CloseDB() })
 
 	serverPriv, _, err := wgutil.GenerateWireguardKeypair()
-	if err != nil { t.Fatalf("server keypair: %v", err) }
+	if err != nil {
+		t.Fatalf("server keypair: %v", err)
+	}
 	clientPriv, _, err := wgutil.GenerateWireguardKeypair()
-	if err != nil { t.Fatalf("client keypair: %v", err) }
+	if err != nil {
+		t.Fatalf("client keypair: %v", err)
+	}
 
 	const subID = "sub-mixed-wg"
 	db := database.GetDB()
@@ -811,19 +831,29 @@ func TestGetSingBoxJsonRejectsMixedWireGuard(t *testing.T) {
 	}
 	vlessInbound := &model.Inbound{
 		UserId: 1, Tag: "mixed-vless", Enable: true, Listen: "0.0.0.0", Port: 443,
-		Protocol: model.VLESS,
-		Settings: "{\"clients\":[{\"id\":\"33333333-4444-4555-8666-777777777777\",\"email\":\"mixed@example.com\",\"subId\":\"" + subID + "\",\"enable\":true}]}",
+		Protocol:       model.VLESS,
+		Settings:       "{\"clients\":[{\"id\":\"33333333-4444-4555-8666-777777777777\",\"email\":\"mixed@example.com\",\"subId\":\"" + subID + "\",\"enable\":true}]}",
 		StreamSettings: "{\"network\":\"tcp\",\"security\":\"none\"}",
 	}
-	if err := db.Create(wgInbound).Error; err != nil { t.Fatalf("seed WireGuard inbound: %v", err) }
-	if err := db.Create(vlessInbound).Error; err != nil { t.Fatalf("seed VLESS inbound: %v", err) }
+	if err := db.Create(wgInbound).Error; err != nil {
+		t.Fatalf("seed WireGuard inbound: %v", err)
+	}
+	if err := db.Create(vlessInbound).Error; err != nil {
+		t.Fatalf("seed VLESS inbound: %v", err)
+	}
 	client := &model.ClientRecord{
 		Email: "mixed@example.com", SubID: subID, UUID: "33333333-4444-4555-8666-777777777777",
 		PrivateKey: clientPriv, AllowedIPs: "10.0.0.2/32", Enable: true,
 	}
-	if err := db.Create(client).Error; err != nil { t.Fatalf("seed client: %v", err) }
-	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: wgInbound.Id}).Error; err != nil { t.Fatalf("attach WireGuard: %v", err) }
-	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: vlessInbound.Id}).Error; err != nil { t.Fatalf("attach VLESS: %v", err) }
+	if err := db.Create(client).Error; err != nil {
+		t.Fatalf("seed client: %v", err)
+	}
+	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: wgInbound.Id}).Error; err != nil {
+		t.Fatalf("attach WireGuard: %v", err)
+	}
+	if err := db.Create(&model.ClientInbound{ClientId: client.Id, InboundId: vlessInbound.Id}).Error; err != nil {
+		t.Fatalf("attach VLESS: %v", err)
+	}
 
 	_, _, err = NewSubJsonService("", "", "", "", NewSubService("")).GetSingBoxJson(subID, "sub.example.com", false)
 	if !errors.Is(err, errSubscriptionFormatUnsupported) {

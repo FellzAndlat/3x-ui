@@ -80,7 +80,7 @@ func binary(protocol model.Protocol) string {
 }
 
 func writePrivate(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".config-*")
@@ -89,7 +89,7 @@ func writePrivate(path string, data []byte) error {
 	}
 	defer os.Remove(temp.Name())
 	defer temp.Close()
-	if err := temp.Chmod(0600); err != nil {
+	if err := temp.Chmod(0o600); err != nil {
 		return err
 	}
 	if _, err := temp.Write(data); err != nil {
@@ -157,7 +157,7 @@ func certificate(inst Instance, folder string) (string, string, error) {
 
 func files(inst Instance, metricsAddr string) ([]string, error) {
 	folder := filepath.Join(directory(), strconv.Itoa(inst.ID))
-	if err := os.MkdirAll(folder, 0700); err != nil {
+	if err := os.MkdirAll(folder, 0o700); err != nil {
 		return nil, err
 	}
 	if inst.Protocol == model.Pingtunnel {
@@ -273,7 +273,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 	}
 	metricsAddr := ""
 	if inst.Protocol == model.TrustTunnel {
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 		if err != nil {
 			return err
 		}
@@ -389,12 +389,14 @@ func ExportTrustTunnelLink(inst Instance, email, address string, port int) (stri
 	return link, nil
 }
 
-type trafficCounters struct{ up, down uint64 }
-type TrafficDelta struct {
-	Tag, Email string
-	Up, Down   int64
-	Active     bool
-}
+type (
+	trafficCounters struct{ up, down uint64 }
+	TrafficDelta    struct {
+		Tag, Email string
+		Up, Down   int64
+		Active     bool
+	}
+)
 
 func (m *Manager) CollectTraffic() []TrafficDelta {
 	m.mu.Lock()
@@ -405,7 +407,11 @@ func (m *Manager) CollectTraffic() []TrafficDelta {
 		if proc.metricsAddr == "" {
 			continue
 		}
-		response, err := client.Get("http://" + proc.metricsAddr + "/clients")
+		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+proc.metricsAddr+"/clients", nil)
+		if err != nil {
+			continue
+		}
+		response, err := client.Do(request)
 		if err != nil {
 			continue
 		}

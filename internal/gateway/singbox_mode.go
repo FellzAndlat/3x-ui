@@ -88,7 +88,7 @@ func readSingBoxBackup() (string, error) {
 }
 
 func createSingBoxBackup(raw string) error {
-	file, err := os.OpenFile(singBoxBackupPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.OpenFile(singBoxBackupPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("sing-box gateway backup already exists at %s; disable Gateway Mode first", singBoxBackupPath)
@@ -189,7 +189,7 @@ func EnableSingBox() error {
 	}
 	if err := saveSingBoxTemplate(cfg); err != nil {
 		if cleanupErr := removeSingBoxBackup(); cleanupErr != nil {
-			return fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
+			return fmt.Errorf("%w; cleanup failed: %w", err, cleanupErr)
 		}
 		return err
 	}

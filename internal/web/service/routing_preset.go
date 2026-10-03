@@ -9,9 +9,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gorm.io/gorm"
+
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
-	"gorm.io/gorm"
 )
 
 const (

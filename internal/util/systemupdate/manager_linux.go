@@ -62,7 +62,7 @@ func GetStatus(ctx context.Context, allPackages bool) (Status, error) {
 		PackageManager: info.manager,
 		Supported:      info.manager != "",
 		RunningAsRoot:  os.Geteuid() == 0,
-		AllPackages:     allPackages,
+		AllPackages:    allPackages,
 	}
 	if !status.Supported {
 		return status, fmt.Errorf("unsupported Linux distribution or package manager")
@@ -124,6 +124,7 @@ func GetStatus(ctx context.Context, allPackages bool) (Status, error) {
 	}
 	return status, nil
 }
+
 func Refresh(ctx context.Context, allPackages bool) (Status, error) {
 	info := detectDistribution()
 	if info.manager == "" {
@@ -134,7 +135,7 @@ func Refresh(ctx context.Context, allPackages bool) (Status, error) {
 	status, statusErr := GetStatus(ctx, allPackages)
 	if statusErr != nil {
 		if refreshErr != nil {
-			return status, fmt.Errorf("package metadata refresh failed: %w; status check failed: %v", refreshErr, statusErr)
+			return status, fmt.Errorf("package metadata refresh failed: %w; status check failed: %w", refreshErr, statusErr)
 		}
 		return status, statusErr
 	}
@@ -410,6 +411,7 @@ func requiredPackages(distribution string) []string {
 
 	return packages
 }
+
 func collectPackageStatuses(
 	distribution string,
 	upgrades map[string]string,

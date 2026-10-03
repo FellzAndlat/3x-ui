@@ -107,9 +107,9 @@ func SyncClientCoreCompatibility(oldCore, newCore string) error {
 			if err := tx.Model(&model.ClientRecord{}).
 				Where("id = ?", record.Id).
 				Updates(map[string]any{
-					"enable":                 wantEnable,
+					"enable":                wantEnable,
 					"auto_disabled_by_core": autoCore,
-					"updated_at":             time.Now().UnixMilli(),
+					"updated_at":            time.Now().UnixMilli(),
 				}).Error; err != nil {
 				return err
 			}

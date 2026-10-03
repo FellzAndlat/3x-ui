@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/enfein/mieru/v3/pkg/appctl"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 )
 
 func TestClashTransportCapabilities(t *testing.T) {
@@ -81,6 +82,7 @@ func TestSubscriptionFormatCapabilities(t *testing.T) {
 		t.Fatal("Clash capability map must keep TUIC/AWG/VLESS support")
 	}
 }
+
 func TestSubscriptionExpiryFromClient(t *testing.T) {
 	const now = int64(1_700_000_000_000)
 	const oneDayMs = int64(86_400_000)
@@ -1326,6 +1328,7 @@ func TestGenNaiveSubscriptionLinkFallsBackToInboundSNI(t *testing.T) {
 		t.Fatalf("sni = %q, want naive.example.com", gotSNI)
 	}
 }
+
 func TestGenNaiveSubscriptionLinkAutoSNIFromAdvertisedHost(t *testing.T) {
 	s := &SubService{
 		clientsByInbound: map[int]map[string]model.Client{

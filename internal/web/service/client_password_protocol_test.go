@@ -36,7 +36,7 @@ func TestAttachPasswordProtocolWithoutUUID(t *testing.T) {
 	source := mkInbound(t, 34002, model.NaiveProxy, `{"clients":[]}`)
 	target := mkInbound(t, 34003, model.ShadowTLS, `{"clients":[]}`)
 	if _, err := svc.Create(inboundSvc, &ClientCreatePayload{
-		Client: model.Client{Email: "attached@x", SubID: "attached-sub", Password: "secret", Enable: true},
+		Client:     model.Client{Email: "attached@x", SubID: "attached-sub", Password: "secret", Enable: true},
 		InboundIds: []int{source.Id},
 	}); err != nil {
 		t.Fatalf("seed client: %v", err)

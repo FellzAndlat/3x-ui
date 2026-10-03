@@ -4,12 +4,12 @@ import "testing"
 
 func TestNormalizeTelemtVersion(t *testing.T) {
 	tests := map[string]string{
-		"0.7.13":                    "0.7.13",
-		"v0.7.13":                   "0.7.13",
-		"Telemt 0.7.13":             "0.7.13",
-		"telemt version v0.7.13":     "0.7.13",
-		"telemt 0.7.13+build.1":      "0.7.13+build.1",
-		"  v0.7.13  ":                "0.7.13",
+		"0.7.13":                 "0.7.13",
+		"v0.7.13":                "0.7.13",
+		"Telemt 0.7.13":          "0.7.13",
+		"telemt version v0.7.13": "0.7.13",
+		"telemt 0.7.13+build.1":  "0.7.13+build.1",
+		"  v0.7.13  ":            "0.7.13",
 	}
 	for input, want := range tests {
 		if got := normalizeTelemtVersion(input); got != want {

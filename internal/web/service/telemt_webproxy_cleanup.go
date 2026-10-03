@@ -98,7 +98,7 @@ func withTelemtRollbackError(operationErr, rollbackErr error) error {
 	if rollbackErr == nil {
 		return operationErr
 	}
-	return fmt.Errorf("%w; configuration rollback failed: %v", operationErr, rollbackErr)
+	return fmt.Errorf("%w; configuration rollback failed: %w", operationErr, rollbackErr)
 }
 
 func (s TelemtService) SaveConfigAtomic(c TelemtConfig) error {
@@ -219,7 +219,7 @@ func (TelemtService) EnsureWebProxyBackend() error {
 	var lastErr error
 	for {
 		if systemctl("is-active", "--quiet", telemtServiceName) == nil {
-			request, err := http.NewRequest(http.MethodHead, "http://"+addr+"/", nil)
+			request, err := http.NewRequestWithContext(context.Background(), http.MethodHead, "http://"+addr+"/", nil)
 			if err == nil {
 				request.Host = state.Domain
 				var response *http.Response

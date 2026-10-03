@@ -28,7 +28,7 @@ import (
 // Server represents the subscription server that serves subscription links and JSON configurations.
 type Server struct {
 	httpServer *http.Server
-	routerMu sync.RWMutex
+	routerMu   sync.RWMutex
 	listener   net.Listener
 
 	sub            *SUBController

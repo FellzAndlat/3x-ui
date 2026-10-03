@@ -677,7 +677,6 @@ func writeConfig(path string, inst Instance, apiPort int, apiToken string) error
 }
 
 func expiresString(unix int64) string { return time.Unix(unix, 0).UTC().Format(time.RFC3339) }
-func quotaString(bytes int64) string   { return strconv.FormatInt(bytes, 10) + "B" }
 
 func newAPIToken() (string, error) {
 	buf := make([]byte, 16)
@@ -763,36 +762,6 @@ func reloadTelemt(port int, token string) bool {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
-}
-
-type secretPutEntry struct {
-	Secret  string `json:"secret"`
-	AdTag   string `json:"ad_tag,omitempty"`
-	Quota   string `json:"quota,omitempty"`
-	Expires string `json:"expires,omitempty"`
-}
-
-type secretsPutBody struct {
-	Secrets map[string]secretPutEntry `json:"secrets"`
-}
-
-func secretsPayload(inst Instance) secretsPutBody {
-	m := make(map[string]secretPutEntry, len(inst.Secrets))
-	for _, e := range inst.Secrets {
-		x := secretPutEntry{Secret: e.Secret, AdTag: e.AdTag}
-		if e.QuotaBytes > 0 {
-			x.Quota = quotaString(e.QuotaBytes)
-		}
-		if e.ExpiresUnix > 0 {
-			x.Expires = expiresString(e.ExpiresUnix)
-		}
-		m[e.Name] = x
-	}
-	return secretsPutBody{Secrets: m}
-}
-
-func applySecrets(port int, token string, inst Instance) bool {
-	return reloadTelemt(port, token)
 }
 
 type statsUser struct {

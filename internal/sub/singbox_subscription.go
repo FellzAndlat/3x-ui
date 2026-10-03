@@ -94,7 +94,7 @@ func buildSeparatedSingBoxSubscription(template map[string]any, proxies []map[st
 		}
 		outbounds = append(outbounds, map[string]any{"type": "direct", "tag": directTag}, map[string]any{"type": "block", "tag": blockedTag})
 		cfg := map[string]any{
-			"$schema": "https://sing-box.sagernet.org/schema.json",
+			"$schema":   "https://sing-box.sagernet.org/schema.json",
 			"outbounds": outbounds,
 		}
 

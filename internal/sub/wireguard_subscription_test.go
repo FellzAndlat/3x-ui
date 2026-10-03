@@ -66,36 +66,40 @@ func TestGenWireguardLinkFormatsIPv6Endpoint(t *testing.T) {
 	}
 }
 
-
 func TestGenWireguardLinkExternalProxyFanOut(t *testing.T) {
 	inbound := &model.Inbound{
-		Protocol: model.WireGuard,
-		Port: 51820,
-		Listen: "0.0.0.0",
-		Settings: `{"secretKey":""}`,
+		Protocol:       model.WireGuard,
+		Port:           51820,
+		Listen:         "0.0.0.0",
+		Settings:       `{"secretKey":""}`,
 		StreamSettings: `{"externalProxy":[{"dest":"edge1.example.com","port":443,"remark":"E1"},{"dest":"","remark":"E2"}]}`,
 	}
-	client := model.Client{Email:"wg@example.com",PrivateKey:"client-private-key",AllowedIPs:[]string{"10.0.0.2/32"}}
-	s := &SubService{address:"vpn.example.com",clientsByInbound:map[int]map[string]model.Client{0:{client.Email:client}},fullyPrimedInbounds:map[int]bool{0:true},settingsByInbound:map[int]map[string]any{}}
+	client := model.Client{Email: "wg@example.com", PrivateKey: "client-private-key", AllowedIPs: []string{"10.0.0.2/32"}}
+	s := &SubService{address: "vpn.example.com", clientsByInbound: map[int]map[string]model.Client{0: {client.Email: client}}, fullyPrimedInbounds: map[int]bool{0: true}, settingsByInbound: map[int]map[string]any{}}
 	links := s.genWireguardLink(inbound, client.Email)
 	parts := strings.Split(strings.TrimSpace(links), "\n")
-	if len(parts) != 2 { t.Fatalf("links = %d, want 2: %q", len(parts), links) }
-	if !strings.Contains(parts[0],"@edge1.example.com:443") { t.Fatalf("first endpoint mismatch: %s", parts[0]) }
-	if !strings.Contains(parts[1],"@vpn.example.com:51820") { t.Fatalf("partial endpoint must fall back to inbound endpoint: %s", parts[1]) }
+	if len(parts) != 2 {
+		t.Fatalf("links = %d, want 2: %q", len(parts), links)
+	}
+	if !strings.Contains(parts[0], "@edge1.example.com:443") {
+		t.Fatalf("first endpoint mismatch: %s", parts[0])
+	}
+	if !strings.Contains(parts[1], "@vpn.example.com:51820") {
+		t.Fatalf("partial endpoint must fall back to inbound endpoint: %s", parts[1])
+	}
 }
-
 
 func TestGenWireguardLinkJSONIPv6Endpoint(t *testing.T) {
 	inbound := &model.Inbound{
 		Protocol: model.WireGuard,
-		Listen: "::",
-		Port: 51820,
+		Listen:   "::",
+		Port:     51820,
 		Settings: `{"secretKey":""}`,
 	}
 	client := model.Client{
 		PrivateKey: "client-private-key",
 		AllowedIPs: []string{"fd00::2/128"},
-		Email: "wg6@example.com",
+		Email:      "wg6@example.com",
 	}
 	svc := NewSubJsonService("", "", "", "", nil)
 	body := svc.genWireguard(inbound, client)

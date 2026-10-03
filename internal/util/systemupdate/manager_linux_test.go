@@ -304,7 +304,7 @@ func TestDistroInfoPackageFamily(t *testing.T) {
 
 func TestInstalledApkPackagePattern(t *testing.T) {
 	cases := map[string]string{
-		"curl-8.5.0-r0":          "curl",
+		"curl-8.5.0-r0":           "curl",
 		"linux-lts-6.6.90-r0":     "linux-lts",
 		"ca-certificates-2025-r0": "ca-certificates",
 	}

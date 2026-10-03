@@ -10,8 +10,8 @@ import (
 
 func TestParseExternalVersion(t *testing.T) {
 	for input, want := range map[string]string{
-		"pingtunnel 2.10 (linux/amd64)":   "2.10",
-		"trusttunnel_endpoint v1.1.0":      "1.1.0",
+		"pingtunnel 2.10 (linux/amd64)":     "2.10",
+		"trusttunnel_endpoint v1.1.0":       "1.1.0",
 		"TrustTunnel endpoint 1.2.3-beta.1": "1.2.3-beta.1",
 	} {
 		if got := parseExternalVersion(input); got != want {

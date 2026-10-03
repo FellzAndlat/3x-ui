@@ -87,11 +87,11 @@ type XrayService struct {
 	xrayAPI        xray.XrayAPI
 	xrayTrafficMu  sync.Mutex
 
-	installedVersionMu       sync.Mutex
-	installedVersionPath     string
-	installedVersionModTime  time.Time
-	installedVersionSize     int64
-	installedVersion          string
+	installedVersionMu      sync.Mutex
+	installedVersionPath    string
+	installedVersionModTime time.Time
+	installedVersionSize    int64
+	installedVersion        string
 }
 
 // IsXrayRunning checks if the Xray process is currently running.

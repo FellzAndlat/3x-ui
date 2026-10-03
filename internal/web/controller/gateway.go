@@ -231,7 +231,7 @@ func (a *GatewayController) enable(c *gin.Context) {
 		if err := enableGatewayForCore(coreType); err != nil {
 			if previousCoreDisabled {
 				if rollbackErr := rollbackGatewayChange(coreType, otherCore, false, true); rollbackErr != nil {
-					err = fmt.Errorf("enable %s Gateway Mode: %w; rollback failed: %v", coreType, err, rollbackErr)
+					err = fmt.Errorf("enable %s Gateway Mode: %w; rollback failed: %w", coreType, err, rollbackErr)
 				} else {
 					err = fmt.Errorf("enable %s Gateway Mode: %w; previous %s Gateway Mode restored", coreType, err, otherCore)
 				}
@@ -251,7 +251,7 @@ func (a *GatewayController) enable(c *gin.Context) {
 			rollbackErr := rollbackGatewayChange(coreType, otherCore, currentEnabledByRequest, previousCoreDisabled)
 			if rollbackErr != nil {
 				payload, _ := a.statusPayload()
-				jsonObj(c, payload, fmt.Errorf("apply %s Gateway Mode restart failed: %v; rollback failed: %w", coreType, restartErr, rollbackErr))
+				jsonObj(c, payload, fmt.Errorf("apply %s Gateway Mode restart failed: %w; rollback failed: %w", coreType, restartErr, rollbackErr))
 				return
 			}
 
@@ -260,7 +260,7 @@ func (a *GatewayController) enable(c *gin.Context) {
 			// cannot leave it serving the attempted Gateway configuration.
 			if restoreErr := a.xrayService.RestartXray(false); restoreErr != nil {
 				payload, _ := a.statusPayload()
-				jsonObj(c, payload, fmt.Errorf("apply %s Gateway Mode restart failed: %v; config rollback succeeded but runtime restore failed: %w", coreType, restartErr, restoreErr))
+				jsonObj(c, payload, fmt.Errorf("apply %s Gateway Mode restart failed: %w; config rollback succeeded but runtime restore failed: %w", coreType, restartErr, restoreErr))
 				return
 			}
 
@@ -306,7 +306,7 @@ func (a *GatewayController) disable(c *gin.Context) {
 			rollbackErr := restoreGatewayCores(disabledCores)
 			payload, _ := a.statusPayload()
 			if rollbackErr != nil {
-				jsonObj(c, payload, fmt.Errorf("disable %s Gateway Mode: %v; rollback failed: %w", candidate, err, rollbackErr))
+				jsonObj(c, payload, fmt.Errorf("disable %s Gateway Mode: %w; rollback failed: %w", candidate, err, rollbackErr))
 			} else {
 				jsonObj(c, payload, fmt.Errorf("disable %s Gateway Mode: %w; earlier changes rolled back", candidate, err))
 			}
@@ -320,13 +320,13 @@ func (a *GatewayController) disable(c *gin.Context) {
 			rollbackErr := restoreGatewayCores(disabledCores)
 			if rollbackErr != nil {
 				payload, _ := a.statusPayload()
-				jsonObj(c, payload, fmt.Errorf("disable Gateway Mode restart failed: %v; rollback failed: %w", restartErr, rollbackErr))
+				jsonObj(c, payload, fmt.Errorf("disable Gateway Mode restart failed: %w; rollback failed: %w", restartErr, rollbackErr))
 				return
 			}
 
 			if restoreErr := a.xrayService.RestartXray(false); restoreErr != nil {
 				payload, _ := a.statusPayload()
-				jsonObj(c, payload, fmt.Errorf("disable Gateway Mode restart failed: %v; config rollback succeeded but runtime restore failed: %w", restartErr, restoreErr))
+				jsonObj(c, payload, fmt.Errorf("disable Gateway Mode restart failed: %w; config rollback succeeded but runtime restore failed: %w", restartErr, restoreErr))
 				return
 			}
 

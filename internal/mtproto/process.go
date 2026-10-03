@@ -39,9 +39,9 @@ var (
 )
 
 type procLogWriter struct {
-	mu        sync.Mutex
+	mu         sync.Mutex
 	label, buf string
-	lastLine  string
+	lastLine   string
 }
 
 func (w *procLogWriter) Write(p []byte) (int, error) {

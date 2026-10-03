@@ -672,40 +672,46 @@ func sudokuInboundUsable(inbound *model.Inbound) bool {
 // A failed or interrupted save can leave an enabled Sudoku inbound without
 // client keys. Retry provisioning before exporting its subscription. The
 // provider serializes generation and only writes settings when keys are missing.
-func (s *SubService) refreshSudokuCredentials(inbound *model.Inbound) {
+func (s *SubService) refreshSudokuCredentials(inbound *model.Inbound) bool {
 	if inbound == nil || inbound.Protocol != model.Sudoku || inbound.NodeID != nil ||
 		!sudoku.IsInstalled(config.GetBinFolderPath()) {
-		return
+		return true
 	}
 	clients, err := s.inboundService.GetClients(inbound)
 	if err != nil {
-		return
+		return false
 	}
 	settings := s.linkSettings(inbound)
 	key, _ := settings["key"].(string)
-	missing := strings.TrimSpace(key) == ""
+	pending, err := sudoku.CredentialRotationPending(config.GetBinFolderPath(), inbound.Id)
+	if err != nil {
+		logger.Warning("Sudoku subscription rotation state:", err)
+		return false
+	}
+	missing := pending || !sudoku.ValidPublicKey(key)
 	for _, client := range clients {
-		if !sudoku.ValidPrivateKey(client.SudokuPrivateKey) {
+		if client.Enable && !sudoku.ValidPrivateKey(client.SudokuPrivateKey) {
 			missing = true
 			break
 		}
 	}
 	if !missing {
-		return
+		return true
 	}
 	if err := service.EnsureSudokuCredentials(inbound.Id); err != nil {
 		logger.Warning("Sudoku subscription credentials:", err)
-		return
+		return false
 	}
 	var updated model.Inbound
 	if err := database.GetDB().First(&updated, inbound.Id).Error; err != nil {
 		logger.Warning("Sudoku subscription reload:", err)
-		return
+		return false
 	}
 	*inbound = updated
 	delete(s.settingsByInbound, inbound.Id)
 	delete(s.clientsByInbound, inbound.Id)
 	delete(s.fullyPrimedInbounds, inbound.Id)
+	return true
 }
 
 func (s *SubService) inboundLinks(inbound *model.Inbound) []string {
@@ -874,9 +880,9 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) 
 	inbounds = slices.DeleteFunc(inbounds, func(inbound *model.Inbound) bool {
 		return !sudokuInboundUsable(inbound)
 	})
-	for _, inbound := range inbounds {
-		s.refreshSudokuCredentials(inbound)
-	}
+	inbounds = slices.DeleteFunc(inbounds, func(inbound *model.Inbound) bool {
+		return !s.refreshSudokuCredentials(inbound)
+	})
 	inboundIDs := make([]int, 0, len(inbounds))
 	for _, inbound := range inbounds {
 		inboundIDs = append(inboundIDs, inbound.Id)

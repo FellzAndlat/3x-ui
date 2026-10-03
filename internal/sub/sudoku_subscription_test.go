@@ -26,7 +26,7 @@ func TestSudokuSubscriptionRepairsMissingClientKey(t *testing.T) {
 	public := strings.Repeat("b", 64)
 	split := strings.Repeat("c", 128)
 	program := "#!/bin/sh\nif [ \"$2\" = \"-more\" ]; then\n echo 'Split Private Key: " + split + "'\nelse\n echo 'Master Public Key: " + public + "'\n echo 'Master Private Key: " + master + "'\nfi\n"
-	if err := os.WriteFile(sudoku.GetBinaryPath(binDir), []byte(program), 0700); err != nil {
+	if err := os.WriteFile(sudoku.GetBinaryPath(binDir), []byte(program), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	const email, subID = "sudoku@example.com", "sudoku-sub"
@@ -65,4 +65,36 @@ func TestSudokuSubscriptionRepairsMissingClientKey(t *testing.T) {
 	if len(clientLinks) != 1 || clientLinks[0] != links[0] {
 		t.Fatalf("client links = %q, want %q", clientLinks, links)
 	}
+
+	t.Run("pending rotation never exports stale keys", func(t *testing.T) {
+		if err := sudoku.BeginCredentialRotation(binDir, inbound.Id); err != nil {
+			t.Fatal(err)
+		}
+		// Both keys are syntactically valid, but the recovery marker means they
+		// may no longer match the server. A failed retry must suppress links.
+		if err := os.WriteFile(sudoku.GetBinaryPath(binDir), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if got := NewLinkProvider().LinksForClient("proxy.example.com", inbound, email); len(got) != 0 {
+			t.Fatalf("pending rotation exported client links: %q", got)
+		}
+		got, _, _, _, err := NewSubService("").GetSubs(subID, "proxy.example.com")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("pending rotation exported subscription links: %q", got)
+		}
+		if err := os.WriteFile(sudoku.GetBinaryPath(binDir), []byte(program), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		got = NewLinkProvider().LinksForClient("proxy.example.com", inbound, email)
+		if len(got) != 1 {
+			t.Fatalf("rotation recovery did not restore links: %q", got)
+		}
+		pending, err := sudoku.CredentialRotationPending(binDir, inbound.Id)
+		if err != nil || pending {
+			t.Fatalf("rotation still pending after recovery: %v, %v", pending, err)
+		}
+	})
 }

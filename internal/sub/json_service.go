@@ -760,7 +760,7 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 		}
 		native, err := singbox.TranslateXrayOutbound(proxy)
 		if err != nil {
-			return "", header, fmt.Errorf("%w: subscription status: %v", errSubscriptionFormatUnsupported, err)
+			return "", header, fmt.Errorf("%w: subscription status: %w", errSubscriptionFormatUnsupported, err)
 		}
 		tag := strings.TrimSpace(remark)
 		if tag == "" {
@@ -1661,9 +1661,9 @@ func (s *SubJsonService) genNativeTLSLikeEndpoint(subReq *SubService, inbound *m
 	// carries the destination and encrypts the payload after the TLS handshake.
 	return map[string]any{
 		"type": "shadowsocks", "method": "2022-blake3-aes-128-gcm",
-		"password": masterKey + ":" + model.ShadowTLSClientKey(client.Email, client.Password),
-		"udp_over_tcp": map[string]any{"enabled": true, "version": 2},
-		"detour": transportTag,
+		"password":                   masterKey + ":" + model.ShadowTLSClientKey(client.Email, client.Password),
+		"udp_over_tcp":               map[string]any{"enabled": true, "version": 2},
+		"detour":                     transportTag,
 		"_panel_shadowtls_transport": transport,
 	}
 }

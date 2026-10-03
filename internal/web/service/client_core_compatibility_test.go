@@ -21,7 +21,7 @@ func TestSyncClientCoreCompatibilitySwitchesAutomaticClientState(t *testing.T) {
 	db := database.GetDB()
 	makeInbound := func(tag string, protocol model.Protocol, port int, email string) *model.Inbound {
 		payload, _ := json.Marshal(map[string][]model.Client{
-			"clients": []model.Client{{Email: email, Enable: true}},
+			"clients": {{Email: email, Enable: true}},
 		})
 		ib := &model.Inbound{Tag: tag, Protocol: protocol, Port: port, Enable: true, Settings: string(payload)}
 		if err := db.Create(ib).Error; err != nil {

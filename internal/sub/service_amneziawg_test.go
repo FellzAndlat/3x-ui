@@ -318,36 +318,49 @@ func TestAmneziaWGConfigTextAlwaysCarriesTheServerMTU(t *testing.T) {
 
 func TestGenAmneziaWGLinkExternalProxyFanOut(t *testing.T) {
 	serverPriv, serverPub, err := wgutil.GenerateWireguardKeypair()
-	if err != nil { t.Fatalf("server keypair: %v", err) }
+	if err != nil {
+		t.Fatalf("server keypair: %v", err)
+	}
 	clientPriv, _, err := wgutil.GenerateWireguardKeypair()
-	if err != nil { t.Fatalf("client keypair: %v", err) }
+	if err != nil {
+		t.Fatalf("client keypair: %v", err)
+	}
 
 	inbound := &model.Inbound{
-		Protocol: model.AmneziaWG,
-		Listen: "0.0.0.0",
-		Port: 51820,
-		Settings: "{\"server\":{\"privateKey\":\"" + serverPriv + "\",\"publicKey\":\"" + serverPub + "\"},\"clients\":[{\"email\":\"user\",\"privateKey\":\"" + clientPriv + "\",\"allowedIPs\":[\"10.8.1.2/32\"]}]}",
+		Protocol:       model.AmneziaWG,
+		Listen:         "0.0.0.0",
+		Port:           51820,
+		Settings:       "{\"server\":{\"privateKey\":\"" + serverPriv + "\",\"publicKey\":\"" + serverPub + "\"},\"clients\":[{\"email\":\"user\",\"privateKey\":\"" + clientPriv + "\",\"allowedIPs\":[\"10.8.1.2/32\"]}]}",
 		StreamSettings: `{"externalProxy":[{"dest":"edge.example.com","port":443,"remark":"EDGE"},{"dest":"","remark":"FALLBACK"}]}`,
 	}
-	s := &SubService{address:"vpn.example.com"}
+	s := &SubService{address: "vpn.example.com"}
 	links := s.genAmneziaWGLink(inbound, "user")
 	parts := strings.Split(strings.TrimSpace(links), "\n")
-	if len(parts) != 2 { t.Fatalf("links = %d, want 2: %q", len(parts), links) }
+	if len(parts) != 2 {
+		t.Fatalf("links = %d, want 2: %q", len(parts), links)
+	}
 	decode := func(value string) string {
 		raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(value, "vpn://"))
-		if err != nil { t.Fatalf("decode vpn link: %v", err) }
+		if err != nil {
+			t.Fatalf("decode vpn link: %v", err)
+		}
 		return string(raw)
 	}
 	first, second := decode(parts[0]), decode(parts[1])
-	if !strings.Contains(first, "Endpoint = edge.example.com:443") { t.Fatalf("first endpoint mismatch: %s", first) }
-	if !strings.Contains(second, "Endpoint = vpn.example.com:51820") { t.Fatalf("partial endpoint must fall back to inbound endpoint: %s", second) }
-	if !strings.Contains(first, "# EDGE") || !strings.Contains(second, "# FALLBACK") { t.Fatalf("endpoint remarks missing: %q / %q", first, second) }
+	if !strings.Contains(first, "Endpoint = edge.example.com:443") {
+		t.Fatalf("first endpoint mismatch: %s", first)
+	}
+	if !strings.Contains(second, "Endpoint = vpn.example.com:51820") {
+		t.Fatalf("partial endpoint must fall back to inbound endpoint: %s", second)
+	}
+	if !strings.Contains(first, "# EDGE") || !strings.Contains(second, "# FALLBACK") {
+		t.Fatalf("endpoint remarks missing: %q / %q", first, second)
+	}
 }
 
-
 func TestAmneziaWGConfigTextIPv6Endpoint(t *testing.T) {
-	server := &amneziawg.ServerSettings{PublicKey:"serverPub", MTU:1420}
-	client := &model.Client{PrivateKey:"clientPriv", AllowedIPs:[]string{"fd00::2/128"}}
+	server := &amneziawg.ServerSettings{PublicKey: "serverPub", MTU: 1420}
+	client := &model.Client{PrivateKey: "clientPriv", AllowedIPs: []string{"fd00::2/128"}}
 	conf := amneziaWGConfigText(server, client, "2001:db8::7", 51820, "ipv6")
 	if !strings.Contains(conf, "Endpoint = [2001:db8::7]:51820") {
 		t.Fatalf("IPv6 endpoint is not bracketed in AmneziaWG config: %s", conf)

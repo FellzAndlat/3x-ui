@@ -119,7 +119,7 @@ func backupExists() (bool, error) {
 }
 
 func createBackup(raw string) error {
-	file, err := os.OpenFile(backupPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	file, err := os.OpenFile(backupPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf(
@@ -271,19 +271,6 @@ func validateXrayGatewayConflicts(cfg map[string]any) error {
 		return fmt.Errorf("Xray inbound %q already uses Gateway port %d", tag, inboundPort)
 	}
 	return nil
-}
-
-func hasInboundTag(rule map[string]any, tag string) bool {
-	values, ok := rule["inboundTag"].([]any)
-	if !ok {
-		return false
-	}
-	for _, value := range values {
-		if value == tag {
-			return true
-		}
-	}
-	return false
 }
 
 func isLegacyGatewayRule(item any) bool {
@@ -531,7 +518,7 @@ func Enable() error {
 	}
 	if err := saveTemplate(cfg); err != nil {
 		if cleanupErr := removeBackup(); cleanupErr != nil {
-			return fmt.Errorf("%w; cleanup failed: %v", err, cleanupErr)
+			return fmt.Errorf("%w; cleanup failed: %w", err, cleanupErr)
 		}
 		return err
 	}

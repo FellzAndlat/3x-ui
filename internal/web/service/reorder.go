@@ -90,4 +90,3 @@ func (s *NodeService) Reorder(ids []int) error {
 	}
 	return tx.Commit().Error
 }
-

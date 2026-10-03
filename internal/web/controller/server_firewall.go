@@ -22,7 +22,7 @@ type FirewallController struct {
 
 type firewallStatusResponse struct {
 	service.FirewallManagedStatus
-	PingEnabled  bool `json:"pingEnabled"`
+	PingEnabled   bool `json:"pingEnabled"`
 	CanInstallUFW bool `json:"canInstallUfw"`
 }
 

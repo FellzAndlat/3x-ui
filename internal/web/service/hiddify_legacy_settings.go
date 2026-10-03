@@ -9,10 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/SawaMEN/3x-ui/v3/internal/database"
-	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database"
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 )
 
 const hiddifyLegacySubscriptionAliasesSetting = "hiddifyLegacySubscriptionAliases"

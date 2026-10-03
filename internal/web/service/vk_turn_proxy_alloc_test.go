@@ -104,7 +104,6 @@ func TestVKTurnProxyAllocatorReusesFreedHole(t *testing.T) {
 	}
 }
 
-
 func TestSanitizeVKTurnEndpointHost(t *testing.T) {
 	cases := []struct {
 		name string
@@ -128,17 +127,16 @@ func TestSanitizeVKTurnEndpointHost(t *testing.T) {
 	}
 }
 
-
 func TestIsHysteria2Inbound(t *testing.T) {
 	cases := []struct {
 		name string
 		ib   *model.Inbound
 		want bool
 	}{
-		{"v2", &model.Inbound{Protocol:model.Hysteria, Settings:`{"version":2}`}, true},
-		{"v1", &model.Inbound{Protocol:model.Hysteria, Settings:`{"version":1}`}, false},
-		{"default", &model.Inbound{Protocol:model.Hysteria, Settings:`{}`}, true},
-		{"other", &model.Inbound{Protocol:model.VLESS, Settings:`{"version":2}`}, false},
+		{"v2", &model.Inbound{Protocol: model.Hysteria, Settings: `{"version":2}`}, true},
+		{"v1", &model.Inbound{Protocol: model.Hysteria, Settings: `{"version":1}`}, false},
+		{"default", &model.Inbound{Protocol: model.Hysteria, Settings: `{}`}, true},
+		{"other", &model.Inbound{Protocol: model.VLESS, Settings: `{"version":2}`}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

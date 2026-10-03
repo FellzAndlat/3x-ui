@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	webServer WebServer
-	subServer SubServer
+	webServer   WebServer
+	subServer   SubServer
 	subServerMu sync.RWMutex
 
 	restartHookMu sync.RWMutex

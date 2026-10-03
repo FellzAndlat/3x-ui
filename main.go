@@ -18,6 +18,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
 	"github.com/SawaMEN/3x-ui/v3/internal/crypto/nodetoken"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
+	"github.com/SawaMEN/3x-ui/v3/internal/gateway"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/sub"
 	"github.com/SawaMEN/3x-ui/v3/internal/tunnelmonitor"
@@ -28,7 +29,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service/panel"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service/tgbot"
-	"github.com/SawaMEN/3x-ui/v3/internal/gateway"
 
 	"github.com/joho/godotenv"
 	"github.com/op/go-logging"
@@ -678,34 +678,34 @@ func main() {
 	case "encrypt-tokens":
 		encryptNodeTokens()
 	case "gateway":
-    		if len(os.Args) < 3 {
-        		fmt.Println("usage: x-ui gateway <enable|disable|status>")
-        		return
-    		}
+		if len(os.Args) < 3 {
+			fmt.Println("usage: x-ui gateway <enable|disable|status>")
+			return
+		}
 
-    		switch os.Args[2] {
-    			case "enable":
-        			if err := gateway.Enable(); err != nil {
-            				fmt.Println("Gateway enable failed:", err)
-            				os.Exit(1)
-        			}
+		switch os.Args[2] {
+		case "enable":
+			if err := gateway.Enable(); err != nil {
+				fmt.Println("Gateway enable failed:", err)
+				os.Exit(1)
+			}
 
-    			case "disable":
-        			if err := gateway.Disable(); err != nil {
-           				fmt.Println("Gateway disable failed:", err)
-            			os.Exit(1)
-        			}
+		case "disable":
+			if err := gateway.Disable(); err != nil {
+				fmt.Println("Gateway disable failed:", err)
+				os.Exit(1)
+			}
 
-    			case "status":
-        			if gateway.IsEnabled() {
-            				fmt.Println("Gateway Mode: enabled")
-        			} else {
-            				fmt.Println("Gateway Mode: disabled")
-        			}
+		case "status":
+			if gateway.IsEnabled() {
+				fmt.Println("Gateway Mode: enabled")
+			} else {
+				fmt.Println("Gateway Mode: disabled")
+			}
 
-    			default:
-        			fmt.Println("usage: x-ui gateway <enable|disable|status>")
-    		}
+		default:
+			fmt.Println("usage: x-ui gateway <enable|disable|status>")
+		}
 	case "migrate-db":
 		if err := migrateDbCmd.Parse(os.Args[2:]); err != nil {
 			fmt.Println(err)

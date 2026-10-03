@@ -15,7 +15,8 @@ import (
 // mierus:// profile URL, it can be imported on a fresh Mieru installation.
 func mieruFullConfigLink(address, username, password string, entries []struct {
 	port, protocol string
-}, mtu int, multiplexing, handshake string) (string, error) {
+}, mtu int, multiplexing, handshake string,
+) (string, error) {
 	address = strings.TrimSpace(strings.Trim(address, "[]"))
 	if address == "" {
 		return "", fmt.Errorf("Mieru server address is empty")

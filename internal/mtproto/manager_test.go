@@ -37,10 +37,12 @@ func TestValidRawSecret(t *testing.T) {
 
 func TestInstanceFromInbound(t *testing.T) {
 	raw := "0123456789abcdef0123456789abcdef"
-	ib := &model.Inbound{Id: 3, Tag: "inbound-3", Listen: "0.0.0.0", Port: 8443, Protocol: model.MTProto,
+	ib := &model.Inbound{
+		Id: 3, Tag: "inbound-3", Listen: "0.0.0.0", Port: 8443, Protocol: model.MTProto,
 		Settings: `{"fakeTlsDomain":"","routeThroughXray":true,"routeXrayPort":50000,"clients":[` +
 			`{"email":"alice","secret":"ee` + raw + `6578616d706c652e636f6d","adTag":"fedcba9876543210fedcba9876543210","enable":true,"totalGB":1073741824,"expiryTime":1893456000000},` +
-			`{"email":"disabled","secret":"dd` + raw + `","enable":false}]}`}
+			`{"email":"disabled","secret":"dd` + raw + `","enable":false}]}`,
+	}
 	inst, ok := InstanceFromInbound(ib)
 	if !ok {
 		t.Fatal("expected usable Telemt instance")

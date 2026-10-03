@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/SawaMEN/3x-ui/v3/internal/naiveproxy"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
-	"github.com/gin-gonic/gin"
 )
 
 type NaiveProxyController struct {

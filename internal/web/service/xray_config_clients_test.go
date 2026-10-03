@@ -108,7 +108,6 @@ func TestGetXrayConfig_EnabledClientsStillEmitted(t *testing.T) {
 	}
 }
 
-
 func TestGetXrayConfig_SkipsMieruInbound(t *testing.T) {
 	setupSettingTestDB(t)
 	db := database.GetDB()

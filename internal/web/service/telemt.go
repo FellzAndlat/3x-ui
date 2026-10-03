@@ -327,8 +327,10 @@ func fetchTelemtLatestRelease() string {
 	return strings.TrimSpace(release.TagName)
 }
 
-const telemtUpdaterPath = "/usr/local/x-ui/telemt-update.sh"
-const telemtUpdaterURL = "https://raw.githubusercontent.com/SawaMEN/3x-ui/main/internal/Telemt/telemt-update.sh"
+const (
+	telemtUpdaterPath = "/usr/local/x-ui/telemt-update.sh"
+	telemtUpdaterURL  = "https://raw.githubusercontent.com/SawaMEN/3x-ui/main/internal/Telemt/telemt-update.sh"
+)
 
 func telemtUpdaterCommand(ctx context.Context, path string, args ...string) *exec.Cmd {
 	// Bash can read a previously installed 0644 script even before its mode is

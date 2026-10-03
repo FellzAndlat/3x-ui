@@ -65,7 +65,7 @@ func TestDetect(t *testing.T) {
 		want    Status
 	}{
 		{
-			name: "active ufw",
+			name:  "active ufw",
 			paths: map[string]string{"ufw": "/usr/sbin/ufw"},
 			outputs: map[string]fakeCommandResult{
 				"/usr/sbin/ufw status": {output: []byte("Status: active\n")},
@@ -79,7 +79,7 @@ func TestDetect(t *testing.T) {
 				"firewall-cmd": "/usr/bin/firewall-cmd",
 			},
 			outputs: map[string]fakeCommandResult{
-				"/usr/sbin/ufw status":           {output: []byte("Status: inactive\n")},
+				"/usr/sbin/ufw status":          {output: []byte("Status: inactive\n")},
 				"/usr/bin/firewall-cmd --state": {output: []byte("running\n")},
 			},
 			want: Status{Backend: BackendFirewalld, Installed: true, Active: true},
@@ -128,10 +128,10 @@ func TestDetect(t *testing.T) {
 
 func TestInstallUFWPackageManagers(t *testing.T) {
 	tests := []struct {
-		name       string
-		binary     string
-		path       string
-		wantArgs   []string
+		name     string
+		binary   string
+		path     string
+		wantArgs []string
 	}{
 		{name: "apt-get", binary: "apt-get", path: "/usr/bin/apt-get", wantArgs: []string{"install", "-y", "ufw"}},
 		{name: "dnf", binary: "dnf", path: "/usr/bin/dnf", wantArgs: []string{"install", "-y", "ufw"}},

@@ -160,10 +160,10 @@ func TestZramBackendForPackage(t *testing.T) {
 		"systemd-zram-generator":  zramBackendGenerator,
 		"zram-generator":          zramBackendGenerator,
 		"zram-generator-defaults": zramBackendGenerator,
-		"zram-config":              zramBackendConfig,
-		"zram-tools":               zramBackendTools,
-		"zram-init":                zramBackendInit,
-		"unrelated":                "",
+		"zram-config":             zramBackendConfig,
+		"zram-tools":              zramBackendTools,
+		"zram-init":               zramBackendInit,
+		"unrelated":               "",
 	}
 	for packageName, want := range tests {
 		if got := zramBackendForPackage(packageName); got != want {

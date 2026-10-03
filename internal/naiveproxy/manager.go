@@ -288,7 +288,7 @@ func startLocked() error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(BinaryPath(), "run", "--config", configPath(), "--adapter", "caddyfile")
+	cmd := exec.CommandContext(context.Background(), BinaryPath(), "run", "--config", configPath(), "--adapter", "caddyfile")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {

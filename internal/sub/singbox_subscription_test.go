@@ -123,7 +123,6 @@ func TestBuildShadowTLSSubscriptionsKeepTransportAndVisibleShadowsocks(t *testin
 	}
 }
 
-
 func TestBuildSeparatedSingBoxSubscriptionFailsClosedOnRoutingTranslation(t *testing.T) {
 	template := map[string]any{
 		"routing": map[string]any{
@@ -143,14 +142,13 @@ func TestBuildSeparatedSingBoxSubscriptionFailsClosedOnRoutingTranslation(t *tes
 	}
 }
 
-
 func TestGenNativeNaivePreservesNativeType(t *testing.T) {
 	service := &SubJsonService{}
 	inbound := &model.Inbound{
-		Protocol: model.NaiveProxy,
-		Listen:   "naive.example.com",
-		Port:     443,
-		Settings: `{"network":"tcp","tls":{"serverName":"naive.example.com","certificatePath":"/cert.pem","keyPath":"/key.pem"},"clients":[{"email":"user","password":"secret"}]}`,
+		Protocol:       model.NaiveProxy,
+		Listen:         "naive.example.com",
+		Port:           443,
+		Settings:       `{"network":"tcp","tls":{"serverName":"naive.example.com","certificatePath":"/cert.pem","keyPath":"/key.pem"},"clients":[{"email":"user","password":"secret"}]}`,
 		StreamSettings: `{"security":"tls"}`,
 	}
 	subReq := &SubService{}
@@ -177,13 +175,13 @@ func TestGenNativeNaivePreservesNativeType(t *testing.T) {
 func TestGenNativeTUICPreservesClientSettings(t *testing.T) {
 	svc := &SubJsonService{}
 	inbound := &model.Inbound{
-		Protocol: model.TUIC,
-		Listen: "tuic.example.com",
-		Port: 443,
-		Settings: `{"certificate":"/cert.pem","private_key":"/key.pem","congestion_control":"bbr","udp_relay_mode":"quic","zero_rtt_handshake":true,"clients":[{"uuid":"11111111-2222-3333-4444-555555555555","password":"secret","email":"user","enable":true}]}`,
+		Protocol:       model.TUIC,
+		Listen:         "tuic.example.com",
+		Port:           443,
+		Settings:       `{"certificate":"/cert.pem","private_key":"/key.pem","congestion_control":"bbr","udp_relay_mode":"quic","zero_rtt_handshake":true,"clients":[{"uuid":"11111111-2222-3333-4444-555555555555","password":"secret","email":"user","enable":true}]}`,
 		StreamSettings: `{"security":"tls","tlsSettings":{"serverName":"tuic.example.com","alpn":["h3"]}}`,
 	}
-	raw := svc.genNativeTUIC(inbound, unmarshalStreamSettings(inbound.StreamSettings), model.Client{ID:"11111111-2222-3333-4444-555555555555",Password:"secret",Email:"user"})
+	raw := svc.genNativeTUIC(inbound, unmarshalStreamSettings(inbound.StreamSettings), model.Client{ID: "11111111-2222-3333-4444-555555555555", Password: "secret", Email: "user"})
 	if raw == nil {
 		t.Fatal("genNativeTUIC returned nil")
 	}
@@ -194,14 +192,13 @@ func TestGenNativeTUICPreservesClientSettings(t *testing.T) {
 	for key, want := range map[string]any{
 		"congestion_control": "bbr",
 		"udp_relay_mode":     "quic",
-		"zero_rtt_handshake":  true,
+		"zero_rtt_handshake": true,
 	} {
 		if got[key] != want {
 			t.Fatalf("%s = %v, want %v; config=%#v", key, got[key], want, got)
 		}
 	}
 }
-
 
 func TestGenNativeAnyTLSUsesClientPassword(t *testing.T) {
 	svc := &SubJsonService{}
@@ -256,8 +253,10 @@ func TestGenNativeShadowTLSUsesHandshakeServer(t *testing.T) {
 
 func TestGenNativeShadowTLSExternalEndpoint(t *testing.T) {
 	svc := &SubJsonService{}
-	inbound := &model.Inbound{Protocol: model.ShadowTLS, Listen: "origin.example.com", Port: 443,
-		Settings: `{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","handshake":{"server":"cloudflare.com"}}`}
+	inbound := &model.Inbound{
+		Protocol: model.ShadowTLS, Listen: "origin.example.com", Port: 443,
+		Settings: `{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","handshake":{"server":"cloudflare.com"}}`,
+	}
 	subReq := &SubService{}
 	endpoint := ShareEndpoint{Address: "edge.example.com", Port: 8443, ep: map[string]any{
 		"sni": "front.example.com", "allowInsecure": true, "alpn": []any{"h2"},
@@ -281,8 +280,10 @@ func TestGenNativeShadowTLSExternalEndpoint(t *testing.T) {
 
 func TestGenNativeShadowTLSWildcardSNIUsesHostOverride(t *testing.T) {
 	svc := &SubJsonService{}
-	inbound := &model.Inbound{Protocol: model.ShadowTLS, Listen: "origin.example.com", Port: 443,
-		Settings: `{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","wildcardSni":"all","handshake":{}}`}
+	inbound := &model.Inbound{
+		Protocol: model.ShadowTLS, Listen: "origin.example.com", Port: 443,
+		Settings: `{"version":3,"innerKey":"MDEyMzQ1Njc4OWFiY2RlZg==","wildcardSni":"all","handshake":{}}`,
+	}
 	endpoint := ShareEndpoint{Address: "edge.example.com", Port: 8443, ep: map[string]any{"sni": "front.example.com"}}
 	got := svc.genNativeTLSLikeEndpoint(&SubService{}, inbound, model.Client{Email: "user", Password: "secret"}, endpoint)
 	if got == nil {
@@ -297,8 +298,10 @@ func TestGenNativeShadowTLSWildcardSNIUsesHostOverride(t *testing.T) {
 
 func TestGenNativeNaiveUsesAdvertisedDomainAsTLSName(t *testing.T) {
 	svc := &SubJsonService{}
-	inbound := &model.Inbound{Protocol: model.NaiveProxy, Listen: "naive.example.com", Port: 443,
-		Settings: `{"network":"tcp","tls":{}}`}
+	inbound := &model.Inbound{
+		Protocol: model.NaiveProxy, Listen: "naive.example.com", Port: 443,
+		Settings: `{"network":"tcp","tls":{}}`,
+	}
 	got := svc.genNativeNaive(&SubService{}, inbound, model.Client{Email: "user", Password: "secret"}, nil)
 	if got == nil {
 		t.Fatal("genNativeNaive returned nil")
@@ -310,9 +313,11 @@ func TestGenNativeNaiveUsesAdvertisedDomainAsTLSName(t *testing.T) {
 }
 
 func TestShadowTLSLinkSkipsPlaintextEndpoint(t *testing.T) {
-	inbound := &model.Inbound{Protocol: model.ShadowTLS, Listen: "shadow.example.com", Port: 443,
-		Settings: `{"handshake":{"server":"cloudflare.com"},"clients":[{"email":"user","password":"secret"}]}`,
-		StreamSettings: `{"externalProxy":[{"dest":"plain.example.com","port":80,"forceTls":"none"}]}`}
+	inbound := &model.Inbound{
+		Protocol: model.ShadowTLS, Listen: "shadow.example.com", Port: 443,
+		Settings:       `{"handshake":{"server":"cloudflare.com"},"clients":[{"email":"user","password":"secret"}]}`,
+		StreamSettings: `{"externalProxy":[{"dest":"plain.example.com","port":80,"forceTls":"none"}]}`,
+	}
 	if link := (&SubService{}).genShadowTlsLink(inbound, "user"); link != "" {
 		t.Fatalf("ShadowTLS must not advertise a plaintext endpoint: %q", link)
 	}

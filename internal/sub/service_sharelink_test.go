@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/enfein/mieru/v3/pkg/appctl"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 )
 
 // shareLinkInbound builds a VLESS inbound with one client and the given stream

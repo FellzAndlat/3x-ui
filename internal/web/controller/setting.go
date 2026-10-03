@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
+	"github.com/SawaMEN/3x-ui/v3/internal/sudoku"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/crypto"
 	systemswap "github.com/SawaMEN/3x-ui/v3/internal/util/swap"
 	systemupdate "github.com/SawaMEN/3x-ui/v3/internal/util/systemupdate"
-	"github.com/SawaMEN/3x-ui/v3/internal/sudoku"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/entity"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/middleware"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"

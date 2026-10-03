@@ -2,7 +2,6 @@ package sudoku
 
 import (
 	"context"
-	"os"
 	"strings"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
@@ -17,9 +16,8 @@ type Status struct {
 
 func GetStatus(ctx context.Context) (Status, error) {
 	binDir := config.GetBinFolderPath()
-	_, err := os.Stat(GetBinaryPath(binDir))
 	status := Status{
-		Installed: err == nil,
+		Installed: IsInstalled(binDir),
 		Version:   readInstalledVersion(binDir),
 	}
 	latest, latestErr := LatestRelease(ctx)

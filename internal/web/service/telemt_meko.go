@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -164,7 +165,7 @@ func runTelemtMekoScript(action string, cfg TelemtMekoConfig) ([]byte, error) {
 	if _, err := os.Stat(telemtMekoScriptPath); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(telemtMekoScriptPath, action)
+	cmd := exec.CommandContext(context.Background(), telemtMekoScriptPath, action)
 	cmd.Env = append(os.Environ(), mekoEnv(cfg)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
