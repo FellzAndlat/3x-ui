@@ -48,6 +48,10 @@ func activeSessionFromConnection(connection *singBoxConnection) ActiveSession {
 	}
 }
 
+func isActiveConnection(connection *singBoxConnection) bool {
+	return connection != nil && connection.ID != "" && connection.ClosedAt == 0
+}
+
 // ActiveSessions returns a snapshot without retaining connection state between calls.
 func (c *ConnectionAPIClient) ActiveSessions(ctx context.Context) ([]ActiveSession, error) {
 	connections, err := c.Snapshot(ctx)
@@ -56,7 +60,10 @@ func (c *ConnectionAPIClient) ActiveSessions(ctx context.Context) ([]ActiveSessi
 	}
 	sessions := make([]ActiveSession, 0, len(connections))
 	for _, connection := range connections {
-		if connection == nil || connection.ID == "" {
+		// sing-box keeps recently closed connections in the initial reset
+		// snapshot and marks them with ClosedAt. They are history, not live
+		// sessions, even when the enclosing event type is NEW.
+		if !isActiveConnection(connection) {
 			continue
 		}
 		sessions = append(sessions, activeSessionFromConnection(connection))
@@ -109,7 +116,7 @@ func matchingConnectionIDs(connections []*singBoxConnection, match func(*singBox
 	ids := make([]string, 0, len(connections))
 	seen := make(map[string]struct{}, len(connections))
 	for _, connection := range connections {
-		if connection == nil || connection.ID == "" || !match(connection) {
+		if !isActiveConnection(connection) || !match(connection) {
 			continue
 		}
 		if _, exists := seen[connection.ID]; exists {
