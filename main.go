@@ -15,6 +15,7 @@ import (
 	"syscall"
 	_ "unsafe"
 
+	"github.com/SawaMEN/3x-ui/v3/internal/adblock/youtubeproxy"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
 	"github.com/SawaMEN/3x-ui/v3/internal/crypto/nodetoken"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
@@ -666,6 +667,10 @@ func main() {
 	}
 
 	switch os.Args[1] {
+	case "youtube-proxy":
+		if err := youtubeproxy.CLI(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
 	case "run":
 		err := runCmd.Parse(os.Args[2:])
 		if err != nil {
@@ -804,6 +809,7 @@ func main() {
 func commandHelp() string {
 	return `
 Commands:
+    youtube-proxy  run the opt-in YouTube HTTPS server filter
     run            run web panel
     migrate        migrate from other/old x-ui
     migrate-db     SQLite <-> .dump (--dump/--restore) or copy into PostgreSQL (--dsn)

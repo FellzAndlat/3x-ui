@@ -1,0 +1,2 @@
+body {width: 300px; padding: 16px; margin: 0; font: 14px/1.5 system-ui, sans-serif; color: #e8edf5; background: #151b27;}
+h1 {font-size: 18px; margin: 0 0 16px;} label {display: flex; gap: 8px; align-items: center;} input {accent-color: #56a6ff;} p {color: #b9c5d6;} #status {min-height: 21px; color: #82c9ff;}

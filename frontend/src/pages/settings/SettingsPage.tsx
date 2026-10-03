@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router';
+import { Navigate, useLocation } from 'react-router';
 import {
   Alert,
   Button,
@@ -301,6 +301,20 @@ export default function SettingsPage() {
         );
     }
   }, [activeSlug, allSetting, updateSetting, saveAll, savePayload]);
+
+  if (slug === 'adblock') {
+    if (!fetched) return <Spin />;
+    return (
+      <Navigate
+        replace
+        to={
+          allSetting.coreType === 'sing-box'
+            ? '/singbox?routingTab=adblock#routing'
+            : '/routing?routingTab=adblock'
+        }
+      />
+    );
+  }
 
   return (
     <ConfigProvider theme={antdThemeConfig}>

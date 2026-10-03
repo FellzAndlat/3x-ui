@@ -491,6 +491,12 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 	}
 	ensureAutomaticClashAPI(cfg)
 	applySingBoxInfrastructureEgress(cfg)
+	if err := singBoxSettingService.applySingBoxAdBlock(cfg); err != nil {
+		return nil, err
+	}
+	if err := singBoxSettingService.applySingBoxYouTubeServer(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -533,6 +539,20 @@ func (s *SingBoxService) GetEditorConfig(ctx context.Context) (*SingBoxEditorSna
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, err
+	}
+	// Remove the named panel-managed filter from an editor round trip.
+	var editorConfig singbox.Config
+	if err := json.Unmarshal(data, &editorConfig); err != nil {
+		return nil, err
+	}
+	if err := stripSingBoxAdBlock(&editorConfig); err != nil {
+		return nil, err
+	}
+	if route, ok := raw["route"]; ok && route != nil {
+		raw["route"] = editorConfig.Route
+	}
+	if _, ok := raw["outbounds"]; ok {
+		raw["outbounds"] = editorConfig.Outbounds
 	}
 	delete(raw, "inbounds")
 	delete(raw, "services")
@@ -721,6 +741,7 @@ func (s *SingBoxService) Restart(ctx context.Context) error {
 	if err := singBoxProcess.Restart(ctx); err != nil {
 		return err
 	}
+	commitManagedYouTube(CoreTypeSingBox)
 	return nil
 }
 
@@ -738,6 +759,7 @@ func (s *SingBoxService) Start(ctx context.Context) error {
 	if err := singBoxProcess.Start(ctx); err != nil {
 		return err
 	}
+	commitManagedYouTube(CoreTypeSingBox)
 	return nil
 }
 

@@ -1,0 +1,7 @@
+html[data-3x-ui-youtube] ytd-ad-slot-renderer,
+html[data-3x-ui-youtube] ytd-display-ad-renderer,
+html[data-3x-ui-youtube] ytd-promoted-sparkles-web-renderer,
+html[data-3x-ui-youtube] ytd-in-feed-ad-layout-renderer,
+html[data-3x-ui-youtube] .ytp-ad-overlay-container {
+  display: none !important;
+}

@@ -35,6 +35,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons';
 
+import AdBlockTab from '@/pages/adblock/AdBlockTab';
 import AppSidebar from '@/layouts/AppSidebar';
 import { HttpUtil } from '@/utils';
 import { useTheme } from '@/hooks/useTheme';
@@ -1195,6 +1196,7 @@ export default function SingBoxPage() {
   const [messageApi, contextHolder] = message.useMessage();
   const { antdThemeConfig, isDark, isUltra } = useTheme();
   const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
   const navigate = useNavigate();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [config, setConfig] = useState<ConfigMap>({});
@@ -2586,7 +2588,23 @@ export default function SingBoxPage() {
       case 'dns':
         return renderDns();
       case 'routing':
-        return renderRoute();
+        return (
+          <Tabs
+            activeKey={searchParams.get('routingTab') === 'adblock' ? 'adblock' : 'rules'}
+            onChange={(key) => {
+              const next = new URLSearchParams(location.search);
+              next.set('routingTab', key);
+              navigate(
+                { pathname: location.pathname, search: next.toString(), hash: location.hash },
+                { preventScrollReset: true },
+              );
+            }}
+            items={[
+              { key: 'rules', label: 'Маршрутизация', children: renderRoute() },
+              { key: 'adblock', label: 'AdBlock', children: <AdBlockTab /> },
+            ]}
+          />
+        );
       case 'outbound':
         return renderOutbounds();
       case 'endpoints':

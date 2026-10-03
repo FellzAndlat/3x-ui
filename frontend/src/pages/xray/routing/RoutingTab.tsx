@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Button, Dropdown, Input, Modal, Select, Space, Table, Tabs, message } from 'antd';
 import {
@@ -8,6 +9,7 @@ import {
   ImportOutlined,
   MoreOutlined,
   PlusOutlined,
+  SafetyOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
 
@@ -16,6 +18,7 @@ import PromptModal from '@/components/feedback/PromptModal';
 import TextModal from '@/components/feedback/TextModal';
 import { isBalancerLoopbackTag } from '../balancers/balancer-loopback';
 import { HttpUtil } from '@/utils';
+import AdBlockTab from '@/pages/adblock/AdBlockTab';
 import RoutingBasic from './RoutingBasic';
 import RouteTester from './RouteTester';
 import RuleFormModal from './RuleFormModal';
@@ -46,6 +49,13 @@ export default function RoutingTab({
   isMobile,
 }: RoutingTabProps) {
   const { t } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const searchParams = new URLSearchParams(location.search);
+  const requestedTab = searchParams.get('routingTab');
+  const activeTab = ['basic', 'rules', 'tester', 'adblock'].includes(requestedTab || '')
+    ? requestedTab!
+    : 'basic';
   const [modal, modalContextHolder] = Modal.useModal();
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<RoutingRule | null>(null);
@@ -454,7 +464,15 @@ export default function RoutingTab({
     <>
       {modalContextHolder}
       <Tabs
-        defaultActiveKey="basic"
+        activeKey={activeTab}
+        onChange={(key) => {
+          const next = new URLSearchParams(location.search);
+          next.set('routingTab', key);
+          navigate(
+            { pathname: location.pathname, search: next.toString(), hash: location.hash },
+            { preventScrollReset: true },
+          );
+        }}
         items={[
           {
             key: 'basic',
@@ -579,29 +597,36 @@ export default function RoutingTab({
             label: catTabLabel(<AimOutlined />, t('pages.xray.routeTester'), isMobile),
             children: <RouteTester inboundTags={inboundTagOptions} isMobile={isMobile} />,
           },
+          {
+            key: 'adblock',
+            label: catTabLabel(<SafetyOutlined />, 'AdBlock', isMobile),
+            children: <AdBlockTab />,
+          },
         ]}
       />
 
-      {presetId != null && routingPresets.some((p) => p.id === presetId) && (
-        <Space style={{ marginTop: 8 }} wrap>
-          <Button
-            danger
-            size="small"
-            loading={presetBusy}
-            onClick={() =>
-              modal.confirm({
-                title: t('pages.xray.deleteRoutingPreset'),
-                okText: t('delete'),
-                okType: 'danger',
-                cancelText: t('cancel'),
-                onOk: () => deleteRoutingPreset(presetId),
-              })
-            }
-          >
-            {t('delete')}
-          </Button>
-        </Space>
-      )}
+      {activeTab === 'rules' &&
+        presetId != null &&
+        routingPresets.some((p) => p.id === presetId) && (
+          <Space style={{ marginTop: 8 }} wrap>
+            <Button
+              danger
+              size="small"
+              loading={presetBusy}
+              onClick={() =>
+                modal.confirm({
+                  title: t('pages.xray.deleteRoutingPreset'),
+                  okText: t('delete'),
+                  okType: 'danger',
+                  cancelText: t('cancel'),
+                  onOk: () => deleteRoutingPreset(presetId),
+                })
+              }
+            >
+              {t('delete')}
+            </Button>
+          </Space>
+        )}
       <RuleFormModal
         open={ruleModalOpen}
         rule={editingRule}

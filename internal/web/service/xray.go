@@ -493,6 +493,12 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		injectNodeEgresses(xrayConfig, nodes)
 	}
 
+	if err := s.settingService.applyXrayAdBlock(xrayConfig); err != nil {
+		return nil, err
+	}
+	if err := s.settingService.applyXrayYouTubeServer(xrayConfig); err != nil {
+		return nil, err
+	}
 	return xrayConfig, nil
 }
 
@@ -1458,6 +1464,7 @@ func (s *XrayService) RestartXray(isForce bool) error {
 		}
 		if !isForce && !configUnchanged && s.tryHotApply(process, xrayConfig) {
 			logger.Info("Xray config changes applied through the core API, no restart needed")
+			commitManagedYouTube(CoreTypeXray)
 			return nil
 		}
 		s.xrayTrafficMu.Lock()
@@ -1483,7 +1490,7 @@ func (s *XrayService) RestartXray(isForce bool) error {
 	if err != nil {
 		return err
 	}
-
+	commitManagedYouTube(CoreTypeXray)
 	return nil
 }
 
