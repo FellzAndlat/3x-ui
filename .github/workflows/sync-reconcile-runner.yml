@@ -1,0 +1,163 @@
+name: One-shot upstream reconcile runner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sync-reconcile-runner.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: sync-upstream-2026-10-03
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/MHSanaei/3x-ui.git || true
+          git fetch --depth=1 upstream main
+      - name: Reconcile sources
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('.')
+
+          def read(path):
+              return (root / path).read_text()
+
+          def write(path, text):
+              (root / path).write_text(text)
+
+          def add_after(path, needle, addition):
+              text = read(path)
+              if addition.strip() in text:
+                  return
+              if needle not in text:
+                  raise SystemExit(f'{path}: insertion anchor not found: {needle!r}')
+              write(path, text.replace(needle, needle + addition, 1))
+
+          # Remove the temporary compatibility namespace shim.
+          for p in [
+              'internal/web/service/upstream_tuic_compat.go',
+              '.github/workflows/sync-reconcile-fix.yml',
+          ]:
+              target = root / p
+              if target.exists():
+                  target.unlink()
+
+          add_after(
+              'internal/web/service/inbound_amneziawg.go',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/logger"\n',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/tuic"\n',
+          )
+          add_after(
+              'internal/web/service/port_conflict.go',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/mieru"\n',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/tuic"\n',
+          )
+
+          # Restore the local client email list required by upstream TUIC traffic IDs.
+          path = 'internal/web/service/inbound.go'
+          text = read(path)
+          start = text.find('func (s *InboundService) buildInboundForLocalRuntime')
+          marker = '\ttrafficIDs := make(map[string]int)\n\tif inbound.Protocol == model.TUIC {'
+          if start >= 0 and marker in text[start:] and '\temails := make([]string, 0, len(clients))\n' not in text[start:]:
+              replacement = '''\temails := make([]string, 0, len(clients))
+\tfor _, client := range clients {
+\t\tif c, ok := client.(map[string]any); ok {
+\t\t\temail, _ := c["email"].(string)
+\t\t\tif email != "" {
+\t\t\t\temails = append(emails, email)
+\t\t\t}
+\t\t}
+\t}
+
+\ttrafficIDs := make(map[string]int)
+\tif inbound.Protocol == model.TUIC {'''
+              text = text[:start] + text[start:].replace(marker, replacement, 1)
+              write(path, text)
+
+          add_after(
+              'internal/web/service/server.go',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/util/common"\n',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"\n',
+          )
+          add_after(
+              'internal/web/service/panel/panel.go',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/logger"\n',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/util/version"\n',
+          )
+          add_after(
+              'internal/web/service/tgbot/tgbot.go',
+              '\t"math/big"\n',
+              '\t"net"\n',
+          )
+          add_after(
+              'internal/web/controller/server.go',
+              '\t"encoding/json"\n',
+              '\t"errors"\n',
+          )
+          add_after(
+              'internal/web/controller/server.go',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/logger"\n',
+              '\t"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"\n',
+          )
+
+          path = 'internal/web/web.go'
+          text = read(path)
+          fn = 'func (s *Server) stop(stopXray bool, stopTgBot bool) error {\n'
+          if fn in text and fn + '\tvar err1, err2 error\n' not in text:
+              write(path, text.replace(fn, fn + '\tvar err1, err2 error\n', 1))
+
+          helper = root / 'internal/web/service/sync_port_helpers.go'
+          helper.write_text('''package service
+
+import "github.com/SawaMEN/3x-ui/v3/internal/database/model"
+
+var loopbackBind = "127.0.0.1"
+
+func inboundBindAddr(ib *model.Inbound) string {
+\tif ib == nil {
+\t\treturn ""
+\t}
+\treturn ib.Listen
+}
+''')
+          PY
+
+          # Native TUIC accounting must use one coherent upstream job/journal implementation.
+          for f in internal/web/job/tuic_job.go internal/web/job/tuic_journal.go internal/web/job/tuic_job_test.go internal/web/job/tuic_journal_test.go; do
+            git show upstream/main:"$f" | sed 's#github.com/mhsanaei/3x-ui/v3#github.com/SawaMEN/3x-ui/v3#g' > "$f"
+          done
+
+          gofmt -w \
+            internal/web/service/inbound.go \
+            internal/web/service/inbound_amneziawg.go \
+            internal/web/service/port_conflict.go \
+            internal/web/service/server.go \
+            internal/web/service/panel/panel.go \
+            internal/web/service/tgbot/tgbot.go \
+            internal/web/controller/server.go \
+            internal/web/web.go \
+            internal/web/service/sync_port_helpers.go \
+            internal/web/job/tuic_job.go \
+            internal/web/job/tuic_journal.go \
+            internal/web/job/tuic_job_test.go \
+            internal/web/job/tuic_journal_test.go
+
+      - name: Commit to sync branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(sync): reconcile upstream TUIC and lost imports"
+          git push origin HEAD:sync-upstream-2026-10-03
