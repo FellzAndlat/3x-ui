@@ -189,7 +189,7 @@ function AppSidebar() {
         label: t('pages.singBox.sections.route'),
       },
       {
-        key: '/singbox?routingTab=adblock#routing',
+        key: '/singbox#adblock',
         icon: <SafetyOutlined />,
         label: 'AdBlock',
       },
@@ -199,7 +199,7 @@ function AppSidebar() {
         label: t('pages.singBox.sections.outbounds'),
       },
       {
-        key: '/settings#gateway',
+        key: '/singbox#gateway',
         icon: <ApartmentOutlined />,
         label: 'Режим шлюза',
       },
@@ -322,7 +322,7 @@ function AppSidebar() {
         : pathname === ''
           ? '/'
           : pathname;
-  const gatewaySubmenu = isSingBox ? '/singbox' : isXray ? '/xray' : '/settings';
+  const gatewaySubmenu = isXray ? '/xray' : '/settings';
   const openSubmenu = gatewayActive
     ? gatewaySubmenu
     : settingsActive
