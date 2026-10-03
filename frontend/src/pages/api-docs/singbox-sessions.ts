@@ -74,7 +74,7 @@ export const singBoxSessionSections: readonly Section[] = [
           {
             name: 'users',
             in: 'body',
-            type: 'array',
+            type: 'string[]',
             desc: 'Authenticated sing-box user identifiers to revoke.',
           },
         ],
