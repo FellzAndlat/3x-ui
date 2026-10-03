@@ -64,7 +64,7 @@ func singBoxInboundRequiresUsers(protocol model.Protocol) bool {
 func isLocalSidecarInbound(protocol model.Protocol) bool {
 	switch protocol {
 	case model.MTProto, model.AmneziaWG, model.Mieru,
-		model.Pingtunnel, model.TrustTunnel, model.Sudoku, model.VKTurnProxy:
+		model.Pingtunnel, model.TrustTunnel, model.FPTN, model.OpenFlux, model.Sudoku, model.VKTurnProxy:
 		return true
 	default:
 		return false

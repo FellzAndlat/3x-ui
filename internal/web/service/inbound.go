@@ -1402,7 +1402,7 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		if inbound.Enable && (isXrayManagedProtocol(inbound.Protocol) ||
 			inbound.Protocol == model.MTProto ||
 			inbound.Protocol == model.TUIC ||
-			inbound.Protocol == model.Pingtunnel || inbound.Protocol == model.TrustTunnel ||
+			inbound.Protocol == model.Pingtunnel || inbound.Protocol == model.TrustTunnel || inbound.Protocol == model.FPTN || inbound.Protocol == model.OpenFlux ||
 			inbound.Protocol == model.AmneziaWG ||
 			inbound.Protocol == model.NaiveProxy ||
 			inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS ||
@@ -1495,7 +1495,7 @@ func (s *InboundService) delInbound(id int) (bool, func(), error) {
 			(isXrayManagedProtocol(ib.Protocol) ||
 				ib.Protocol == model.MTProto ||
 				ib.Protocol == model.TUIC ||
-				ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel ||
+				ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel || ib.Protocol == model.FPTN || ib.Protocol == model.OpenFlux ||
 				ib.Protocol == model.AmneziaWG ||
 				naiveSingBox)
 		if shouldPushToRuntime {
@@ -2069,7 +2069,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		oldInbound.Tag = resolvedTag
 		inbound.Tag = oldInbound.Tag
 
-		localSidecarTransition := oldProtocol == model.MTProto || oldInbound.Protocol == model.MTProto || oldProtocol == model.TUIC || oldInbound.Protocol == model.TUIC || oldProtocol == model.Mieru || oldInbound.Protocol == model.Mieru || oldProtocol == model.Pingtunnel || oldInbound.Protocol == model.Pingtunnel || oldProtocol == model.TrustTunnel || oldInbound.Protocol == model.TrustTunnel
+		localSidecarTransition := oldProtocol == model.MTProto || oldInbound.Protocol == model.MTProto || oldProtocol == model.TUIC || oldInbound.Protocol == model.TUIC || oldProtocol == model.Mieru || oldInbound.Protocol == model.Mieru || oldProtocol == model.Pingtunnel || oldInbound.Protocol == model.Pingtunnel || oldProtocol == model.TrustTunnel || oldInbound.Protocol == model.TrustTunnel || oldProtocol == model.FPTN || oldInbound.Protocol == model.FPTN || oldProtocol == model.OpenFlux || oldInbound.Protocol == model.OpenFlux
 		naiveSingBoxRuntime := false
 		if oldProtocol == model.NaiveProxy || oldInbound.Protocol == model.NaiveProxy ||
 			oldProtocol == model.Snell || oldInbound.Protocol == model.Snell || oldProtocol == model.AnyTLS || oldInbound.Protocol == model.AnyTLS ||
@@ -2114,7 +2114,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 						pushable = false
 					}
 				}
-				newProtocolIsSidecar := oldInbound.Protocol == model.MTProto || oldInbound.Protocol == model.TUIC || oldInbound.Protocol == model.Mieru || oldInbound.Protocol == model.Pingtunnel || oldInbound.Protocol == model.TrustTunnel
+				newProtocolIsSidecar := oldInbound.Protocol == model.MTProto || oldInbound.Protocol == model.TUIC || oldInbound.Protocol == model.Mieru || oldInbound.Protocol == model.Pingtunnel || oldInbound.Protocol == model.TrustTunnel || oldInbound.Protocol == model.FPTN || oldInbound.Protocol == model.OpenFlux
 				if pushable {
 					postCommitApply = func() {
 						if err2 := rt.UpdateInbound(context.Background(), &oldSnapshot, payload); err2 == nil {

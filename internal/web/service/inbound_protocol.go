@@ -74,6 +74,8 @@ var nodeEligibleProtocols = map[model.Protocol]bool{
 	model.TUIC:        true,
 	model.Pingtunnel:  true,
 	model.TrustTunnel: true,
+	model.FPTN:        true,
+	model.OpenFlux:    true,
 	model.NaiveProxy:  true,
 	model.Snell:       true,
 	model.AnyTLS:      true,

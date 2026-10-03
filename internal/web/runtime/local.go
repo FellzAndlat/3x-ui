@@ -83,7 +83,7 @@ func (l *Local) AddInbound(ctx context.Context, ib *model.Inbound) error {
 		}
 		return mieru.GetManager().Ensure(inst)
 	}
-	if ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel {
+	if externalvpn.IsManaged(ib.Protocol) {
 		inst, err := externalvpn.FromInbound(ib)
 		if err != nil {
 			return err
@@ -138,7 +138,7 @@ func (l *Local) DelInbound(ctx context.Context, ib *model.Inbound) error {
 		mieru.GetManager().Remove(ib.Id)
 		return nil
 	}
-	if ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel {
+	if externalvpn.IsManaged(ib.Protocol) {
 		externalvpn.GetManager().Remove(ib.Id)
 		return nil
 	}
@@ -167,7 +167,7 @@ func (l *Local) DelInbound(ctx context.Context, ib *model.Inbound) error {
 }
 
 func (l *Local) UpdateInbound(ctx context.Context, oldIb, newIb *model.Inbound) error {
-	if oldIb.Protocol == model.Pingtunnel || oldIb.Protocol == model.TrustTunnel || newIb.Protocol == model.Pingtunnel || newIb.Protocol == model.TrustTunnel {
+	if externalvpn.IsManaged(oldIb.Protocol) || externalvpn.IsManaged(newIb.Protocol) {
 		if err := l.DelInbound(ctx, oldIb); err != nil {
 			return err
 		}
@@ -297,7 +297,7 @@ func (l *Local) updateMieruInbound(ctx context.Context, oldIb, newIb *model.Inbo
 }
 
 func (l *Local) AddUser(ctx context.Context, ib *model.Inbound, userMap map[string]any) error {
-	if ib.Protocol == model.MTProto || ib.Protocol == model.AmneziaWG || ib.Protocol == model.TUIC || ib.Protocol == model.Mieru || ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel || ib.Protocol == model.Sudoku {
+	if ib.Protocol == model.MTProto || ib.Protocol == model.AmneziaWG || ib.Protocol == model.TUIC || ib.Protocol == model.Mieru || externalvpn.IsManaged(ib.Protocol) || ib.Protocol == model.Sudoku {
 		return nil
 	}
 	if l.isSingBox() {
@@ -307,7 +307,7 @@ func (l *Local) AddUser(ctx context.Context, ib *model.Inbound, userMap map[stri
 }
 
 func (l *Local) RemoveUser(ctx context.Context, ib *model.Inbound, email string) error {
-	if ib.Protocol == model.MTProto || ib.Protocol == model.AmneziaWG || ib.Protocol == model.TUIC || ib.Protocol == model.Mieru || ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel || ib.Protocol == model.Sudoku {
+	if ib.Protocol == model.MTProto || ib.Protocol == model.AmneziaWG || ib.Protocol == model.TUIC || ib.Protocol == model.Mieru || externalvpn.IsManaged(ib.Protocol) || ib.Protocol == model.Sudoku {
 		return nil
 	}
 	if l.isSingBox() {
@@ -337,7 +337,7 @@ func (l *Local) DeleteUser(ctx context.Context, ib *model.Inbound, email string)
 }
 func (l *Local) DeleteClient(context.Context, string) error { return nil }
 func (l *Local) UpdateUser(ctx context.Context, ib *model.Inbound, oldEmail string, payload model.Client) error {
-	if ib.Protocol == model.Mieru || ib.Protocol == model.Sudoku {
+	if ib.Protocol == model.Mieru || ib.Protocol == model.Sudoku || externalvpn.IsManaged(ib.Protocol) {
 		return nil // Full state is reapplied by the protocol-specific reconciler.
 	}
 	if l.isSingBox() {

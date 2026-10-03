@@ -18,7 +18,27 @@ type Client struct {
 	Enable   bool   `json:"enable"`
 }
 
+type OpenFluxTransport struct {
+	Type     string `json:"type"`
+	URL      string `json:"url,omitempty"`
+	Priority int    `json:"priority,omitempty"`
+	Dial     string `json:"dial,omitempty"`
+}
+
 type Settings struct {
+	Image         string              `json:"image"`
+	MTU           int                 `json:"mtu"`
+	MaxSessions   int                 `json:"maxSessions"`
+	Bandwidth     int                 `json:"bandwidth"`
+	DetectProbing bool                `json:"detectProbing"`
+	AllowedSNI    string              `json:"allowedSni"`
+	AdsFilter     bool                `json:"adsFilter"`
+	TorrentFilter bool                `json:"torrentFilter"`
+	SpamFilter    bool                `json:"spamFilter"`
+	MetricsKey    string              `json:"metricsKey"`
+	Context       string              `json:"context"`
+	Transports    []OpenFluxTransport `json:"transports"`
+
 	Key            int      `json:"key"`
 	Encrypt        string   `json:"encrypt"`
 	EncryptKey     string   `json:"encryptKey"`
@@ -42,7 +62,7 @@ type Instance struct {
 }
 
 func FromInbound(ib *model.Inbound) (Instance, error) {
-	if ib == nil || (ib.Protocol != model.Pingtunnel && ib.Protocol != model.TrustTunnel) {
+	if ib == nil || !IsManaged(ib.Protocol) {
 		return Instance{}, fmt.Errorf("unsupported external VPN inbound")
 	}
 	var settings Settings
@@ -55,6 +75,9 @@ func FromInbound(ib *model.Inbound) (Instance, error) {
 
 func (inst Instance) Validate() error {
 	s := inst.Settings
+	if inst.Protocol == model.FPTN || inst.Protocol == model.OpenFlux {
+		return inst.validateAdditional()
+	}
 	if inst.Protocol == model.Pingtunnel {
 		if inst.Port != 0 {
 			return fmt.Errorf("Pingtunnel uses ICMP and requires port 0")
@@ -145,4 +168,8 @@ func GenerateSecret() (string, error) {
 		out[i*2], out[i*2+1] = alphabet[b>>4], alphabet[b&15]
 	}
 	return string(out[:]), nil
+}
+
+func IsManaged(p model.Protocol) bool {
+	return p == model.Pingtunnel || p == model.TrustTunnel || p == model.FPTN || p == model.OpenFlux
 }

@@ -153,7 +153,7 @@ func isXrayManagedProtocol(protocol model.Protocol) bool {
 		protocol != model.AmneziaWG &&
 		protocol != model.TUIC &&
 		protocol != model.Pingtunnel &&
-		protocol != model.TrustTunnel &&
+		protocol != model.TrustTunnel && protocol != model.FPTN && protocol != model.OpenFlux &&
 		protocol != model.Mieru &&
 		protocol != model.Sudoku
 }

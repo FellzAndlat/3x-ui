@@ -35,6 +35,7 @@ type running struct {
 	protocol    model.Protocol
 	metricsAddr string
 	tag         string
+	instance    Instance
 	counters    map[string]trafficCounters
 	fingerprint string
 	cancel      context.CancelFunc
@@ -255,7 +256,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 			m.removeLocked(inst.ID)
 		}
 	}
-	if inst.Protocol == model.TrustTunnel {
+	if inst.Protocol == model.TrustTunnel || inst.Protocol == model.FPTN || inst.Protocol == model.OpenFlux {
 		active := false
 		for _, c := range inst.Settings.Clients {
 			active = active || c.Enable
@@ -272,7 +273,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 		}
 	}
 	metricsAddr := ""
-	if inst.Protocol == model.TrustTunnel {
+	if inst.Protocol == model.TrustTunnel || inst.Protocol == model.FPTN {
 		listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 		if err != nil {
 			return err
@@ -280,18 +281,30 @@ func (m *Manager) ensureLocked(inst Instance) error {
 		metricsAddr = listener.Addr().String()
 		_ = listener.Close()
 	}
-	args, err := files(inst, metricsAddr)
-	if err != nil {
-		return err
+	var cmd *exec.Cmd
+	var cancel context.CancelFunc
+	var ctx context.Context
+	if inst.Protocol == model.FPTN || inst.Protocol == model.OpenFlux {
+		var err error
+		cmd, cancel, err = m.additionalCommand(inst, metricsAddr)
+		if err != nil {
+			return err
+		}
+		ctx = context.Background()
+	} else {
+		args, err := files(inst, metricsAddr)
+		if err != nil {
+			return err
+		}
+		ctx, cancel = context.WithCancel(context.Background())
+		cmd = exec.CommandContext(ctx, binary(inst.Protocol), args...)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, binary(inst.Protocol), args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return fmt.Errorf("%s: %w", inst.Protocol, err)
 	}
-	proc := &running{protocol: inst.Protocol, fingerprint: fp, cancel: cancel, cmd: cmd, done: make(chan struct{}), metricsAddr: metricsAddr, tag: inst.Tag, counters: map[string]trafficCounters{}}
+	proc := &running{instance: inst, protocol: inst.Protocol, fingerprint: fp, cancel: cancel, cmd: cmd, done: make(chan struct{}), metricsAddr: metricsAddr, tag: inst.Tag, counters: map[string]trafficCounters{}}
 	m.procs[inst.ID] = proc
 	go func() {
 		err := cmd.Wait()
@@ -305,6 +318,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 
 func (m *Manager) removeLocked(id int) {
 	if proc := m.procs[id]; proc != nil {
+		cleanupAdditional(id, proc.protocol)
 		proc.cancel()
 		select {
 		case <-proc.done:
@@ -404,6 +418,10 @@ func (m *Manager) CollectTraffic() []TrafficDelta {
 	var deltas []TrafficDelta
 	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}}
 	for _, proc := range m.procs {
+		if proc.protocol == model.FPTN || proc.protocol == model.OpenFlux {
+			deltas = append(deltas, m.collectAdditionalTraffic(proc)...)
+			continue
+		}
 		if proc.metricsAddr == "" {
 			continue
 		}

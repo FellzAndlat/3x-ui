@@ -44,7 +44,7 @@ var errSubscriptionFormatUnsupported = errors.New("subscription format cannot re
 func containsUnsupportedJSONProtocol(inbounds []*model.Inbound) bool {
 	for _, inbound := range inbounds {
 		switch inbound.Protocol {
-		case model.Snell, model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.AmneziaWG, model.TUIC, model.MTProto, model.VKTurnProxy, model.Mieru, model.Sudoku, model.TrustTunnel:
+		case model.Snell, model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.AmneziaWG, model.TUIC, model.MTProto, model.VKTurnProxy, model.Mieru, model.Sudoku, model.TrustTunnel, model.FPTN, model.OpenFlux:
 			return true
 		}
 	}
@@ -62,7 +62,7 @@ func containsUnsupportedSingBoxProtocol(inbounds []*model.Inbound) bool {
 
 func singBoxUnsupportedProtocol(protocol model.Protocol) bool {
 	switch protocol {
-	case model.AmneziaWG, model.MTProto, model.VKTurnProxy, model.Mieru, model.Sudoku, model.TrustTunnel:
+	case model.AmneziaWG, model.MTProto, model.VKTurnProxy, model.Mieru, model.Sudoku, model.TrustTunnel, model.FPTN, model.OpenFlux:
 		return true
 	}
 	return false
@@ -71,7 +71,7 @@ func singBoxUnsupportedProtocol(protocol model.Protocol) bool {
 func containsUnsupportedClashProtocol(inbounds []*model.Inbound) bool {
 	for _, inbound := range inbounds {
 		switch inbound.Protocol {
-		case model.Snell, model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.MTProto, model.VKTurnProxy, model.Mieru, model.TrustTunnel:
+		case model.Snell, model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.MTProto, model.VKTurnProxy, model.Mieru, model.TrustTunnel, model.FPTN, model.OpenFlux:
 			return true
 		case model.Hysteria, model.WireGuard, model.TUIC, model.AmneziaWG, model.Sudoku:
 			// These protocols have dedicated Clash/Mihomo emitters.
@@ -859,7 +859,7 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) 
 	protocols := []string{
 		"vmess", "vless", "trojan", "shadowsocks", "hysteria",
 		"wireguard", "amneziawg", "mtproto", "tuic", "naive", "anytls", "shadowtls", "mieru",
-		"vk-turn-proxy", "trusttunnel", "sudoku", "snell",
+		"vk-turn-proxy", "trusttunnel", "sudoku", "snell", "fptn", "openflux",
 	}
 	err := db.Model(model.Inbound{}).
 		Where(`id in (
@@ -1095,6 +1095,8 @@ func (s *SubService) GetLink(inbound *model.Inbound, email string) string {
 		return strings.Join(links, "\n")
 	case model.NaiveProxy:
 		return s.genNaiveLink(inbound, email)
+	case model.FPTN, model.OpenFlux:
+		return s.genAdditionalVPNLink(inbound, email)
 	case model.Snell:
 		return s.genSnellLink(inbound, email)
 	case model.AnyTLS:

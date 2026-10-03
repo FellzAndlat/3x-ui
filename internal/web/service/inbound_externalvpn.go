@@ -15,7 +15,10 @@ func prepareExternalVPN(ib *model.Inbound, previous string) error {
 	if err := snell.Prepare(ib, previous); err != nil {
 		return err
 	}
-	if ib.Protocol != model.Pingtunnel && ib.Protocol != model.TrustTunnel {
+	if ib.Protocol == model.FPTN || ib.Protocol == model.OpenFlux {
+		return externalvpn.PrepareAdditional(ib, previous)
+	}
+	if !externalvpn.IsManaged(ib.Protocol) {
 		return nil
 	}
 	var raw map[string]any
@@ -86,7 +89,7 @@ func prepareExternalVPN(ib *model.Inbound, previous string) error {
 
 func (s *InboundService) DesiredExternalVPNInstances() ([]externalvpn.Instance, error) {
 	var rows []*model.Inbound
-	err := database.GetDB().Where("protocol IN ? AND enable = ? AND node_id IS NULL", []model.Protocol{model.Pingtunnel, model.TrustTunnel}, true).Find(&rows).Error
+	err := database.GetDB().Where("protocol IN ? AND enable = ? AND node_id IS NULL", []model.Protocol{model.Pingtunnel, model.TrustTunnel, model.FPTN, model.OpenFlux}, true).Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
