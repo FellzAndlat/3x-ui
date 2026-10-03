@@ -37,11 +37,14 @@ func newFPTNCertificate(host string) (string, string, error) {
 }
 
 func fptnCertificateFiles(inst Instance, folder string) (string, string, error) {
-	if inst.Settings.Certificate != "" {
-		return certificate(inst, folder)
-	}
 	s := inst.Settings
-	pair, err := tls.X509KeyPair([]byte(s.CertificatePEM), []byte(s.PrivateKeyPEM))
+	var pair tls.Certificate
+	var err error
+	if s.Certificate != "" {
+		pair, err = tls.LoadX509KeyPair(s.Certificate, s.PrivateKey)
+	} else {
+		pair, err = tls.X509KeyPair([]byte(s.CertificatePEM), []byte(s.PrivateKeyPEM))
+	}
 	if err != nil {
 		return "", "", fmt.Errorf("FPTN automatic certificate: %w", err)
 	}
@@ -57,6 +60,9 @@ func fptnCertificateFiles(inst Instance, folder string) (string, string, error) 
 	}
 	if err := leaf.VerifyHostname(s.Hostname); err != nil {
 		return "", "", err
+	}
+	if s.Certificate != "" {
+		return s.Certificate, s.PrivateKey, nil
 	}
 	cert, key := filepath.Join(folder, "cert.pem"), filepath.Join(folder, "key.pem")
 	if err := writePrivate(cert, []byte(s.CertificatePEM)); err != nil {

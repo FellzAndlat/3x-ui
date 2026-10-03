@@ -32,4 +32,8 @@ FPTN/OpenFlux connections cannot be represented by standard Xray, sing-box or Cl
 
 ## Validation
 
-Backend compilation, frontend TypeScript checking and frontend production build are checked during implementation. Automated tests and live network handshakes are not part of this change's validation. Before deployment, verify TCP/UDP traffic, subscription refresh, quota enforcement, node operation and recovery after tunnel failure against real endpoints for each enabled protocol.
+Backend compilation, frontend TypeScript checking and frontend production build are checked during implementation. Focused regression checks cover strict OpenFlux launch settings, native link round trips, certificate identity and session counter resets. Official sing-box 1.14.2 validates the generated native configs. A local OpenFlux 0.3.0 pair completes authenticated capability negotiation; proxy traffic and native sing-box startup could not be verified in the development sandbox, which restricts networking/netlink. FPTN container handshakes require a Docker host. Before deployment, verify TCP/UDP traffic, subscription refresh, quota enforcement, node operation and recovery after tunnel failure against real endpoints for each enabled protocol.
+
+## FPTN traffic accounting caveat
+
+Upstream FPTN 0.4.4 and 0.4.6 pass `session_id = 0` to their Prometheus counters for every session of a user. Multiple sessions and reconnects may therefore produce incomplete counters before the panel receives them. The panel tracks separate session labels when present, handles resets and saturates totals safely, but cannot recover bytes upstream did not report. Do not treat traffic quotas on these unmodified upstream server images as exact accounting. Correcting that limitation requires an upstream server fix; a panel-only change cannot fix it.
