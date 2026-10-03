@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
+	"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/entity"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/global"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service"
@@ -738,7 +740,12 @@ func (a *ServerController) getCertHash(c *gin.Context) {
 // getRemoteCertHash runs `xray tls ping` against the given server and returns
 // its live certificate SHA-256 hash(es) for pinning.
 func (a *ServerController) getRemoteCertHash(c *gin.Context) {
-	hashes, err := a.serverService.GetRemoteCertHash(c.PostForm("server"))
+	allowPrivate := c.PostForm("allowPrivate") == "true"
+	hashes, err := a.serverService.GetRemoteCertHash(c.PostForm("server"), allowPrivate)
+	if errors.Is(err, netsafe.ErrPrivateAddressBlocked) {
+		jsonMsgObj(c, "get remote cert hash", gin.H{"privateTarget": true}, err)
+		return
+	}
 	if err != nil {
 		jsonMsg(c, "get remote cert hash", err)
 		return

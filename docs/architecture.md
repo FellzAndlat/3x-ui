@@ -19,8 +19,8 @@ Xray JSON config from that state, supervises the Xray child process, and exposes
 WebSocket API. A React SPA (built by Vite, embedded into the Go binary) is the UI. A second,
 separate HTTP server serves **subscription links** to end users.
 
-The panel supervises **managed child processes**: Xray-core itself and — when MTProto or
-TUIC inbounds exist — dedicated child proxy binaries:
+The panel supervises **managed child processes**: Xray-core itself and — when MTProto
+inbounds exist — a dedicated child proxy binary:
 
 - **`telemt` for MTProto inbounds** (`telemt/telemt`; `internal/mtproto/`):
   One managed process per inbound uses native `[access.users]` secrets, per-user
@@ -42,7 +42,7 @@ Servers and processes, all launched from `main.go`:
 | **Panel**        | `internal/web`                    | Admin REST/WS API + serves the embedded SPA                        | 2053              |
 | **Subscription** | `internal/sub`                    | Public endpoint that hands out client configs (raw / JSON / Clash) | `subPort` setting |
 | **Xray-core**    | supervised via `internal/xray`    | The actual proxy engine; a child process, not Go code              | `inbounds[].port` |
-| **Telemt**    | supervised via `internal/mtproto` | MTProto proxy child process for MTProto inbounds (multi-secret)    | per inbound       |
+| **Telemt**       | supervised via `internal/mtproto` | MTProto proxy child process for MTProto inbounds (multi-secret)    | per inbound       |
 | **tuic-server**  | supervised via `internal/tuic`    | TUIC v5 proxy child process fronted by a Go UDP relay              | per inbound       |
 
 Two key ideas that explain most of the complexity:
@@ -383,7 +383,7 @@ All registered in `web.go` → `startTask()`. Each is a struct with a `Run()` me
 | `@every 5s`         | `node_heartbeat_job`                                                                             | Probe child nodes (online/offline)                                                    |
 | `@every 5s`         | `node_traffic_sync_job`                                                                          | Pull + merge node traffic; push reconciliation                                        |
 | `@every 10s`        | `check_client_ip_job`                                                                            | Enforce per-client IP limits                                                          |
-| `@every 10s`        | `mtproto_job`                                                                                    | Reconcile `Telemt` sidecars against enabled MTProto inbounds                             |
+| `@every 10s`        | `mtproto_job`                                                                                    | Reconcile `Telemt` sidecars against enabled MTProto inbounds                          |
 | `@every 10s`        | `amneziawg_job`                                                                                  | Reconcile embedded AmneziaWG interfaces against enabled local inbounds                |
 | `@every 5m`         | `outbound_subscription_job`                                                                      | Refresh outbound provider configs                                                     |
 | `@every 10m`        | `clear_logs_job` (`PruneXrayLogsJob`)                                                            | Truncate Xray access/error logs once either exceeds 64 MiB                            |

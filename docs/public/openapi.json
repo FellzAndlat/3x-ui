@@ -1721,6 +1721,9 @@
           "group": {
             "type": "string"
           },
+          "hiddifySubURI": {
+            "type": "string"
+          },
           "id": {
             "type": "integer"
           },
@@ -2774,7 +2777,9 @@
               "shadowtls",
               "mieru",
               "vk-turn-proxy",
-              "sudoku"
+              "sudoku",
+              "pingtunnel",
+              "trusttunnel"
             ],
             "example": "vless",
             "type": "string"
@@ -3197,6 +3202,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "coreType": {
+            "type": "string"
+          },
           "cpuPct": {
             "example": 23.5,
             "type": "number"
@@ -3301,12 +3309,30 @@
           "remark": {
             "type": "string"
           },
+          "runningCore": {
+            "type": "string"
+          },
           "scheme": {
             "enum": [
               "http",
               "https"
             ],
             "example": "https",
+            "type": "string"
+          },
+          "singboxError": {
+            "type": "string"
+          },
+          "singboxInstalled": {
+            "type": "boolean"
+          },
+          "singboxKnown": {
+            "type": "boolean"
+          },
+          "singboxState": {
+            "type": "string"
+          },
+          "singboxVersion": {
             "type": "string"
           },
           "sortOrder": {
@@ -3360,6 +3386,7 @@
           "clientCount",
           "configDirty",
           "configDirtyAt",
+          "coreType",
           "cpuPct",
           "createdAt",
           "depletedCount",
@@ -3383,7 +3410,13 @@
           "pinnedCertSha256",
           "port",
           "remark",
+          "runningCore",
           "scheme",
+          "singboxError",
+          "singboxInstalled",
+          "singboxKnown",
+          "singboxState",
+          "singboxVersion",
           "sortOrder",
           "status",
           "tlsVerifyMode",
@@ -3517,6 +3550,9 @@
             "format": "int64",
             "type": "integer"
           },
+          "coreType": {
+            "type": "string"
+          },
           "cpuPct": {
             "example": 12.5,
             "type": "number"
@@ -3623,8 +3659,27 @@
             "example": "Primary edge",
             "type": "string"
           },
+          "runningCore": {
+            "type": "string"
+          },
           "scheme": {
             "example": "https",
+            "type": "string"
+          },
+          "singboxError": {
+            "type": "string"
+          },
+          "singboxInstalled": {
+            "type": "boolean"
+          },
+          "singboxKnown": {
+            "type": "boolean"
+          },
+          "singboxState": {
+            "example": "running",
+            "type": "string"
+          },
+          "singboxVersion": {
             "type": "string"
           },
           "status": {
@@ -3669,6 +3724,7 @@
           "clientCount",
           "configDirty",
           "configDirtyAt",
+          "coreType",
           "cpuPct",
           "createdAt",
           "depletedCount",
@@ -3693,7 +3749,13 @@
           "pinnedCertSha256",
           "port",
           "remark",
+          "runningCore",
           "scheme",
+          "singboxError",
+          "singboxInstalled",
+          "singboxKnown",
+          "singboxState",
+          "singboxVersion",
           "status",
           "tlsVerifyMode",
           "updatedAt",
@@ -3836,6 +3898,9 @@
       },
       "ProbeResultUI": {
         "properties": {
+          "coreType": {
+            "type": "string"
+          },
           "cpuPct": {
             "example": 12.5,
             "type": "number"
@@ -3853,6 +3918,24 @@
           },
           "panelVersion": {
             "example": "v3.x.x",
+            "type": "string"
+          },
+          "runningCore": {
+            "type": "string"
+          },
+          "singboxError": {
+            "type": "string"
+          },
+          "singboxInstalled": {
+            "type": "boolean"
+          },
+          "singboxKnown": {
+            "type": "boolean"
+          },
+          "singboxState": {
+            "type": "string"
+          },
+          "singboxVersion": {
             "type": "string"
           },
           "status": {
@@ -3877,11 +3960,18 @@
           }
         },
         "required": [
+          "coreType",
           "cpuPct",
           "error",
           "latencyMs",
           "memPct",
           "panelVersion",
+          "runningCore",
+          "singboxError",
+          "singboxInstalled",
+          "singboxKnown",
+          "singboxState",
+          "singboxVersion",
           "status",
           "uptimeSecs",
           "xrayError",
@@ -4541,6 +4631,14 @@
   ],
   "tags": [
     {
+      "name": "External VPN",
+      "description": "Inspect and update standalone external VPN components."
+    },
+    {
+      "name": "NaiveProxy",
+      "description": "Manage the standalone Caddy-Naive sidecar used when Xray is the selected core."
+    },
+    {
       "name": "Routing Presets",
       "description": "Reusable routing rules owned by the authenticated user."
     },
@@ -4610,6 +4708,137 @@
     }
   ],
   "paths": {
+    "/panel/api/server/externalvpn/status": {
+      "get": {
+        "tags": [
+          "External VPN"
+        ],
+        "summary": "Return external VPN component installation and update status.",
+        "operationId": "get_panel_api_server_externalvpn_status",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/externalvpn/update/{protocol}": {
+      "post": {
+        "tags": [
+          "External VPN"
+        ],
+        "summary": "Install or update an external VPN component.",
+        "operationId": "post_panel_api_server_externalvpn_update_protocol",
+        "parameters": [
+          {
+            "name": "protocol",
+            "in": "path",
+            "required": true,
+            "description": "External VPN protocol identifier.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/naiveproxy/status": {
+      "get": {
+        "tags": [
+          "NaiveProxy"
+        ],
+        "summary": "Return standalone NaiveProxy installation and runtime status.",
+        "operationId": "get_panel_api_naiveproxy_status",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/naiveproxy/update": {
+      "post": {
+        "tags": [
+          "NaiveProxy"
+        ],
+        "summary": "Install or update standalone NaiveProxy from the official release.",
+        "operationId": "post_panel_api_naiveproxy_update",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/xray/routingPresets/list": {
       "get": {
         "tags": [
@@ -6670,6 +6899,93 @@
         }
       }
     },
+    "/panel/api/server/core/capabilities": {
+      "get": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Return the selected core and its supported panel capabilities.",
+        "operationId": "get_panel_api_server_core_capabilities",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/singbox/outbound/check": {
+      "post": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Measure the delay of a running sing-box outbound.",
+        "operationId": "post_panel_api_server_singbox_outbound_check",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tag": {
+                    "type": "string",
+                    "description": "Outbound tag."
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": ""
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in milliseconds, from 1 to 30000; defaults to 5000."
+                  }
+                },
+                "required": [
+                  "tag"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/server/getPanelUpdateInfo": {
       "get": {
         "tags": [
@@ -7725,6 +8041,139 @@
         }
       }
     },
+    "/panel/api/server/hiddify/preview": {
+      "post": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Preview the number of VPN users in a Hiddify Panel JSON backup.",
+        "operationId": "post_panel_api_server_hiddify_preview",
+        "description": "Available when sing-box is the saved core. The uploaded file is not imported.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "backup": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Hiddify JSON backup, up to 8 MiB."
+                  }
+                },
+                "required": [
+                  "backup"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/hiddify/import": {
+      "post": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Import VPN users from a Hiddify Panel JSON backup without inbound connections.",
+        "operationId": "post_panel_api_server_hiddify_import",
+        "description": "Preserves UUID subscription IDs, remaining traffic, expiration, and WireGuard keys. Existing users are skipped.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "backup": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "Hiddify JSON backup, up to 8 MiB."
+                  }
+                },
+                "required": [
+                  "backup"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/hiddify/export": {
+      "get": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Download panel clients as a Hiddify-compatible JSON backup.",
+        "operationId": "get_panel_api_server_hiddify_export",
+        "description": "Exports clients with UUID-compatible identities, traffic limits, expiration, Telegram ID, WireGuard keys, and the saved legacy proxy_path_client alias. Clients without a UUID-compatible identity are skipped.",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/server/getNewEchCert": {
       "post": {
         "tags": [
@@ -7872,6 +8321,10 @@
                   "server": {
                     "type": "string",
                     "description": "Remote server as domain or domain:port (default port 443), e.g. cloudflare-dns.com."
+                  },
+                  "allowPrivate": {
+                    "type": "boolean",
+                    "description": "Ping a private/internal/loopback server (LAN, Docker service name). Default false (SSRF guard blocks it and the error response sets obj.privateTarget=true)."
                   }
                 },
                 "required": [
@@ -9602,7 +10055,7 @@
         "tags": [
           "Clients"
         ],
-        "summary": "Clear the group label on many clients in one call. Inverse of /groups/bulkAdd. Clients themselves are kept — only the group label is cleared from clients.group_name and from each owning inbound's settings JSON. Groups become empty if all their members are removed.",
+        "summary": "Clear the group label on many clients in one call. Inverse of bulkAdd. Clients themselves are kept — only the group label is cleared from clients.group_name and from each owning inbound's settings JSON. Groups become empty if all their members are removed.",
         "operationId": "post_panel_api_clients_groups_bulkRemove",
         "requestBody": {
           "required": true,
@@ -10975,6 +11428,7 @@
                       "clientCount": 25,
                       "configDirty": false,
                       "configDirtyAt": 0,
+                      "coreType": "",
                       "cpuPct": 12.5,
                       "createdAt": 1700000000,
                       "depletedCount": 1,
@@ -11002,7 +11456,13 @@
                       "pinnedCertSha256": "",
                       "port": 2053,
                       "remark": "Primary edge",
+                      "runningCore": "",
                       "scheme": "https",
+                      "singboxError": "",
+                      "singboxInstalled": false,
+                      "singboxKnown": false,
+                      "singboxState": "running",
+                      "singboxVersion": "",
                       "status": "online",
                       "tlsVerifyMode": "verify",
                       "transitive": false,
@@ -11176,6 +11636,7 @@
                     "clientCount": 25,
                     "configDirty": false,
                     "configDirtyAt": 0,
+                    "coreType": "",
                     "cpuPct": 12.5,
                     "createdAt": 1700000000,
                     "depletedCount": 1,
@@ -11203,7 +11664,13 @@
                     "pinnedCertSha256": "",
                     "port": 2053,
                     "remark": "Primary edge",
+                    "runningCore": "",
                     "scheme": "https",
+                    "singboxError": "",
+                    "singboxInstalled": false,
+                    "singboxKnown": false,
+                    "singboxState": "running",
+                    "singboxVersion": "",
                     "status": "online",
                     "tlsVerifyMode": "verify",
                     "transitive": false,
@@ -11326,6 +11793,7 @@
                     "clientCount": 25,
                     "configDirty": false,
                     "configDirtyAt": 0,
+                    "coreType": "",
                     "cpuPct": 12.5,
                     "createdAt": 1700000000,
                     "depletedCount": 1,
@@ -11353,7 +11821,13 @@
                     "pinnedCertSha256": "",
                     "port": 2053,
                     "remark": "Primary edge",
+                    "runningCore": "",
                     "scheme": "https",
+                    "singboxError": "",
+                    "singboxInstalled": false,
+                    "singboxKnown": false,
+                    "singboxState": "running",
+                    "singboxVersion": "",
                     "status": "online",
                     "tlsVerifyMode": "verify",
                     "transitive": false,
@@ -11574,11 +12048,18 @@
                 "example": {
                   "success": true,
                   "obj": {
+                    "coreType": "",
                     "cpuPct": 12.5,
                     "error": "",
                     "latencyMs": 42,
                     "memPct": 45.2,
                     "panelVersion": "v3.x.x",
+                    "runningCore": "",
+                    "singboxError": "",
+                    "singboxInstalled": false,
+                    "singboxKnown": false,
+                    "singboxState": "",
+                    "singboxVersion": "",
                     "status": "online",
                     "uptimeSecs": 86400,
                     "xrayError": "",
@@ -16650,6 +17131,7 @@
                   "clientCount": 25,
                   "configDirty": false,
                   "configDirtyAt": 0,
+                  "coreType": "",
                   "cpuPct": 12.5,
                   "createdAt": 1700000000,
                   "depletedCount": 1,
@@ -16677,7 +17159,13 @@
                   "pinnedCertSha256": "",
                   "port": 2053,
                   "remark": "Primary edge",
+                  "runningCore": "",
                   "scheme": "https",
+                  "singboxError": "",
+                  "singboxInstalled": false,
+                  "singboxKnown": false,
+                  "singboxState": "running",
+                  "singboxVersion": "",
                   "status": "online",
                   "tlsVerifyMode": "verify",
                   "transitive": false,

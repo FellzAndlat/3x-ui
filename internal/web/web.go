@@ -879,6 +879,7 @@ func (s *Server) StopPanelOnly() error {
 }
 
 func (s *Server) stop(stopXray bool, stopTgBot bool) error {
+	var err1, err2 error
 	s.cancel()
 	if stopXray {
 		if coreType, _ := s.settingService.GetCoreType(); coreType == service.CoreTypeSingBox {
@@ -897,7 +898,22 @@ func (s *Server) stop(stopXray bool, stopTgBot bool) error {
 		logger.Warning("vk-turn-proxy shutdown failed:", err)
 	}
 	if s.cron != nil {
-		s.cron.Stop()
+		<-s.cron.Stop().Done()
+	}
+	if stopXray {
+		tuic.GetManager().StopAll()
+		if err := job.NewTuicJob().FlushStoppedTraffic(); err != nil {
+			logger.Warning("persist final TUIC traffic on shutdown failed:", err)
+			err2 = err
+		}
+		mtproto.GetManager().StopAll()
+		amneziawgnet.GetManager().StopAll()
+		amneziawgnet.GetOutboundManager().StopAll()
+	}
+	if stopXray {
+		if err := s.xrayService.StopXray(); err != nil {
+			err2 = common.Combine(err2, err)
+		}
 	}
 	if s.bus != nil {
 		s.bus.Stop()
@@ -918,15 +934,8 @@ func (s *Server) stop(stopXray bool, stopTgBot bool) error {
 	if s.wsHub != nil {
 		s.wsHub.Stop()
 	}
-	var err1 error
-	var err2 error
-	if s.httpServer != nil {
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer shutdownCancel()
-		err1 = s.httpServer.Shutdown(shutdownCtx)
-	}
 	if s.listener != nil {
-		err2 = s.listener.Close()
+		err1 = common.Combine(err1, s.listener.Close())
 	}
 	return common.Combine(err1, err2)
 }

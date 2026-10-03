@@ -6899,6 +6899,93 @@
         }
       }
     },
+    "/panel/api/server/core/capabilities": {
+      "get": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Return the selected core and its supported panel capabilities.",
+        "operationId": "get_panel_api_server_core_capabilities",
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/panel/api/server/singbox/outbound/check": {
+      "post": {
+        "tags": [
+          "Server"
+        ],
+        "summary": "Measure the delay of a running sing-box outbound.",
+        "operationId": "post_panel_api_server_singbox_outbound_check",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tag": {
+                    "type": "string",
+                    "description": "Outbound tag."
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": ""
+                  },
+                  "timeout": {
+                    "type": "integer",
+                    "description": "Timeout in milliseconds, from 1 to 30000; defaults to 5000."
+                  }
+                },
+                "required": [
+                  "tag"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "msg": {
+                      "type": "string"
+                    },
+                    "obj": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/panel/api/server/getPanelUpdateInfo": {
       "get": {
         "tags": [
@@ -8234,6 +8321,10 @@
                   "server": {
                     "type": "string",
                     "description": "Remote server as domain or domain:port (default port 443), e.g. cloudflare-dns.com."
+                  },
+                  "allowPrivate": {
+                    "type": "boolean",
+                    "description": "Ping a private/internal/loopback server (LAN, Docker service name). Default false (SSRF guard blocks it and the error response sets obj.privateTarget=true)."
                   }
                 },
                 "required": [

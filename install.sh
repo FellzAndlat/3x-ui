@@ -1738,6 +1738,9 @@ install_x-ui() {
     fi
     trap - EXIT INT TERM
 
+    rm -f bin/tuic-server bin/tuic-server-* > /dev/null 2>&1 || true
+    rm -rf bin/tuic > /dev/null 2>&1 || true
+
     # Update x-ui cli and se set permission
     mv -f "${xui_script_temp}" /usr/bin/x-ui
     if [[ $? -ne 0 ]]; then

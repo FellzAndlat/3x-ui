@@ -2,8 +2,13 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
+	"github.com/SawaMEN/3x-ui/v3/internal/util/version"
+
+	"gorm.io/gorm"
 )
 
 // inboundShadowsocksMethod extracts settings.method for Shadowsocks inbounds so
@@ -82,9 +87,42 @@ var nodeEligibleProtocols = map[model.Protocol]bool{
 	model.Sudoku:      true,
 }
 
-// isNodeEligibleProtocol reports whether protocol may be assigned to a node.
 func isNodeEligibleProtocol(protocol model.Protocol) bool {
 	return nodeEligibleProtocols[protocol]
+}
+
+// nodeProtocolFirstRelease is the panel release that introduced each protocol
+// newer than node support itself; an older node would hand it to Xray as-is.
+var nodeProtocolFirstRelease = map[model.Protocol]string{
+	model.MTProto:   "v3.5.0",
+	model.AmneziaWG: "v3.7.0",
+	model.TUIC:      "v3.8.0",
+}
+
+// checkNodeCanHostProtocol refuses assigning protocol to nodeID unless the
+// protocol may live on a node and that node's panel is new enough to run it.
+func checkNodeCanHostProtocol(db *gorm.DB, nodeID int, protocol model.Protocol) error {
+	if !nodeEligibleProtocols[protocol] {
+		return common.NewErrorf("%s inbounds cannot be assigned to a node", protocol)
+	}
+	firstRelease, ok := nodeProtocolFirstRelease[protocol]
+	if !ok {
+		return nil
+	}
+	var node model.Node
+	if err := db.Select("id", "name", "panel_version").First(&node, nodeID).Error; err != nil {
+		return err
+	}
+	if strings.TrimSpace(node.PanelVersion) == "" {
+		return common.NewErrorf("node %q has not reported its panel version yet; %s inbounds need %s or newer",
+			node.Name, protocol, firstRelease)
+	}
+	// A dev build reports "dev+<sha>": it tracks main, which carries every protocol.
+	if cmp, ok := version.Compare(node.PanelVersion, firstRelease); ok && cmp < 0 {
+		return common.NewErrorf("node %q runs panel %s; %s inbounds need %s or newer",
+			node.Name, node.PanelVersion, protocol, firstRelease)
+	}
+	return nil
 }
 
 // vlessEncryptionEnabled reports whether a VLESS inbound has VLESS-level

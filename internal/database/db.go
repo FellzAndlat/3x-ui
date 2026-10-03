@@ -91,6 +91,7 @@ func allModels() []any {
 		&model.TelemtIPGeo{},
 		&model.OutboundSubscription{},
 		&model.SubBalancer{},
+		&model.TuicTrafficReceipt{},
 	}
 }
 

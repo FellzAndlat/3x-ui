@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
@@ -96,6 +97,10 @@ func (s *ClientService) ApplyInboundClientDelta(tx *gorm.DB, inboundId int, chan
 func (s *ClientService) syncInboundClients(tx *gorm.DB, inboundId int, clients []model.Client, detachEmails []string, prune bool) error {
 	if tx == nil {
 		tx = database.GetDB()
+	}
+
+	if err := s.validateTuicIdentities(tx, inboundId, clients, detachEmails, prune); err != nil {
+		return err
 	}
 
 	emails := make([]string, 0, len(clients))
@@ -211,7 +216,42 @@ func (s *ClientService) syncInboundClients(tx *gorm.DB, inboundId int, clients [
 		wantedIds = append(wantedIds, id)
 	}
 
-	return s.reconcileInboundLinks(tx, inboundId, wantedFlow, wantedIds, detachEmails, prune)
+	if err := s.reconcileInboundLinks(tx, inboundId, wantedFlow, wantedIds, detachEmails, prune); err != nil {
+		return err
+	}
+
+	affected := map[int]struct{}{inboundId: {}}
+	for _, ids := range chunkInts(wantedIds, sqlInChunk) {
+		var inboundIDs []int
+		if err := tx.Model(&model.ClientInbound{}).Distinct("inbound_id").Where("client_id IN ?", ids).Pluck("inbound_id", &inboundIDs).Error; err != nil {
+			return err
+		}
+		for _, id := range inboundIDs {
+			affected[id] = struct{}{}
+		}
+	}
+	affectedIDs := make([]int, 0, len(affected))
+	for id := range affected {
+		affectedIDs = append(affectedIDs, id)
+	}
+	for _, ids := range chunkInts(affectedIDs, sqlInChunk) {
+		var duplicates int64
+		err := tx.Raw(`SELECT COUNT(*) FROM (
+            SELECT ci.inbound_id, LOWER(c.uuid) FROM clients c
+            JOIN client_inbounds ci ON ci.client_id = c.id
+            JOIN inbounds i ON i.id = ci.inbound_id
+            WHERE i.protocol = ? AND c.uuid <> '' AND ci.inbound_id IN ?
+            GROUP BY ci.inbound_id, LOWER(c.uuid) HAVING COUNT(*) > 1
+        ) AS duplicate_uuids`, model.TUIC, ids).Scan(&duplicates).Error
+		if err != nil {
+			return err
+		}
+		if duplicates > 0 {
+			return fmt.Errorf("TUIC: duplicate client UUID within inbound")
+		}
+	}
+
+	return nil
 }
 
 // reconcileInboundLinks writes only the client_inbounds rows that differ. prune

@@ -134,6 +134,10 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 	if len(traffics) == 0 {
 		return nil
 	}
+	traffics, err = canonicalizeClientTraffic(tx, traffics)
+	if err != nil {
+		return fmt.Errorf("resolve client traffic identities: %w", err)
+	}
 
 	// The same email can be reported by multiple local inbounds or sidecars.
 	// Aggregate first to keep the SQL IN list small and preserve every delta.
@@ -167,6 +171,7 @@ func (s *InboundService) addClientTraffic(tx *gorm.DB, traffics []*xray.ClientTr
 	// conflict, but this filter was removed rather than relying on that ordering).
 	err = tx.Model(xray.ClientTraffic{}).
 		Where("email IN (?)", emails).
+		Order("id").
 		Find(&dbClientTraffics).Error
 	if err != nil {
 		return err

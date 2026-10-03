@@ -23,6 +23,15 @@ export type HostLinkInput = Pick<
   | 'allowInsecure'
 >;
 
+export interface HostEndpoint {
+  dest: string;
+  port: number;
+  remark: string;
+  sni?: string;
+  alpn?: string[];
+  allowInsecure?: boolean;
+}
+
 // hostToExternalProxyEntry projects a host onto the ExternalProxyEntry shape the
 // share-link preview generators already understand — the frontend mirror of the
 // backend's hostToExternalProxyMap. security "reality"/"same" keep the inbound's

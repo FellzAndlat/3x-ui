@@ -126,12 +126,12 @@ scenario is provided for an environment with reachable YouTube.
 
 ## Approaches researched and limits
 
-| Project | Approach | Applied here |
-| --- | --- | --- |
-| [Privaxy](https://github.com/Barre/privaxy) | HTTPS interception, URL filters and script/style injection | Selective interception with a locally trusted CA; implementation is native Go |
-| [mitmproxy](https://docs.mitmproxy.org/stable/concepts/certificates/) | Per-install CA and configurable interception | Explicit trust, unique CA, leaving incompatible hosts opaque |
-| [mitmproxy-adblock](https://github.com/dekoza/mitmproxy-adblock) | Ad filtering through an interception proxy | Demonstrates the approach, not reliable current YouTube support |
-| [Invidious](https://docs.invidious.io/installation/) | Separate frontend and companion service | Alternative viewing route, not transparent official-app filtering |
+| Project                                                               | Approach                                                   | Applied here                                                                  |
+| --------------------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [Privaxy](https://github.com/Barre/privaxy)                           | HTTPS interception, URL filters and script/style injection | Selective interception with a locally trusted CA; implementation is native Go |
+| [mitmproxy](https://docs.mitmproxy.org/stable/concepts/certificates/) | Per-install CA and configurable interception               | Explicit trust, unique CA, leaving incompatible hosts opaque                  |
+| [mitmproxy-adblock](https://github.com/dekoza/mitmproxy-adblock)      | Ad filtering through an interception proxy                 | Demonstrates the approach, not reliable current YouTube support               |
+| [Invidious](https://docs.invidious.io/installation/)                  | Separate frontend and companion service                    | Alternative viewing route, not transparent official-app filtering             |
 
 The filter strips known ad metadata from player/next JSON and initial player
 objects inside HTML scripts while retaining media URLs, captions, playability

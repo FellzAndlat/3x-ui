@@ -63,6 +63,7 @@ func migrationModels() []any {
 		&model.TelemtIPGeo{},
 		&model.OutboundSubscription{},
 		&model.SubBalancer{},
+		&model.TuicTrafficReceipt{},
 		&model.RoutingPreset{},
 		&model.UserSession{},
 	}

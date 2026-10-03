@@ -23,6 +23,7 @@ func TestUpdateInbound_NodeMtprotoShareAddrIsEditable(t *testing.T) {
 	}
 
 	update := existing
+	update.NodeID = nil // Edit payloads may omit the stored node assignment.
 	update.ShareAddrStrategy = "custom"
 	update.ShareAddr = "new-share.example.com"
 	updated, _, err := (&InboundService{}).UpdateInbound(&update)
@@ -47,7 +48,7 @@ func TestUpdateInbound_NodeMtprotoShareAddrIsEditable(t *testing.T) {
 func TestUpdateInbound_RejectsProtocolChangeToNodeIneligible(t *testing.T) {
 	setupConflictDB(t)
 	nodeID := 6
-	seedNodeRow(t, database.GetDB(), &model.Node{Id: nodeID, Name: "n6", Address: "127.0.0.1", Port: 2096, ApiToken: "tok", Enable: true})
+	seedNodeRow(t, database.GetDB(), &model.Node{Id: nodeID, Name: "n6", Address: "127.0.0.1", Port: 2096, ApiToken: "tok", Enable: true, PanelVersion: "v3.4.1"})
 	seedInboundConflictNode(t, "vless-node", "127.0.0.1", 4064, model.VLESS,
 		`{"network":"tcp","security":"none"}`,
 		`{"clients":[{"id":"11111111-2222-4333-8444-555555555555","email":"vn-c","enable":true}],"decryption":"none"}`, &nodeID)

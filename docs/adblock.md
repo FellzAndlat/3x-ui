@@ -12,13 +12,13 @@ covered.
 
 ## Rules
 
-| Entry | Meaning |
-| --- | --- |
-| `0.0.0.0 ads.example.com alias.example.com` | Block both exact hostnames |
-| `127.0.0.1 ads.example.com` / `:: ads.example.com` | Block the exact hostname |
-| `ads.example.com` / `full:ads.example.com` | Block that exact hostname |
-| `domain:example.com` / `||example.com^` | Block the hostname and its subdomains |
-| `@@||example.com^` | Unconditional domain exception within that source |
+| Entry                                              | Meaning                    |
+| -------------------------------------------------- | -------------------------- |
+| `0.0.0.0 ads.example.com alias.example.com`        | Block both exact hostnames |
+| `127.0.0.1 ads.example.com` / `:: ads.example.com` | Block the exact hostname   |
+| `ads.example.com` / `full:ads.example.com`         | Block that exact hostname  |
+| `domain:example.com` / `                           |                            | example.com^` | Block the hostname and its subdomains             |
+| `@@                                                |                            | example.com^` | Unconditional domain exception within that source |
 
 Comments, duplicate entries, and unsupported browser rules are ignored.
 Ordinary-address hosts mappings (for example `192.0.2.1 example.com`) are
@@ -78,18 +78,17 @@ Core configuration checks run before each traffic test. A runtime denied access
 to netlink sockets is explicitly reported as skipped after configuration
 validation, rather than counted as a successful traffic test.
 
-
 ## Automatic profiles and YouTube
 
 The profile selector supplies maintained sources and a refresh interval:
 
-| Profile | Source | Default refresh |
-| --- | --- | --- |
-| Balanced | StevenBlack hosts | 24 hours |
-| Mobile ads | AdGuard DNS filter | 12 hours |
-| Extended protection | OISD big | 12 hours |
-| Light | OISD small | 24 hours |
-| Custom | User-provided sources | User-configured |
+| Profile             | Source                | Default refresh |
+| ------------------- | --------------------- | --------------- |
+| Balanced            | StevenBlack hosts     | 24 hours        |
+| Mobile ads          | AdGuard DNS filter    | 12 hours        |
+| Extended protection | OISD big              | 12 hours        |
+| Light               | OISD small            | 24 hours        |
+| Custom              | User-provided sources | User-configured |
 
 Selecting a preset fills in its sources and enables automatic refreshes. The
 backend resolves preset IDs to canonical URLs. Editing the source field changes

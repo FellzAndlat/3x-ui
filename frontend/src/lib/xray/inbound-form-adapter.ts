@@ -29,6 +29,7 @@ import { tlsCertUsesFiles } from '@/schemas/protocols/security/tls';
 import { SockoptStreamSettingsSchema } from '@/schemas/protocols/stream/sockopt';
 import { XHttpStreamSettingsSchema, XHttpXmuxSchema } from '@/schemas/protocols/stream/xhttp';
 import { migrateSudokuSettings } from '@/schemas/protocols/inbound/sudoku';
+import { resolveTuicServerSettings } from '@/lib/tuic';
 
 const XMUX_DEFAULTS = XHttpXmuxSchema.parse({});
 
@@ -177,6 +178,9 @@ export function rawInboundToFormValues(row: RawInboundRow): InboundFormValues {
       ? migrateSudokuSettings(coerceJsonObject(row.settings))
       : row.settings,
   );
+  if (row.protocol === 'tuic') {
+    rawSettings.server = resolveTuicServerSettings(rawSettings);
+  }
   const settings = (
     isShadowTls
       ? {

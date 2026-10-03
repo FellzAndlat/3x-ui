@@ -12,6 +12,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/mieru"
+	"github.com/SawaMEN/3x-ui/v3/internal/tuic"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
 
 	"gorm.io/gorm"
@@ -323,6 +324,13 @@ func checkPortConflictTx(db *gorm.DB, inbound *model.Inbound, ignoreId int) (*po
 		if conflict != nil {
 			return conflict, nil
 		}
+		conflict, err = checkTuicSocksConflict(db, inbound, ignoreId, newBits)
+		if err != nil {
+			return nil, err
+		}
+		if conflict != nil {
+			return conflict, nil
+		}
 	}
 
 	// The reverse direction, only meaningful once the id is known -- AddInbound
@@ -356,6 +364,25 @@ func checkPortConflictTx(db *gorm.DB, inbound *model.Inbound, ignoreId int) (*po
 	if forwardedBy != nil {
 		forwardedBy.Transports = newBits
 		return forwardedBy, nil
+	}
+	if inbound.NodeID == nil && inbound.Protocol == model.TUIC && ignoreId > 0 {
+		if self := tuicSocksSelfConflict(inbound, ignoreId); self != "" {
+			return nil, common.NewError(self)
+		}
+		conflict, err := checkTuicSocksRelayCollision(db, ignoreId)
+		if err != nil {
+			return nil, err
+		}
+		if conflict != nil {
+			return conflict, nil
+		}
+		conflict, err = checkTuicSocksReverseConflict(db, ignoreId)
+		if err != nil {
+			return nil, err
+		}
+		if conflict != nil {
+			return conflict, nil
+		}
 	}
 
 	var candidates []*model.Inbound
@@ -513,6 +540,96 @@ func checkAmneziawgnetSocksReverseConflict(db *gorm.DB, id int) (*portConflictDe
 			continue
 		}
 		if overlap, _ := spansOverlap(inboundListenerSpans(c), []listenerSpan{{relayPort, relayPort, transportTCP}}); overlap == 0 {
+			continue
+		}
+		return &portConflictDetail{
+			InboundID:  c.Id,
+			Remark:     c.Remark,
+			Tag:        c.Tag,
+			Listen:     c.Listen,
+			Port:       relayPort,
+			Relay:      true,
+			Transports: transportTCP,
+		}, nil
+	}
+	return nil, nil
+}
+
+func checkTuicSocksConflict(db *gorm.DB, inbound *model.Inbound, ignoreId int, newBits transportBits) (*portConflictDetail, error) {
+	var candidates []*model.Inbound
+	q := db.Model(model.Inbound{}).Where("protocol = ? AND node_id IS NULL", model.TUIC)
+	if ignoreId > 0 {
+		q = q.Where("id != ?", ignoreId)
+	}
+	if err := q.Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+	for _, c := range candidates {
+		if _, ok := tuic.InstanceFromInbound(c); !ok {
+			continue
+		}
+		if tuic.SOCKSPortForInbound(c.Id) != inbound.Port {
+			continue
+		}
+		return &portConflictDetail{
+			InboundID:  c.Id,
+			Remark:     c.Remark,
+			Tag:        c.Tag,
+			Listen:     "127.0.0.1",
+			Port:       inbound.Port,
+			Transports: newBits,
+		}, nil
+	}
+	return nil, nil
+}
+
+func checkTuicSocksRelayCollision(db *gorm.DB, id int) (*portConflictDetail, error) {
+	relayPort := tuic.SOCKSPortForInbound(id)
+	var candidates []*model.Inbound
+	if err := db.Model(model.Inbound{}).
+		Where("protocol = ? AND node_id IS NULL AND id != ?", model.TUIC, id).
+		Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+	for _, c := range candidates {
+		if tuic.SOCKSPortForInbound(c.Id) != relayPort {
+			continue
+		}
+		return &portConflictDetail{
+			InboundID:  c.Id,
+			Remark:     c.Remark,
+			Tag:        c.Tag,
+			Listen:     "127.0.0.1",
+			Port:       relayPort,
+			Relay:      true,
+			Transports: transportTCP,
+		}, nil
+	}
+	return nil, nil
+}
+
+func tuicSocksSelfConflict(inbound *model.Inbound, id int) string {
+	if id <= 0 || inbound.NodeID != nil || !listenOverlaps(loopbackBind, inboundBindAddr(inbound)) {
+		return ""
+	}
+	relayPort := tuic.SOCKSPortForInbound(id)
+	if inbound.Port != relayPort {
+		return ""
+	}
+	return fmt.Sprintf("TUIC port %d is inbound #%d's own SOCKS5 relay port on 127.0.0.1; choose a different TUIC port",
+		relayPort, id)
+}
+
+func checkTuicSocksReverseConflict(db *gorm.DB, id int) (*portConflictDetail, error) {
+	relayPort := tuic.SOCKSPortForInbound(id)
+	var candidates []*model.Inbound
+	if err := db.Model(model.Inbound{}).
+		Where("port = ? AND node_id IS NULL AND id != ?", relayPort, id).
+		Find(&candidates).Error; err != nil {
+		return nil, err
+	}
+	for _, c := range candidates {
+		if !listenOverlaps(loopbackBind, inboundBindAddr(c)) {
 			continue
 		}
 		return &portConflictDetail{
