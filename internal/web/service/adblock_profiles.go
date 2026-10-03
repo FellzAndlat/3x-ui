@@ -15,12 +15,56 @@ type AdBlockProfile struct {
 	UpdateIntervalHours int    `json:"updateIntervalHours"`
 }
 
+const (
+	adBlockSourceAdAway      = "https://raw.githubusercontent.com/AdAway/adaway.github.io/master/hosts.txt"
+	adBlockSourceStevenBlack = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+	adBlockSourcePeteLowe    = "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext"
+)
+
 func AdBlockProfiles() []AdBlockProfile {
 	return []AdBlockProfile{
-		{"balanced", "Сбалансированный", "Реклама и трекеры: hosts-список StevenBlack, обновление раз в сутки.", DefaultAdBlockSources, 24},
-		{"mobile", "Реклама в приложениях", "AdGuard DNS: рекламные сети и трекеры, в том числе мобильные; обновление каждые 12 часов.", "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt", 12},
-		{"strict", "Расширенная защита", "OISD big: реклама, трекеры и вредоносные домены; обновление каждые 12 часов.", "https://big.oisd.nl", 12},
-		{"light", "Лёгкий", "OISD small: преимущественно реклама; меньше правил, обновление раз в сутки.", "https://small.oisd.nl", 24},
+		{
+			"balanced",
+			"StevenBlack Unified · рекомендуемый",
+			"Готовый объединённый hosts-список рекламы, трекеров и вредоносных доменов. Подходит большинству пользователей; обновление раз в сутки.",
+			adBlockSourceStevenBlack,
+			24,
+		},
+		{
+			"adaway",
+			"AdAway Official",
+			"Официальный список AdAway для рекламы и мобильных трекеров; обновление раз в сутки.",
+			adBlockSourceAdAway,
+			24,
+		},
+		{
+			"peterlowe",
+			"Pete Lowe",
+			"Компактный и давно поддерживаемый список рекламных серверов; обновление раз в сутки.",
+			adBlockSourcePeteLowe,
+			24,
+		},
+		{
+			"mobile",
+			"Реклама в приложениях",
+			"AdGuard DNS: рекламные сети и трекеры, в том числе мобильные; обновление каждые 12 часов.",
+			"https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
+			12,
+		},
+		{
+			"light",
+			"Лёгкий",
+			"OISD small: преимущественно реклама; меньше правил и ниже риск несовместимости, обновление раз в сутки.",
+			"https://small.oisd.nl",
+			24,
+		},
+		{
+			"strict",
+			"Расширенная защита",
+			"OISD big: реклама, трекеры и вредоносные домены; обновление каждые 12 часов.",
+			"https://big.oisd.nl",
+			12,
+		},
 	}
 }
 
