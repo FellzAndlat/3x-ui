@@ -17,6 +17,7 @@ import (
 
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/google/uuid"
 )
 
@@ -39,6 +40,8 @@ type managedOutbound struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	container   string
+	nextRetry   time.Time
+	failures    int
 }
 
 var outboundMu sync.Mutex
@@ -117,7 +120,10 @@ func EnsureOutbound(raw map[string]any) (map[string]any, error) {
 		}
 		stopOutbound(old)
 	}
-	proc := &managedOutbound{raw: raw, fingerprint: fingerprint}
+	proc := &managedOutbound{fingerprint: fingerprint}
+	if err := json.Unmarshal(data, &proc.raw); err != nil {
+		return nil, err
+	}
 	if old != nil {
 		proc.port, proc.password = old.port, old.password
 	}
@@ -174,7 +180,7 @@ func startOutbound(tag string, proc *managedOutbound) error {
 			return err
 		}
 		var conf strings.Builder
-		fmt.Fprintf(&conf, "[Interface]\nRole = client\nInbound = socks5\nSocks5 = 127.0.0.1:%d\nCodec = batched\nEncryptionKeyFile = %s\nSessionContext = %s\n", proc.port, secret, s.Context)
+		fmt.Fprintf(&conf, "[Interface]\nRole = client\nInbound = socks5\nSocks5 = 127.0.0.1:%d\nCodec = batched\nEncryptionKeyFile = %s\nSessionContext = %s\nCookieStore = %s\n", proc.port, secret, s.Context, filepath.Join(folder, "cookies.json"))
 		for _, t := range s.Transports {
 			fmt.Fprintf(&conf, "\n[Transport \"%s\"]\nType = %s\nPriority = %d\n", t.Type, t.Type, t.Priority)
 			if t.Type == "direct" {
@@ -292,12 +298,38 @@ func KeepOutbounds(tags map[string]bool) {
 }
 func RefreshOutbounds() {
 	outboundMu.Lock()
-	var rows []map[string]any
-	for _, proc := range outboundProcesses {
-		rows = append(rows, proc.raw)
+	defer outboundMu.Unlock()
+	for tag, proc := range outboundProcesses {
+		select {
+		case <-proc.done:
+		default:
+			continue
+		}
+		if time.Now().Before(proc.nextRetry) {
+			continue
+		}
+		stopOutbound(proc)
+		if err := startOutbound(tag, proc); err != nil {
+			logger.Warningf("managed VPN outbound %q: %v", tag, err)
+		}
+		// Do not run a tight restart loop for an invalid config or unreachable
+		// runtime. Keep the same bridge address through every recovery attempt.
+		proc.failures++
+		if proc.failures > 6 {
+			proc.failures = 6
+		}
+		proc.nextRetry = time.Now().Add(time.Duration(1<<proc.failures) * time.Second)
 	}
-	outboundMu.Unlock()
-	for _, raw := range rows {
-		_, _ = EnsureOutbound(raw)
+}
+
+func stopOutboundProtocol(protocol model.Protocol) {
+	outboundMu.Lock()
+	defer outboundMu.Unlock()
+	for _, proc := range outboundProcesses {
+		p, _ := proc.raw["protocol"].(string)
+		if strings.EqualFold(p, string(protocol)) {
+			stopOutbound(proc)
+			proc.nextRetry = time.Time{}
+		}
 	}
 }

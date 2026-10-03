@@ -51,7 +51,7 @@ func (m *Manager) additionalCommand(inst Instance, metricsAddr string) (*exec.Cm
 			}
 		}
 		var conf strings.Builder
-		fmt.Fprintf(&conf, "[Interface]\nRole = exit\nMode = l4\nCodec = batched\nEncryptionKeyFile = %s\nSessionContext = %s\nIPCSocket = %s\n", secret, inst.Settings.Context, socket)
+		fmt.Fprintf(&conf, "[Interface]\nRole = exit\nMode = l4\nCodec = batched\nEncryptionKeyFile = %s\nSessionContext = %s\nIPCSocket = %s\nCookieStore = %s\n", secret, inst.Settings.Context, socket, filepath.Join(folder, "cookies.json"))
 		for _, t := range inst.Settings.Transports {
 			fmt.Fprintf(&conf, "\n[Transport \"%s\"]\nType = %s\nPriority = %d\n", t.Type, t.Type, t.Priority)
 			if t.Type == "direct" {
@@ -188,6 +188,7 @@ func InstallOpenFlux(ctx context.Context) error {
 		return err
 	}
 	GetManager().StopProtocol(model.OpenFlux)
+	stopOutboundProtocol(model.OpenFlux)
 	return nil
 }
 
