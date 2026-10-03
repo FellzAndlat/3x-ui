@@ -96,6 +96,42 @@ export function applyDnsPreset(config: ConfigObject, key: DnsPreset): ConfigObje
   };
 }
 
+export function optimisticCacheEnabled(dns: ConfigObject): boolean {
+  return dns.optimistic === true || object(dns.optimistic).enabled === true;
+}
+
+export function setDnsCache(config: ConfigObject, enabled: boolean): ConfigObject {
+  const dns: ConfigObject = { ...object(config.dns), disable_cache: !enabled };
+  // Optimistic caching cannot be used without the normal DNS cache.
+  if (!enabled && optimisticCacheEnabled(dns)) dns.optimistic = false;
+  return { ...config, dns };
+}
+
+export function setOptimisticCache(config: ConfigObject, enabled: boolean): ConfigObject {
+  const dns = object(config.dns);
+  const optimistic = object(dns.optimistic);
+  return {
+    ...config,
+    dns: {
+      ...dns,
+      optimistic: Object.keys(optimistic).length ? { ...optimistic, enabled } : enabled,
+      ...(enabled ? { disable_cache: false, disable_expire: false } : {}),
+    },
+  };
+}
+
+export function setLogLevel(config: ConfigObject, level: string): ConfigObject {
+  const log = object(config.log);
+  return {
+    ...config,
+    log: {
+      ...log,
+      disabled: level === 'off',
+      ...(level !== 'off' ? { level } : {}),
+    },
+  };
+}
+
 export function setDefaultOutbound(config: ConfigObject, tag: string): ConfigObject {
   const route = { ...object(config.route) };
   if (tag) route.final = tag;

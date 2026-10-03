@@ -204,21 +204,6 @@ function AppSidebar() {
         label: 'Режим шлюза',
       },
       {
-        key: '/singbox#endpoints',
-        icon: <ClusterOutlined />,
-        label: 'Endpoints',
-      },
-      {
-        key: '/singbox#certificates',
-        icon: <SafetyOutlined />,
-        label: 'Сертификаты',
-      },
-      {
-        key: '/singbox#network',
-        icon: <GlobalOutlined />,
-        label: 'Сеть и HTTP-клиенты',
-      },
-      {
         key: '/singbox#advanced',
         icon: <CodeOutlined />,
         label: 'Дополнительно / JSON',

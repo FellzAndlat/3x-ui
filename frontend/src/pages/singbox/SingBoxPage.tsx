@@ -42,7 +42,13 @@ import { HttpUtil } from '@/utils';
 import { useTheme } from '@/hooks/useTheme';
 import './SingBoxPage.css';
 import SimpleSettings from './SimpleSettings';
-import { outboundDefaults, outboundErrors } from './simple-settings';
+import {
+  outboundDefaults,
+  outboundErrors,
+  optimisticCacheEnabled,
+  setDnsCache,
+  setOptimisticCache,
+} from './simple-settings';
 import { parseShareLink, uniqueTag } from './share-links';
 
 type SectionKey =
@@ -1307,7 +1313,7 @@ export default function SingBoxPage() {
             </Field>
             <Field label="Добавлять timestamp">
               <ToggleField
-                checked={asBoolean(value.timestamp, true)}
+                checked={asBoolean(value.timestamp)}
                 onChange={(next) => patchSection('log', { timestamp: next })}
               />
             </Field>
@@ -1369,13 +1375,13 @@ export default function SingBoxPage() {
             <Field label="Кэш">
               <Switch
                 checked={!asBoolean(value.disable_cache)}
-                onChange={(v) => patchSection('dns', { disable_cache: !v })}
+                onChange={(v) => setConfig(setDnsCache(config, v))}
               />
             </Field>
             <Field label="Оптимистический кэш">
               <Switch
-                checked={asBoolean(value.optimistic)}
-                onChange={(v) => patchSection('dns', { optimistic: v })}
+                checked={optimisticCacheEnabled(value)}
+                onChange={(v) => setConfig(setOptimisticCache(config, v))}
               />
             </Field>
             <Field label="Client subnet">
@@ -2536,10 +2542,14 @@ export default function SingBoxPage() {
           </Button>
         </Space>
       </Card>
-      {renderExperimental()}
       <Collapse
         items={[
           { key: 'basic', label: 'Журнал, время и схема', children: renderBasic() },
+          {
+            key: 'experimental',
+            label: 'Кэш-файл и служебные API',
+            children: renderExperimental(),
+          },
           { key: 'certificates', label: 'Сертификаты', children: renderCertificates() },
           { key: 'network', label: 'Сеть и HTTP-клиенты', children: renderNetwork() },
           { key: 'endpoints', label: 'Туннели (Endpoints)', children: renderEndpoints() },
@@ -2678,7 +2688,11 @@ export default function SingBoxPage() {
                 />
               ) : snapshot ? (
                 <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-                  <Card hoverable>
+                  <Card className="singbox-toolbar">
+                    <div className="singbox-toolbar-heading">
+                      <strong>Настройки sing-box · {SECTION_LABELS[activeSection]}</strong>
+                      <span>Сохранение применит настройки и перезапустит работающее ядро.</span>
+                    </div>
                     <Row gutter={[12, 12]} align="middle">
                       <Col xs={24} md={14}>
                         <Space wrap>
@@ -2726,11 +2740,13 @@ export default function SingBoxPage() {
                                 : t('pages.singBox.stopped')}
                             </Tag>
                             {snapshot?.version && <Tag>{snapshot.version}</Tag>}
-                            <Tag color="processing">
-                              {snapshot?.configSource === 'disk'
-                                ? t('pages.singBox.sourceDisk')
-                                : t('pages.singBox.sourceGenerated')}
-                            </Tag>
+                            {showAdvanced && (
+                              <Tag>
+                                {snapshot?.configSource === 'disk'
+                                  ? t('pages.singBox.sourceDisk')
+                                  : t('pages.singBox.sourceGenerated')}
+                              </Tag>
+                            )}
                             {dirty && <Tag color="warning">Есть несохранённые изменения</Tag>}
                           </Space>
                         </div>

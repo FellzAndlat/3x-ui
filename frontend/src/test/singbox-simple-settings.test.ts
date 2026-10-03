@@ -5,6 +5,9 @@ import {
   DNS_PRESETS,
   outboundDefaults,
   setDefaultOutbound,
+  setDnsCache,
+  setOptimisticCache,
+  setLogLevel,
 } from '@/pages/singbox/simple-settings';
 
 describe('simple sing-box settings', () => {
@@ -122,4 +125,53 @@ describe('simple sing-box settings', () => {
       expect(outboundDefaults(type, 'proxy')).not.toHaveProperty('tls.insecure');
     },
   );
+});
+
+describe('dependent sing-box settings', () => {
+  it('disables optimistic caching together with normal caching, retaining custom DNS rules', () => {
+    const config = {
+      dns: {
+        optimistic: { enabled: true, timeout: '1h' },
+        rules: [{ domain: ['internal.test'], server: 'local' }],
+        servers: [{ type: 'local', tag: 'local' }],
+      },
+      experimental: { clash_api: { secret: 'keep' } },
+    };
+    expect(setDnsCache(config, false)).toEqual({
+      ...config,
+      dns: { ...config.dns, disable_cache: true, optimistic: false },
+    });
+    expect(config.dns.optimistic).toEqual({ enabled: true, timeout: '1h' });
+  });
+  it('enables optimistic caching without conflicting flags and keeps its timeout', () => {
+    const config = {
+      dns: {
+        optimistic: { enabled: false, timeout: '2h' },
+        disable_cache: true,
+        disable_expire: true,
+      },
+    };
+    expect(setOptimisticCache(config, true)).toEqual({
+      dns: {
+        optimistic: { enabled: true, timeout: '2h' },
+        disable_cache: false,
+        disable_expire: false,
+      },
+    });
+    expect(setOptimisticCache({ dns: { optimistic: true } }, false)).toEqual({
+      dns: { optimistic: false },
+    });
+  });
+  it('changes log detail without losing custom output or disabling traffic accounting', () => {
+    const config = {
+      log: { output: '/tmp/custom.log', timestamp: true, level: 'trace' },
+      experimental: { v2ray_api: { listen: '127.0.0.1:10085' } },
+    };
+    const disabled = setLogLevel(config, 'off');
+    expect(disabled).toEqual({ ...config, log: { ...config.log, disabled: true } });
+    expect(setLogLevel(disabled, 'warn')).toEqual({
+      ...config,
+      log: { ...config.log, level: 'warn', disabled: false },
+    });
+  });
 });
