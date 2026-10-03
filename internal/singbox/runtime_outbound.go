@@ -33,6 +33,9 @@ func normalizeOutboundsForRuntime(outbounds []map[string]any) ([]map[string]any,
 	if err := json.Unmarshal(data, &normalized); err != nil {
 		return nil, fmt.Errorf("clone outbound config: %w", err)
 	}
+	if err := validateRuntimeOutboundDetours(normalized); err != nil {
+		return nil, err
+	}
 
 	for index, outbound := range normalized {
 		outboundType := strings.ToLower(strings.TrimSpace(rawString(outbound, "type")))
@@ -54,6 +57,71 @@ func normalizeOutboundsForRuntime(outbounds []map[string]any) ([]map[string]any,
 		}
 	}
 	return normalized, nil
+}
+
+func validateRuntimeOutboundDetours(outbounds []map[string]any) error {
+	knownTags := make(map[string]struct{}, len(outbounds))
+	for _, outbound := range outbounds {
+		if tag := strings.TrimSpace(rawString(outbound, "tag")); tag != "" {
+			knownTags[tag] = struct{}{}
+		}
+	}
+
+	edges := make(map[string]string, len(outbounds))
+	for _, outbound := range outbounds {
+		tag := strings.TrimSpace(rawString(outbound, "tag"))
+		detour := strings.TrimSpace(rawString(outbound, "detour"))
+		if tag == "" || detour == "" {
+			continue
+		}
+		if detour == tag {
+			return fmt.Errorf("sing-box outbound %q cannot detour to itself", tag)
+		}
+		// Endpoint tags can also act as outbound targets. Only add an edge when
+		// both ends are in the outbound list; endpoint references are validated
+		// by sing-box after the full config is assembled.
+		if _, exists := knownTags[detour]; exists {
+			edges[tag] = detour
+		}
+	}
+
+	state := make(map[string]uint8, len(edges))
+	stack := make([]string, 0, len(edges))
+	var visit func(string) error
+	visit = func(tag string) error {
+		switch state[tag] {
+		case 1:
+			start := 0
+			for i, item := range stack {
+				if item == tag {
+					start = i
+					break
+				}
+			}
+			cycle := append(append([]string(nil), stack[start:]...), tag)
+			return fmt.Errorf("sing-box outbound detour cycle: %s", strings.Join(cycle, " -> "))
+		case 2:
+			return nil
+		}
+
+		state[tag] = 1
+		stack = append(stack, tag)
+		if next, exists := edges[tag]; exists {
+			if err := visit(next); err != nil {
+				return err
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[tag] = 2
+		return nil
+	}
+
+	for tag := range edges {
+		if err := visit(tag); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateRuntimeHysteriaOutbound(outbound map[string]any, outboundType string) error {
