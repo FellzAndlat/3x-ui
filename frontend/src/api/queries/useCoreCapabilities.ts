@@ -37,14 +37,16 @@ export interface OutboundProbeResult {
 const coreCapabilitiesKey = ['server', 'core-capabilities'] as const;
 
 async function fetchCoreCapabilities(): Promise<CoreCapabilitiesResponse> {
-  const msg = await HttpUtil.get('/panel/api/server/core/capabilities', undefined, {
-    silent: true,
-  });
+  const msg = await HttpUtil.get<CoreCapabilitiesResponse>(
+    '/panel/api/server/core/capabilities',
+    undefined,
+    { silent: true },
+  );
   if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch core capabilities');
   if (!msg.obj?.core || !msg.obj?.capabilities) {
     throw new Error('Invalid core capabilities response');
   }
-  return msg.obj as CoreCapabilitiesResponse;
+  return msg.obj;
 }
 
 export function useCoreCapabilitiesQuery() {
@@ -66,12 +68,15 @@ export function useSingBoxOutboundProbe() {
       if (url) payload.url = url;
       if (timeout !== undefined) payload.timeout = timeout;
 
-      const msg = await HttpUtil.post('/panel/api/server/singbox/outbound/check', payload);
+      const msg = await HttpUtil.post<OutboundProbeResult>(
+        '/panel/api/server/singbox/outbound/check',
+        payload,
+      );
       if (!msg?.success) throw new Error(msg?.msg || 'Outbound probe failed');
       if (!msg.obj || typeof msg.obj.delay !== 'number') {
         throw new Error('Invalid outbound probe response');
       }
-      return msg.obj as OutboundProbeResult;
+      return msg.obj;
     },
   });
 
