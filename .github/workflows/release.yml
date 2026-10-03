@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "**"
+      - main
     tags:
       - "v*.*.*"
     paths:
@@ -157,13 +157,6 @@ jobs:
           fi
           go build -p 12 -buildvcs=true -ldflags "$LDFLAGS" -o xui-release -v .
 
-          # Stable and rolling dev releases share the same source commit but
-          # must advertise different versions. Build a second binary without
-          # the injected dev commit for the stable release on main.
-          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
-            go build -p 12 -buildvcs=true -ldflags "-w -s -linkmode external -extldflags '-static'" -o xui-stable -v .
-          fi
-
           rm -rf x-ui
           mkdir -p x-ui/bin
           mv xui-release x-ui/x-ui
@@ -213,7 +206,7 @@ jobs:
           rm -f "$TELEMT_PKG"
 
           curl -sfLRo tuic-server "${CURL_RETRY[@]}" "https://github.com/EAimTY/tuic/releases/download/tuic-server-1.0.0/tuic-server-1.0.0-${TUIC_ARCH}"
-          chmod +x tuic-server
+          chmod 0755 tuic-server
 
           PINGTUNNEL_VERSION=2.10
           curl -fL --show-error "${CURL_RETRY[@]}" -o pingtunnel.zip "https://github.com/esrrhs/pingtunnel/releases/download/${PINGTUNNEL_VERSION}/pingtunnel_linux_${{ matrix.platform }}.zip"
@@ -247,13 +240,6 @@ jobs:
           tar -zcf x-ui-linux-${{ matrix.platform }}.tar.gz x-ui
           sha256sum x-ui-linux-${{ matrix.platform }}.tar.gz > x-ui-linux-${{ matrix.platform }}.tar.gz.sha256
 
-          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
-            mv xui-stable x-ui/x-ui
-            mkdir -p stable
-            tar -zcf stable/x-ui-linux-${{ matrix.platform }}.tar.gz x-ui
-            (cd stable && sha256sum x-ui-linux-${{ matrix.platform }}.tar.gz > x-ui-linux-${{ matrix.platform }}.tar.gz.sha256)
-          fi
-
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
@@ -261,15 +247,6 @@ jobs:
           path: |
             x-ui-linux-${{ matrix.platform }}.tar.gz
             x-ui-linux-${{ matrix.platform }}.tar.gz.sha256
-
-      - name: Upload stable build artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v7
-        with:
-          name: stable-x-ui-linux-${{ matrix.platform }}
-          path: |
-            stable/x-ui-linux-${{ matrix.platform }}.tar.gz
-            stable/x-ui-linux-${{ matrix.platform }}.tar.gz.sha256
 
       - name: Upload stable release assets
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -281,72 +258,6 @@ jobs:
           file_glob: true
           overwrite: true
           prerelease: false
-
-  publish-versioned-release:
-    name: Publish versioned stable release from main
-    needs: [build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Ensure stable release exists
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < internal/config/version)"
-          TAG="v${VERSION}"
-          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Invalid panel version: ${VERSION}" >&2
-            exit 1
-          fi
-
-          if ! gh release view "${TAG}" >/dev/null 2>&1; then
-            gh release create "${TAG}" \
-              --target "${GITHUB_SHA}" \
-              --title "${VERSION}" \
-              --generate-notes
-          fi
-
-      - name: Download Linux build artifacts
-        uses: actions/download-artifact@v8
-        with:
-          pattern: stable-x-ui-linux-*
-          path: stable-artifacts
-          merge-multiple: true
-
-      - name: Upload stable release assets
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          VERSION="$(tr -d '[:space:]' < internal/config/version)"
-          TAG="v${VERSION}"
-          for asset in \
-            stable-artifacts/x-ui-linux-amd64.tar.gz \
-            stable-artifacts/x-ui-linux-amd64.tar.gz.sha256 \
-            stable-artifacts/x-ui-linux-arm64.tar.gz \
-            stable-artifacts/x-ui-linux-arm64.tar.gz.sha256; do
-            test -f "${asset}"
-            uploaded=false
-            for attempt in {1..5}; do
-              if gh release upload "${TAG}" "${asset}" --clobber; then
-                uploaded=true
-                break
-              fi
-              if (( attempt < 5 )); then
-                sleep $((attempt * 3))
-              fi
-            done
-            if [[ "${uploaded}" != true ]]; then
-              echo "Failed to upload ${asset} to ${TAG} after 5 attempts" >&2
-              exit 1
-            fi
-          done
 
   publish-dev:
     name: Publish rolling dev release
