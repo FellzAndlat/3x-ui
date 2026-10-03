@@ -54,6 +54,27 @@ func TestActiveSessionFromNilConnection(t *testing.T) {
 	}
 }
 
+func TestIsActiveConnection(t *testing.T) {
+	tests := []struct {
+		name       string
+		connection *singBoxConnection
+		want       bool
+	}{
+		{name: "nil", connection: nil, want: false},
+		{name: "missing id", connection: &singBoxConnection{}, want: false},
+		{name: "live", connection: &singBoxConnection{ID: "conn-live"}, want: true},
+		{name: "closed history", connection: &singBoxConnection{ID: "conn-closed", ClosedAt: 123}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isActiveConnection(tt.connection); got != tt.want {
+				t.Fatalf("isActiveConnection() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMatchingConnectionIDs(t *testing.T) {
 	connections := []*singBoxConnection{
 		nil,
@@ -61,6 +82,7 @@ func TestMatchingConnectionIDs(t *testing.T) {
 		{ID: "conn-1", Inbound: "vless-443", User: "alice"},
 		{ID: "conn-1", Inbound: "vless-443", User: "alice"},
 		{ID: "conn-2", Inbound: "vless-443", User: "bob"},
+		{ID: "conn-closed", Inbound: "vless-443", User: "alice", ClosedAt: 123},
 		{ID: "conn-3", Inbound: "trojan-443", User: "alice"},
 	}
 
