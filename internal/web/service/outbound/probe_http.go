@@ -2,25 +2,24 @@ package outbound
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
+	"net/http"
+	"net/http/httptrace"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"crypto/tls"
-	"encoding/json"
-	"io/fs"
-	"net/http"
-	"net/http/httptrace"
-	"net/url"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
-	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/json_util"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 )
@@ -294,6 +293,11 @@ func runHTTPProbeBatchForCore(items []*httpBatchItem, allOutbounds []any, testUR
 	defer release()
 
 	cfg := buildBatchTestConfig(items, allOutbounds, ports)
+	cleanupVPN, err := bridgeManagedProbeOutbounds(cfg)
+	if err != nil {
+		return false, err
+	}
+	defer cleanupVPN()
 
 	configPath, err := createTestConfigPath()
 	if err != nil {
@@ -418,15 +422,7 @@ func buildBatchTestConfig(items []*httpBatchItem, allOutbounds []any, ports []in
 			bridged = append(bridged, ob)
 			continue
 		}
-		if externalvpn.IsAdditionalOutbound(m) {
-			bridge, err := externalvpn.EnsureOutbound(m)
-			if err == nil {
-				bridged = append(bridged, bridge)
-			} else {
-				bridged = append(bridged, ob)
-			}
-			continue
-		}
+
 		if p, _ := m["protocol"].(string); !strings.EqualFold(p, "amneziawg") {
 			bridged = append(bridged, ob)
 			continue

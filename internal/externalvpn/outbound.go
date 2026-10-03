@@ -333,3 +333,38 @@ func stopOutboundProtocol(protocol model.Protocol) {
 		}
 	}
 }
+
+// Probe processes use separate identities so a temporary test cannot replace
+// the live tunnel or be restarted indefinitely by the regular supervisor.
+func EnsureProbeOutbound(raw map[string]any) (map[string]any, func(), error) {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	var isolated map[string]any
+	if err := json.Unmarshal(data, &isolated); err != nil {
+		return nil, nil, err
+	}
+	tag, _ := raw["tag"].(string)
+	probeTag := "__probe_" + uuid.NewString()
+	isolated["tag"] = probeTag
+	bridge, err := EnsureOutbound(isolated)
+	if err != nil {
+		return nil, nil, err
+	}
+	bridge["tag"] = tag
+	var once sync.Once
+	cleanup := func() {
+		once.Do(func() {
+			outboundMu.Lock()
+			defer outboundMu.Unlock()
+			if proc := outboundProcesses[probeTag]; proc != nil {
+				stopOutbound(proc)
+				delete(outboundProcesses, probeTag)
+			}
+			sum := sha256.Sum256([]byte(probeTag))
+			_ = os.RemoveAll(filepath.Join(directory(), "outbound-"+hex.EncodeToString(sum[:8])))
+		})
+	}
+	return bridge, cleanup, nil
+}
