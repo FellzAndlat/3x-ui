@@ -275,6 +275,12 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 		if err := json.Unmarshal(rawBytes, &raw); err != nil {
 			return nil, err
 		}
+		stream, _ := raw["streamSettings"].(map[string]any)
+		network, _ := stream["network"].(string)
+		if strings.EqualFold(strings.TrimSpace(network), "xhttp") {
+			logger.Warningf("Skipping sing-box inbound %q: XHTTP transport is only supported by Xray", inbound.Tag)
+			continue
+		}
 		// Xray treats an empty inbound listen address as all interfaces. The
 		// sing-box default is loopback, which makes a successfully started
 		// inbound unreachable from the network. Preserve Xray semantics.
