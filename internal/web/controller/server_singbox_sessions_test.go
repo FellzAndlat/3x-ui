@@ -4,6 +4,10 @@ import (
 	"net/http"
 	"reflect"
 	"testing"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestNormalizeSingBoxSessionNodeID(t *testing.T) {
@@ -47,6 +51,44 @@ func TestNormalizeSingBoxSessionNodeID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNormalizeSingBoxSessionNodeTarget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	remote := 7
+	local := 0
+
+	t.Run("admin may target remote runtime", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(nil)
+		c.Set("api_token_scope", model.ApiScopeAdmin)
+		got, err := normalizeSingBoxSessionNodeTarget(c, &remote)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil || *got != remote {
+			t.Fatalf("got %v, want node %d", got, remote)
+		}
+	})
+
+	t.Run("node sync may target local runtime", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(nil)
+		c.Set("api_token_scope", model.ApiScopeNodeSync)
+		got, err := normalizeSingBoxSessionNodeTarget(c, &local)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("got %v, want local nil", got)
+		}
+	})
+
+	t.Run("node sync may not relay to remote runtime", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(nil)
+		c.Set("api_token_scope", model.ApiScopeNodeSync)
+		if _, err := normalizeSingBoxSessionNodeTarget(c, &remote); err == nil {
+			t.Fatal("expected node-sync relay to be rejected")
+		}
+	})
 }
 
 func TestNormalizeSingBoxSessionUsers(t *testing.T) {
