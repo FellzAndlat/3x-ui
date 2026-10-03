@@ -27,6 +27,20 @@ func TestSelectProbeOutboundsKeepsOnlyDependencyClosure(t *testing.T) {
 	}
 }
 
+func TestSelectProbeOutboundsKeepsProxySettingsDependency(t *testing.T) {
+	outbounds := []map[string]any{
+		{"tag": "hop", "protocol": "socks", "settings": map[string]any{"servers": []any{map[string]any{"address": "127.0.0.1", "port": 1080}}}},
+		{"tag": "proxy", "protocol": "vless", "proxySettings": map[string]any{"tag": "hop"}},
+	}
+	selected, err := selectProbeOutbounds(outbounds, []string{"proxy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selected) != 2 || selected[0]["tag"] != "hop" || selected[1]["tag"] != "proxy" {
+		t.Fatalf("proxySettings dependency was dropped: %v", selected)
+	}
+}
+
 func TestSelectProbeOutboundsValidatesChains(t *testing.T) {
 	tests := []struct {
 		name      string
