@@ -220,7 +220,7 @@ func decodeTrafficConnection(data []byte) (*singBoxConnection, error) {
 		}
 		data = data[n:]
 		switch field {
-		case 1, 2, 10:
+		case 1, 2, 3, 10:
 			if typ != protowire.BytesType {
 				return nil, fmt.Errorf("invalid Connection traffic string field %d wire type %d", field, typ)
 			}
@@ -233,6 +233,8 @@ func decodeTrafficConnection(data []byte) (*singBoxConnection, error) {
 				connection.ID = string(value)
 			case 2:
 				connection.Inbound = string(value)
+			case 3:
+				connection.InboundType = string(value)
 			case 10:
 				connection.User = string(value)
 			}
@@ -479,6 +481,88 @@ func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvent
 	c.trafficSnapshotAt = snapshotAt
 }
 
+// applyNaiveClashFallback repairs a sing-box edge case where Naive connections
+// are present in the native daemon snapshot, but its cumulative counters stay
+// at zero. The Clash endpoint is backed by the same traffic manager and exposes
+// cumulative byte counters for the same connection IDs. We only use those
+// counters when the native Naive delta is zero, so normal native accounting is
+// never double-counted.
+func (c *ConnectionAPIClient) applyNaiveClashFallback(ctx context.Context, response *connectionEvents) {
+	if response == nil || len(response.Events) == 0 {
+		return
+	}
+	needFallback := false
+	for _, event := range response.Events {
+		if event != nil && event.Connection != nil && event.Connection.InboundType == "naive" && (event.UplinkDelta == 0 || event.DownlinkDelta == 0) {
+			needFallback = true
+			break
+		}
+	}
+	if !needFallback {
+		return
+	}
+
+	connections, err := NewClashStatsClient().Connections(ctx)
+	if err != nil {
+		return
+	}
+	byID := make(map[string]ClashConnection, len(connections))
+	for _, connection := range connections {
+		if connection.ID != "" {
+			byID[connection.ID] = connection
+		}
+	}
+
+	c.trafficMu.Lock()
+	defer c.trafficMu.Unlock()
+	if c.naiveFallbackSnapshots == nil {
+		c.naiveFallbackSnapshots = make(map[string]connectionTrafficSnapshot)
+	}
+	seen := make(map[string]struct{})
+	for _, event := range response.Events {
+		if event == nil || event.Connection == nil || event.Connection.InboundType != "naive" {
+			continue
+		}
+		id := event.ID
+		if id == "" {
+			id = event.Connection.ID
+		}
+		current, ok := byID[id]
+		if !ok || id == "" {
+			continue
+		}
+		seen[id] = struct{}{}
+		up, down := current.Upload, current.Download
+		if up < 0 {
+			up = 0
+		}
+		if down < 0 {
+			down = 0
+		}
+		previous, exists := c.naiveFallbackSnapshots[id]
+		fallbackUp := snapshotTrafficDelta(up, previous.uplink, exists, false)
+		fallbackDown := snapshotTrafficDelta(down, previous.downlink, exists, false)
+		if event.UplinkDelta == 0 {
+			event.UplinkDelta = fallbackUp
+		}
+		if event.DownlinkDelta == 0 {
+			event.DownlinkDelta = fallbackDown
+		}
+		c.naiveFallbackSnapshots[id] = connectionTrafficSnapshot{uplink: up, downlink: down}
+	}
+	for id, snapshot := range c.naiveFallbackSnapshots {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		if snapshot.missingSnapshots+1 >= trafficSnapshotMissingGrace {
+			delete(c.naiveFallbackSnapshots, id)
+			continue
+		}
+		snapshot.missingSnapshots++
+		c.naiveFallbackSnapshots[id] = snapshot
+	}
+}
+
 // SnapshotTrafficEvents is a low-allocation variant used by the traffic poll.
 // SubscribeConnections starts with Reset=true and cumulative connection totals.
 // Convert that reset snapshot to deltas locally because this poll uses a
@@ -511,14 +595,16 @@ func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connec
 		return connectionEvents{}, err
 	}
 	c.normalizeTrafficSnapshot(&response, snapshotAt)
+	c.applyNaiveClashFallback(ctx, &response)
 	return response, nil
 }
 
 type ConnectionAPIClient struct {
-	conn              *grpc.ClientConn
-	trafficMu         sync.Mutex
-	trafficSnapshots  map[string]connectionTrafficSnapshot
-	trafficSnapshotAt int64
+	conn                   *grpc.ClientConn
+	trafficMu              sync.Mutex
+	trafficSnapshots       map[string]connectionTrafficSnapshot
+	naiveFallbackSnapshots map[string]connectionTrafficSnapshot
+	trafficSnapshotAt      int64
 }
 
 func NewConnectionAPIClient() *ConnectionAPIClient { return &ConnectionAPIClient{} }

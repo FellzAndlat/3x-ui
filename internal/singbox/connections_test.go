@@ -59,3 +59,30 @@ func TestDecodeConnectionEventMapping(t *testing.T) {
 		t.Fatalf("unexpected event deltas: up=%d down=%d", got.UplinkDelta, got.DownlinkDelta)
 	}
 }
+
+func TestDecodeTrafficConnectionKeepsNaiveIdentity(t *testing.T) {
+	var data []byte
+	data = protowire.AppendTag(data, 1, protowire.BytesType)
+	data = protowire.AppendString(data, "naive-1")
+	data = protowire.AppendTag(data, 2, protowire.BytesType)
+	data = protowire.AppendString(data, "naive-in")
+	data = protowire.AppendTag(data, 3, protowire.BytesType)
+	data = protowire.AppendString(data, "naive")
+	data = protowire.AppendTag(data, 10, protowire.BytesType)
+	data = protowire.AppendString(data, "alice@example.com")
+	data = protowire.AppendTag(data, 16, protowire.VarintType)
+	data = protowire.AppendVarint(data, 12345)
+	data = protowire.AppendTag(data, 17, protowire.VarintType)
+	data = protowire.AppendVarint(data, 67890)
+
+	got, err := decodeTrafficConnection(data)
+	if err != nil {
+		t.Fatalf("decodeTrafficConnection() error = %v", err)
+	}
+	if got.ID != "naive-1" || got.Inbound != "naive-in" || got.InboundType != "naive" || got.User != "alice@example.com" {
+		t.Fatalf("unexpected Naive identity mapping: %+v", got)
+	}
+	if got.UplinkTotal != 12345 || got.DownlinkTotal != 67890 {
+		t.Fatalf("unexpected Naive traffic totals: up=%d down=%d", got.UplinkTotal, got.DownlinkTotal)
+	}
+}

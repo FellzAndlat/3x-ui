@@ -1,7 +1,9 @@
-import { Alert, Form, Input, InputNumber, Select } from 'antd';
+import { useState } from 'react';
+import { Alert, Button, Collapse, Form, Input, InputNumber, Select, Space, message } from 'antd';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { FormField } from '@/components/form/rhf';
+import { HttpUtil } from '@/utils';
 
 export function PingtunnelFields() {
   const { t } = useTranslation();
@@ -83,6 +85,63 @@ export function PingtunnelFields() {
 
 export function TrustTunnelFields() {
   const { t } = useTranslation();
+  const { control, setValue } = useFormContext();
+  const [loadingPanelCert, setLoadingPanelCert] = useState(false);
+  const shareAddr = (useWatch({ control, name: 'shareAddr' }) ?? '') as string;
+  const nodeId = useWatch({ control, name: 'nodeId' }) as number | null | undefined;
+  const certificate = (useWatch({ control, name: 'settings.certificate' }) ?? '') as string;
+  const privateKey = (useWatch({ control, name: 'settings.privateKey' }) ?? '') as string;
+
+  const updateSetting = (field: string, value: string) => {
+    setValue(`settings.${field}`, value, {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    });
+  };
+
+  const autofillHostname = () => {
+    const candidate = (shareAddr || window.location.hostname || '').trim().replace(/^\[|\]$/g, '');
+    if (!candidate || candidate === '0.0.0.0' || candidate === '::') {
+      message.warning(t('pages.inbounds.form.trusttunnelHostnameHint'));
+      return;
+    }
+    updateSetting('hostname', candidate);
+    message.success(t('pages.inbounds.setSuccess'));
+  };
+
+  const usePanelCertificate = async () => {
+    setLoadingPanelCert(true);
+    try {
+      const response =
+        typeof nodeId === 'number'
+          ? await HttpUtil.get(`/panel/api/nodes/webCert/${nodeId}`, undefined, { silent: true })
+          : await HttpUtil.post('/panel/api/setting/all', undefined, { silent: true });
+      if (!response?.success) {
+        message.warning(response?.msg || t('pages.inbounds.setDefaultCertEmpty'));
+        return;
+      }
+      const obj = response.obj as { webCertFile?: string; webKeyFile?: string };
+      if (!obj?.webCertFile || !obj?.webKeyFile) {
+        message.warning(t('pages.inbounds.setDefaultCertEmpty'));
+        return;
+      }
+      updateSetting('certificate', obj.webCertFile);
+      updateSetting('privateKey', obj.webKeyFile);
+      message.success(t('pages.inbounds.setSuccess'));
+    } catch {
+      message.error(t('somethingWentWrong'));
+    } finally {
+      setLoadingPanelCert(false);
+    }
+  };
+
+  const useAutomaticCertificate = () => {
+    updateSetting('certificate', '');
+    updateSetting('privateKey', '');
+    message.success(t('pages.inbounds.setSuccess'));
+  };
+
   return (
     <>
       <Alert type="info" showIcon description={t('pages.inbounds.form.trusttunnelHint')} />
@@ -93,20 +152,64 @@ export function TrustTunnelFields() {
       >
         <Input placeholder="vpn.example.com" />
       </FormField>
-      <FormField
-        name={['settings', 'certificate']}
-        label={t('pages.inbounds.form.trusttunnelCert')}
-        tooltip={t('pages.inbounds.form.trusttunnelCertHint')}
-      >
-        <Input />
-      </FormField>
-      <FormField
-        name={['settings', 'privateKey']}
-        label={t('pages.inbounds.form.trusttunnelKey')}
-        tooltip={t('pages.inbounds.form.trusttunnelKeyHint')}
-      >
-        <Input.Password />
-      </FormField>
+      <Space wrap style={{ marginTop: -12, marginBottom: 12 }}>
+        <Button onClick={autofillHostname}>
+          {t('pages.inbounds.form.trusttunnelAuto', { defaultValue: 'Auto' })}
+        </Button>
+      </Space>
+
+      <Alert
+        type="success"
+        showIcon
+        message={
+          certificate && privateKey
+            ? t('pages.inbounds.form.trusttunnelCustomCertificate', {
+                defaultValue: 'TLS: certificate from panel/custom files',
+              })
+            : t('pages.inbounds.form.trusttunnelAutomaticCertificate', {
+                defaultValue: 'TLS: automatic certificate. No manual configuration is required.',
+              })
+        }
+        style={{ marginBottom: 12 }}
+      />
+
+      <Collapse
+        ghost
+        items={[
+          {
+            key: 'tls',
+            label: t('pages.inbounds.advancedTitle'),
+            children: (
+              <>
+                <Space wrap style={{ marginBottom: 12 }}>
+                  <Button loading={loadingPanelCert} onClick={usePanelCertificate}>
+                    {t('pages.inbounds.setDefaultCert')}
+                  </Button>
+                  <Button onClick={useAutomaticCertificate}>
+                    {t('pages.inbounds.form.trusttunnelAutomaticCertificate', {
+                      defaultValue: 'Automatic certificate',
+                    })}
+                  </Button>
+                </Space>
+                <FormField
+                  name={['settings', 'certificate']}
+                  label={t('pages.inbounds.form.trusttunnelCert')}
+                  tooltip={t('pages.inbounds.form.trusttunnelCertHint')}
+                >
+                  <Input placeholder="/path/to/fullchain.pem" />
+                </FormField>
+                <FormField
+                  name={['settings', 'privateKey']}
+                  label={t('pages.inbounds.form.trusttunnelKey')}
+                  tooltip={t('pages.inbounds.form.trusttunnelKeyHint')}
+                >
+                  <Input.Password placeholder="/path/to/privkey.pem" />
+                </FormField>
+              </>
+            ),
+          },
+        ]}
+      />
     </>
   );
 }
