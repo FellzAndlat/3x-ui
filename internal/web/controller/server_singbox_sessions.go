@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	webruntime "github.com/SawaMEN/3x-ui/v3/internal/web/runtime"
 
 	"github.com/gin-gonic/gin"
@@ -20,7 +21,9 @@ type singBoxDisconnectSessionsRequest struct {
 }
 
 // The same endpoints are also the transport used by runtime.Remote. Node-sync
-// tokens must therefore be able to call the node-local form (without nodeId).
+// tokens may call only the node-local form (without nodeId); otherwise a node
+// could use its transport credential to relay session commands through another
+// panel runtime.
 func init() {
 	nodeSyncScopeAllow["/server/singbox/sessions"] = map[string]struct{}{http.MethodGet: {}}
 	nodeSyncScopeAllow["/server/singbox/sessions/disconnect-user"] = map[string]struct{}{http.MethodPost: {}}
@@ -45,6 +48,17 @@ func normalizeSingBoxSessionNodeID(nodeID *int) (*int, error) {
 	return nodeID, nil
 }
 
+func normalizeSingBoxSessionNodeTarget(c *gin.Context, nodeID *int) (*int, error) {
+	nodeID, err := normalizeSingBoxSessionNodeID(nodeID)
+	if err != nil || nodeID == nil {
+		return nodeID, err
+	}
+	if scope, ok := c.Get("api_token_scope"); ok && scope == model.ApiScopeNodeSync {
+		return nil, errors.New("node-sync session requests may target only the local runtime")
+	}
+	return nodeID, nil
+}
+
 func singBoxSessionNodeIDFromQuery(c *gin.Context) (*int, error) {
 	raw := strings.TrimSpace(c.Query("nodeId"))
 	if raw == "" {
@@ -54,7 +68,7 @@ func singBoxSessionNodeIDFromQuery(c *gin.Context) (*int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid nodeId: %w", err)
 	}
-	return normalizeSingBoxSessionNodeID(&id)
+	return normalizeSingBoxSessionNodeTarget(c, &id)
 }
 
 func singBoxSessionRuntime(nodeID *int) (webruntime.SessionRuntime, error) {
@@ -135,7 +149,7 @@ func (a *ServerController) disconnectSingBoxUsersSessions(c *gin.Context) {
 func (a *ServerController) disconnectSingBoxUsersSessionsRequest(c *gin.Context, request *singBoxDisconnectSessionsRequest) {
 	request.Inbound = strings.TrimSpace(request.Inbound)
 	request.Users = normalizeSingBoxSessionUsers(request.Users)
-	nodeID, err := normalizeSingBoxSessionNodeID(request.NodeID)
+	nodeID, err := normalizeSingBoxSessionNodeTarget(c, request.NodeID)
 	if err != nil {
 		jsonMsg(c, "disconnect sing-box user sessions", err)
 		return
@@ -166,7 +180,7 @@ func (a *ServerController) disconnectSingBoxInboundSessions(c *gin.Context) {
 		jsonMsg(c, "disconnect sing-box inbound sessions", errors.New("inbound is required"))
 		return
 	}
-	nodeID, err := normalizeSingBoxSessionNodeID(request.NodeID)
+	nodeID, err := normalizeSingBoxSessionNodeTarget(c, request.NodeID)
 	if err != nil {
 		jsonMsg(c, "disconnect sing-box inbound sessions", err)
 		return
