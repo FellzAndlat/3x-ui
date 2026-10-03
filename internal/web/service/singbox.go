@@ -484,6 +484,11 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 	if err := s.applyNativeTemplate(cfg); err != nil {
 		return nil, err
 	}
+	for _, inbound := range inbounds {
+		if err := injectSingBoxMtprotoEgress(cfg, inbound); err != nil {
+			return nil, err
+		}
+	}
 	ensureAutomaticClashAPI(cfg)
 	applySingBoxInfrastructureEgress(cfg)
 	return cfg, nil

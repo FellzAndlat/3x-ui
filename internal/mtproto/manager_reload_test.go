@@ -21,6 +21,9 @@ func TestMain(m *testing.M) {
 		if exitFile := os.Getenv("TELEMT_FAKE_EXIT_FILE"); exitFile != "" {
 			for {
 				if _, err := os.Stat(exitFile); err == nil {
+					if os.Getenv("TELEMT_FAKE_EXIT_SUCCESS") == "1" {
+						os.Exit(0)
+					}
 					os.Exit(1)
 				} else if !os.IsNotExist(err) {
 					os.Exit(2)

@@ -22,6 +22,7 @@ on:
       - "internal/Telemt/telemt-update.sh"
       - "internal/Telemt/telemt.toml.example"
       - "internal/Telemt/telemt-meko-fix.service"
+      - "internal/Telemt/telemt-meko-fix.sh"
       - ".github/workflows/release.yml"
       - ".github/workflows/build.yml"
       - "internal/config/version"

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The panel, systemd and the sidecar supervisor can invoke this helper at once.
+# Serialize readers and writers across processes, including loading settings.
+command -v flock >/dev/null 2>&1 || { echo "flock (util-linux) is required" >&2; exit 1; }
+exec 9>/run/lock/x-ui-telemt-meko.lock
+flock -w 8 9 || { echo "MEKO rule update is already in progress" >&2; exit 1; }
+
+# Wait for the xtables lock held by other firewall tools as well.
+iptables() { command iptables -w 2 "$@"; }
+
 CONFIG_GLOB="/usr/local/x-ui/bin/mtproto/telemt-*.toml"
 LEGACY_CONFIG="/etc/x-ui/telemt.toml"
 STATE_FILE="/etc/x-ui/telemt-meko-fix.env"
@@ -24,7 +33,7 @@ if [[ -r "$STATE_FILE" ]]; then
         esac
     done < "$STATE_FILE"
 fi
-ENABLED="${TELEMT_MEKO_ENABLED:-${file_enabled:-0}}"
+ENABLED="${TELEMT_MEKO_ENABLED:-${file_enabled:-1}}"
 RATE="${TELEMT_MEKO_RATE:-${file_rate:-54/minute}}"
 BURST="${TELEMT_MEKO_BURST:-${file_burst:-1}}"
 
@@ -146,7 +155,10 @@ ensure_chain() {
 }
 
 remove() {
-    command -v iptables >/dev/null 2>&1 || return 0
+    if command -v nft >/dev/null 2>&1; then
+        nft delete table inet xui_telemt_meko 2>/dev/null || true
+    fi
+    type -P iptables >/dev/null 2>&1 || return 0
     remove_jump_all filter INPUT "$FILTER_CHAIN"
     remove_jump_all mangle PREROUTING "$MARK_CHAIN"
     iptables -t filter -F "$FILTER_CHAIN" 2>/dev/null || true
@@ -154,6 +166,25 @@ remove() {
     iptables -t mangle -F "$MARK_CHAIN" 2>/dev/null || true
     iptables -t mangle -X "$MARK_CHAIN" 2>/dev/null || true
     log "MEKO V3 rules removed"
+}
+
+# Native nftables needs no xt_u32 kernel module and applies one atomic batch.
+# Payload offsets are relative to TCP, so the same iOS signature handles IPv6.
+# Accepted SYNs return to the host firewall; its access policy is preserved.
+apply_nft() {
+    local port
+    {
+        echo 'add table inet xui_telemt_meko'
+        echo 'flush table inet xui_telemt_meko'
+        echo 'add set inet xui_telemt_meko ports { type inet_service; }'
+        printf 'add element inet xui_telemt_meko ports { %s }\n' "$(IFS=,; echo "${ports[*]}")"
+        echo 'add chain inet xui_telemt_meko input { type filter hook input priority -10; policy accept; }'
+        echo 'add rule inet xui_telemt_meko input tcp dport @ports tcp flags & (fin | syn | rst | ack) == syn @th,96,32 & 0x000fffff == 0x0002ffff @th,160,8 0x02 @th,192,16 0x0103 @th,224,24 0x010108 @th,320,32 0x04020000 counter return'
+        for port in "${ports[@]}"; do
+            printf 'add rule inet xui_telemt_meko input tcp dport %s tcp flags & (fin | syn | rst | ack) == syn meter tm4_%s { ip saddr timeout 60s limit rate over %s burst %s packets } counter reject with tcp reset\n' "$port" "$port" "$RATE" "$BURST"
+            printf 'add rule inet xui_telemt_meko input tcp dport %s tcp flags & (fin | syn | rst | ack) == syn meter tm6_%s { ip6 saddr timeout 60s limit rate over %s burst %s packets } counter reject with tcp reset\n' "$port" "$port" "$RATE" "$BURST"
+        done
+    } | nft -f -
 }
 
 apply() {
@@ -167,15 +198,28 @@ apply() {
     # even if the persisted state was edited or corrupted by hand.
     normalize_limits
 
-    command -v iptables >/dev/null 2>&1 || { log "iptables is required"; exit 1; }
-    ensure_u32 || { log "xt_u32 is not available; MEKO V3 cannot be enabled"; exit 1; }
-
     mapfile -t ports < <(collect_ports)
     if (( ${#ports[@]} == 0 )); then
         remove
         log "No active Telemt MTProto ports found; rules left clean"
         return 0
     fi
+
+    if command -v nft >/dev/null 2>&1 && apply_nft; then
+        # Remove only the legacy managed chains, leaving the new nft table.
+        if type -P iptables >/dev/null 2>&1; then
+            remove_jump_all filter INPUT "$FILTER_CHAIN"
+            remove_jump_all mangle PREROUTING "$MARK_CHAIN"
+            iptables -t filter -F "$FILTER_CHAIN" 2>/dev/null || true
+            iptables -t filter -X "$FILTER_CHAIN" 2>/dev/null || true
+            iptables -t mangle -F "$MARK_CHAIN" 2>/dev/null || true
+            iptables -t mangle -X "$MARK_CHAIN" 2>/dev/null || true
+        fi
+        log "MEKO V3 nftables applied to IPv4/IPv6 ports: ${ports[*]}"
+        return 0
+    fi
+    type -P iptables >/dev/null 2>&1 || { log "nftables or iptables is required"; exit 1; }
+    ensure_u32 || { log "xt_u32 is not available; MEKO V3 cannot be enabled"; exit 1; }
 
     ensure_chain filter "$FILTER_CHAIN"
     ensure_chain mangle "$MARK_CHAIN"
@@ -210,13 +254,16 @@ apply() {
             -j REJECT --reject-with tcp-reset
     done
 
+    if command -v nft >/dev/null 2>&1; then
+        nft delete table inet xui_telemt_meko 2>/dev/null || true
+    fi
     log "MEKO V3 applied to Telemt MTProto ports: ${ports[*]} (rate=${RATE}, burst=${BURST})"
 }
 
 status() {
     local installed=false
     local -a applied_ports=()
-    if command -v iptables >/dev/null 2>&1; then
+    if type -P iptables >/dev/null 2>&1; then
         if jump_is_first_unique filter INPUT "$FILTER_CHAIN" && \
            jump_is_first_unique mangle PREROUTING "$MARK_CHAIN"; then
             installed=true
@@ -229,6 +276,13 @@ status() {
                     | sort -n
             )
         fi
+    fi
+    if command -v nft >/dev/null 2>&1 && nft list chain inet xui_telemt_meko input 2>/dev/null | grep -q 'reject with tcp reset'; then
+        installed=true
+        mapfile -t applied_ports < <(nft -n list set inet xui_telemt_meko ports 2>/dev/null | awk '
+            /elements = {/ { inside=1; sub(/^.*elements = {/, "") }
+            inside { end=($0 ~ /}/); gsub(/[{},]/, " "); for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+$/) print $i; if (end) exit }
+        ' | sort -n)
     fi
     mapfile -t ports < <(collect_ports)
     printf 'enabled=%s\n' "$(enabled && echo true || echo false)"

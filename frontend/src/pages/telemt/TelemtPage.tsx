@@ -81,17 +81,6 @@ type Config = {
   upstreamType: string;
 };
 
-type MekoConfig = {
-  enabled: boolean;
-  applied: boolean;
-  ratePerMinute: number;
-  burst: number;
-  ports: number[];
-  appliedPorts: number[];
-  fingerprint: string;
-  mark: string;
-};
-
 type Proxy = {
   name: string;
   secret: string;
@@ -113,17 +102,6 @@ const defaults: Config = {
   tls: true,
   sni: 'petrovich.ru',
   upstreamType: 'direct',
-};
-
-const defaultMeko: MekoConfig = {
-  enabled: false,
-  applied: false,
-  ratePerMinute: 54,
-  burst: 1,
-  ports: [],
-  appliedPorts: [],
-  fingerprint: 'MEKO V3/u32',
-  mark: '0x400',
 };
 
 const jsonOptions = { headers: { 'Content-Type': 'application/json' } };
@@ -159,12 +137,10 @@ export default function TelemtPage() {
       error: '',
     },
   });
-  const [mekoConfig, setMekoConfig] = useState<MekoConfig>(defaultMeko);
   const [proxies, setProxies] = useState<Proxy[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [serviceAction, setServiceAction] = useState<ServiceAction | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
-  const [mekoSaving, setMekoSaving] = useState(false);
   const [proxyCreating, setProxyCreating] = useState(false);
   const [proxyDeleting, setProxyDeleting] = useState<string | null>(null);
   const [webProxyLoading, setWebProxyLoading] = useState(false);
@@ -181,18 +157,6 @@ export default function TelemtPage() {
     if (r?.success && r.obj) form.setFieldsValue({ ...defaults, ...r.obj });
   }, [form]);
 
-  const loadMeko = useCallback(async () => {
-    const r = await HttpUtil.get<MekoConfig>('/panel/api/telemt/meko/config');
-    if (r?.success && r.obj) {
-      setMekoConfig({
-        ...defaultMeko,
-        ...r.obj,
-        ports: Array.isArray(r.obj.ports) ? r.obj.ports : [],
-        appliedPorts: Array.isArray(r.obj.appliedPorts) ? r.obj.appliedPorts : [],
-      });
-    }
-  }, []);
-
   const loadProxies = useCallback(async () => {
     const r = await HttpUtil.get<Proxy[]>('/panel/api/telemt/proxy');
     if (!r?.success || !Array.isArray(r.obj)) return;
@@ -208,20 +172,20 @@ export default function TelemtPage() {
   const refreshAll = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([loadStatus(), loadConfig(), loadMeko(), loadProxies()]);
+      await Promise.all([loadStatus(), loadConfig(), loadProxies()]);
     } finally {
       setRefreshing(false);
     }
-  }, [loadConfig, loadMeko, loadProxies, loadStatus]);
+  }, [loadConfig, loadProxies, loadStatus]);
 
   useEffect(() => {
     const initialRefresh = window.setTimeout(() => void refreshAll(), 0);
-    const timer = window.setInterval(() => void Promise.all([loadStatus(), loadMeko()]), 15000);
+    const timer = window.setInterval(() => void loadStatus(), 15000);
     return () => {
       window.clearTimeout(initialRefresh);
       window.clearInterval(timer);
     };
-  }, [loadMeko, loadStatus, refreshAll]);
+  }, [loadStatus, refreshAll]);
 
   const runAction = async (actionName: ServiceAction, successText: string) => {
     setServiceAction(actionName);
@@ -240,23 +204,6 @@ export default function TelemtPage() {
       }
     } finally {
       setServiceAction(null);
-    }
-  };
-
-  const saveMeko = async (next: MekoConfig, successText = 'Настройки MEKO V3 применены') => {
-    setMekoSaving(true);
-    try {
-      const r = await HttpUtil.post<MekoConfig>('/panel/api/telemt/meko/config', next, jsonOptions);
-      if (r?.success && r.obj) {
-        setMekoConfig({ ...defaultMeko, ...r.obj });
-        message.success(successText);
-        await loadStatus();
-      } else {
-        message.error(r?.msg || 'Не удалось применить MEKO V3');
-        await loadMeko();
-      }
-    } finally {
-      setMekoSaving(false);
     }
   };
 
@@ -379,10 +326,6 @@ export default function TelemtPage() {
       ? 'Работает'
       : 'Остановлен';
 
-  const mekoPorts = mekoConfig.ports.length > 0 ? mekoConfig.ports.join(', ') : 'нет активных';
-  const mekoAppliedPorts =
-    mekoConfig.appliedPorts.length > 0 ? mekoConfig.appliedPorts.join(', ') : 'нет';
-
   return (
     <ConfigProvider theme={antdThemeConfig}>
       <Layout className="page-layout telemt-page">
@@ -482,34 +425,6 @@ export default function TelemtPage() {
                           </Typography.Title>
                           <Typography.Text type="secondary">
                             Порт {configuredPort || defaults.port}
-                          </Typography.Text>
-                        </div>
-                      </Col>
-                      <Col xs={24} md={8}>
-                        <div className="telemt-metric">
-                          <Typography.Text type="secondary">MEKO V3</Typography.Text>
-                          <Typography.Title level={4}>
-                            <Space size={8}>
-                              <Switch
-                                checked={mekoConfig.enabled}
-                                disabled={!status.installed || mekoSaving}
-                                loading={mekoSaving}
-                                onChange={(checked) =>
-                                  void saveMeko(
-                                    { ...mekoConfig, enabled: checked },
-                                    checked ? 'MEKO V3 включён' : 'MEKO V3 выключен',
-                                  )
-                                }
-                              />
-                              {mekoConfig.enabled && (
-                                <Tag color={mekoConfig.applied ? 'green' : 'gold'}>
-                                  {mekoConfig.applied ? 'Применён' : 'Ожидает порт'}
-                                </Tag>
-                              )}
-                            </Space>
-                          </Typography.Title>
-                          <Typography.Text type="secondary">
-                            Все MTProto Telemt-порты: {mekoPorts}.
                           </Typography.Text>
                         </div>
                       </Col>
@@ -888,111 +803,6 @@ export default function TelemtPage() {
                           </Typography.Text>
                         </Space>
                       </Form>
-                    ),
-                  },
-                  {
-                    key: 'meko',
-                    label: (
-                      <Space>
-                        <SafetyCertificateOutlined />
-                        MEKO V3 / Proxy Fix
-                        {mekoConfig.enabled && (
-                          <Tag color={mekoConfig.applied ? 'green' : 'gold'}>
-                            {mekoConfig.applied ? 'активен' : 'ожидает inbound'}
-                          </Tag>
-                        )}
-                      </Space>
-                    ),
-                    children: (
-                      <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                        <Alert
-                          type="info"
-                          showIcon
-                          message="MEKO V3 применяется ко всем MTProto-inbound на Telemt"
-                          description="3X-UI автоматически обновляет отдельные firewall-цепочки при добавлении, удалении или смене порта MTProto. Чужие iptables-правила не очищаются."
-                        />
-                        <Descriptions size="small" bordered column={{ xs: 1, sm: 2, md: 4 }}>
-                          <Descriptions.Item label="Fingerprint">
-                            {mekoConfig.fingerprint || 'MEKO V3/u32'}
-                          </Descriptions.Item>
-                          <Descriptions.Item label="MARK">
-                            {mekoConfig.mark || '0x400'}
-                          </Descriptions.Item>
-                          <Descriptions.Item label="Найденные порты">{mekoPorts}</Descriptions.Item>
-                          <Descriptions.Item label="Защищённые порты">
-                            {mekoAppliedPorts}
-                          </Descriptions.Item>
-                        </Descriptions>
-                        {mekoConfig.enabled && mekoConfig.ports.length === 0 && (
-                          <Alert
-                            type="warning"
-                            showIcon
-                            message="Нет активных MTProto Telemt-inbound"
-                            description="Фикс включён и будет применён автоматически, как только появится активный MTProto-inbound."
-                          />
-                        )}
-                        <Row gutter={16}>
-                          <Col xs={24} md={8}>
-                            <Typography.Text>SYN на IP в минуту</Typography.Text>
-                            <InputNumber
-                              min={1}
-                              max={60000}
-                              value={mekoConfig.ratePerMinute}
-                              disabled={mekoSaving}
-                              style={{ width: '100%', marginTop: 6 }}
-                              onChange={(value) =>
-                                setMekoConfig((current) => ({
-                                  ...current,
-                                  ratePerMinute: value ?? defaultMeko.ratePerMinute,
-                                }))
-                              }
-                            />
-                          </Col>
-                          <Col xs={24} md={8}>
-                            <Typography.Text>Burst</Typography.Text>
-                            <InputNumber
-                              min={1}
-                              max={1000}
-                              value={mekoConfig.burst}
-                              disabled={mekoSaving}
-                              style={{ width: '100%', marginTop: 6 }}
-                              onChange={(value) =>
-                                setMekoConfig((current) => ({
-                                  ...current,
-                                  burst: value ?? defaultMeko.burst,
-                                }))
-                              }
-                            />
-                          </Col>
-                          <Col xs={24} md={8}>
-                            <Typography.Text>Включён</Typography.Text>
-                            <div style={{ marginTop: 10 }}>
-                              <Switch
-                                checked={mekoConfig.enabled}
-                                loading={mekoSaving}
-                                disabled={!status.installed || mekoSaving}
-                                onChange={(enabled) =>
-                                  setMekoConfig((current) => ({ ...current, enabled }))
-                                }
-                              />
-                            </div>
-                          </Col>
-                        </Row>
-                        <Space wrap>
-                          <Button
-                            type="primary"
-                            loading={mekoSaving}
-                            disabled={!status.installed || mekoSaving}
-                            onClick={() => void saveMeko(mekoConfig)}
-                          >
-                            Сохранить и применить MEKO V3
-                          </Button>
-                          <Typography.Text type="secondary">
-                            По умолчанию: 54 SYN/min/IP, burst 1. Изменения применяются только к
-                            цепочкам TELEMT_MEKO и TELEMT_MEKO_MARK.
-                          </Typography.Text>
-                        </Space>
-                      </Space>
                     ),
                   },
                 ]}

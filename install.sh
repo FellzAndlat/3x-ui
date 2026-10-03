@@ -91,29 +91,29 @@ is_port_in_use() {
 install_base() {
     case "${release}" in
         ubuntu | debian | armbian)
-            apt-get update && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl iproute2 iptables
+            apt-get update && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl iproute2 iptables nftables util-linux
             ;;
         fedora | amzn | virtuozzo | rhel | almalinux | rocky | ol)
-            dnf makecache -y && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables
+            dnf makecache -y && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables nftables util-linux
             ;;
         centos)
             if [[ "${VERSION_ID}" =~ ^7 ]]; then
-                yum makecache -y && yum install -y cronie curl tar tzdata socat ca-certificates openssl iproute iptables
+                yum makecache -y && yum install -y cronie curl tar tzdata socat ca-certificates openssl iproute iptables nftables util-linux
             else
-                dnf makecache -y && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables
+                dnf makecache -y && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables nftables util-linux
             fi
             ;;
         arch | manjaro | parch)
-            pacman -Syu --noconfirm --needed cronie curl tar tzdata socat ca-certificates openssl iproute2 iptables
+            pacman -Syu --noconfirm --needed cronie curl tar tzdata socat ca-certificates openssl iproute2 iptables nftables util-linux
             ;;
         opensuse-tumbleweed | opensuse-leap)
-            zypper refresh && zypper -q install -y cron curl tar timezone socat ca-certificates openssl iproute2 iptables
+            zypper refresh && zypper -q install -y cron curl tar timezone socat ca-certificates openssl iproute2 iptables nftables util-linux
             ;;
         alpine)
-            apk update && apk add dcron curl tar tzdata socat ca-certificates openssl iproute2 iptables
+            apk update && apk add dcron curl tar tzdata socat ca-certificates openssl iproute2 iptables nftables util-linux
             ;;
         *)
-            apt-get update && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl iproute2 iptables
+            apt-get update && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl iproute2 iptables nftables util-linux
             ;;
     esac
 }
@@ -1593,12 +1593,12 @@ install_x-ui() {
         # Kill any leftover mtg (MTProto) sidecars. x-ui runs them outside its own
         # lifecycle, so on Linux a stale one can survive the stop and keep holding
         # an inbound port with an outdated secret, silently breaking new clients.
-        # The freshly installed panel respawns a clean mtg per inbound on start.
+        # The new panel replaces legacy mtg sidecars with Telemt on start.
         pkill -f 'mtg-linux-[^ ]* run ' > /dev/null 2>&1 || true
         pkill -f 'tuic-server.*-c .*bin/tuic/tuic_[0-9]+\.json' > /dev/null 2>&1 || true
 
         # bin/ is about to be wiped wholesale by the tar extraction below. The
-        # release only ships known assets (xray/mtg binaries, the bundled
+        # release only ships known assets (xray/telemt binaries, the bundled
         # geoip*/geosite*.dat sets) -- anything else in bin/ was placed there
         # by the admin (e.g. a hand-added custom geoip/geosite file referenced
         # from a routing rule via "ext:<file>:<code>") and would otherwise be
@@ -1672,9 +1672,9 @@ install_x-ui() {
             systemctl enable --now telemt-update.timer 2> /dev/null || true
         fi
 
-        # Install the optional MEKO V3 TCP fix for Telemt. The service is tied
-        # to telemt.service and applies the firewall rules only while Telemt
-        # is running. It is deliberately non-fatal when xt_u32 is unavailable.
+        # Install the automatic MEKO V3 helper for active MTProto sidecars.
+        # The panel initializes its state and starts it when ports appear.
+        # nftables is preferred; IPv4 iptables remains a fallback.
         if [[ -f telemt-meko-fix.sh && -f telemt-meko-fix.service ]]; then
             install -m 0755 -o root -g root telemt-meko-fix.sh "${xui_folder}/telemt-meko-fix.sh"
             install -m 0644 -o root -g root telemt-meko-fix.service "${xui_service}/telemt-meko-fix.service"
@@ -1696,11 +1696,6 @@ install_x-ui() {
 
     # Check the system's architecture and rename the file accordingly.
     chmod +x x-ui bin/xray-linux-$(arch)
-    if [[ -f bin/mtg-linux-arm ]]; then
-        chmod +x bin/mtg-linux-arm
-    elif [[ -f bin/mtg-linux-$(arch) ]]; then
-        chmod +x bin/mtg-linux-$(arch)
-    fi
     [[ -f bin/pingtunnel ]] && chmod 0755 bin/pingtunnel
     [[ -f bin/trusttunnel_endpoint ]] && chmod 0755 bin/trusttunnel_endpoint
     if [[ -f bin/tuic-server ]]; then
@@ -1715,19 +1710,19 @@ install_x-ui() {
     # there) -- never overwrites a same-named file the new release provides,
     # so bundled assets (geoip.dat, geoip_RU.dat, ...) still get the fresh
     # per-release copy. Runs after the arch-rename above so xray-linux-arm32/
-    # mtg-linux-arm already exist under their final names there and aren't
+    # telemt already exist under their final names there and aren't
     # mistaken for custom files needing a restore. Skips paths the panel
     # itself regenerates at runtime (config.json, mtproto/*.toml -- see
     # internal/xray/process.go, internal/mtproto/manager.go): those aren't
     # admin-placed, and restoring a stale one only resurrects dead state (an
-    # orphaned mtg config for a since-deleted inbound) or the wrong
+    # orphaned Telemt config for a since-deleted inbound) or the wrong
     # directory permissions.
     if [[ -n "${custom_bin_backup}" ]]; then
         local restored_custom_bin=()
         while IFS= read -r -d '' f; do
             local rel="${f#"${custom_bin_backup}"/}"
             case "${rel}" in
-                config.json | mtproto | mtproto/* | tuic | tuic/* | mieru | mieru/*) continue ;;
+                config.json | mtg-linux-* | mtproto | mtproto/* | tuic | tuic/* | mieru | mieru/*) continue ;;
             esac
             if [[ ! -e "bin/${rel}" ]]; then
                 mkdir -p "bin/$(dirname "${rel}")"

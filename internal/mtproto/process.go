@@ -164,8 +164,11 @@ func (p *Process) wait(cmd *exec.Cmd, done chan struct{}) {
 	defer close(done)
 	err := cmd.Wait()
 	p.logWriter.Flush()
-	if err == nil || p.intentionalStop.Load() {
+	if p.intentionalStop.Load() {
 		return
+	}
+	if err == nil {
+		err = errors.New("telemt exited unexpectedly with status 0")
 	}
 	logger.Errorf("mtproto: telemt process exited: %v", err)
 	p.setExitErr(err)

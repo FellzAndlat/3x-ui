@@ -185,29 +185,29 @@ install_base() {
     echo -e "${green}Updating and install dependency packages...${plain}"
     case "${release}" in
         ubuntu | debian | armbian)
-            apt-get update > /dev/null 2>&1 && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl iproute2 iptables > /dev/null 2>&1
+            apt-get update > /dev/null 2>&1 && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl iproute2 iptables nftables util-linux > /dev/null 2>&1
             ;;
         fedora | amzn | virtuozzo | rhel | almalinux | rocky | ol)
-            dnf makecache -y > /dev/null 2>&1 && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables > /dev/null 2>&1
+            dnf makecache -y > /dev/null 2>&1 && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables nftables util-linux > /dev/null 2>&1
             ;;
         centos)
             if [[ "${VERSION_ID}" =~ ^7 ]]; then
-                yum makecache -y > /dev/null 2>&1 && yum install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables > /dev/null 2>&1
+                yum makecache -y > /dev/null 2>&1 && yum install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables nftables util-linux > /dev/null 2>&1
             else
-                dnf makecache -y > /dev/null 2>&1 && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables > /dev/null 2>&1
+                dnf makecache -y > /dev/null 2>&1 && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl iproute iptables nftables util-linux > /dev/null 2>&1
             fi
             ;;
         arch | manjaro | parch)
-            pacman -Sy --noconfirm cronie curl tar tzdata socat ca-certificates openssl iproute2 iptables > /dev/null 2>&1
+            pacman -Sy --noconfirm cronie curl tar tzdata socat ca-certificates openssl iproute2 iptables nftables util-linux > /dev/null 2>&1
             ;;
         opensuse-tumbleweed | opensuse-leap)
-            zypper refresh > /dev/null 2>&1 && zypper -q install -y cron curl tar timezone socat ca-certificates openssl iproute2 iptables > /dev/null 2>&1
+            zypper refresh > /dev/null 2>&1 && zypper -q install -y cron curl tar timezone socat ca-certificates openssl iproute2 iptables nftables util-linux > /dev/null 2>&1
             ;;
         alpine)
-            apk update > /dev/null 2>&1 && apk add dcron curl tar tzdata socat ca-certificates openssl iproute2 iptables > /dev/null 2>&1
+            apk update > /dev/null 2>&1 && apk add dcron curl tar tzdata socat ca-certificates openssl iproute2 iptables nftables util-linux > /dev/null 2>&1
             ;;
         *)
-            apt-get update > /dev/null 2>&1 && apt install -y -q cron curl tar tzdata socat ca-certificates openssl iproute2 iptables > /dev/null 2>&1
+            apt-get update > /dev/null 2>&1 && apt install -y -q cron curl tar tzdata socat ca-certificates openssl iproute2 iptables nftables util-linux > /dev/null 2>&1
             ;;
     esac
 }
@@ -1154,7 +1154,7 @@ update_x-ui() {
         # Kill any leftover mtg (MTProto) sidecars. x-ui runs them outside its own
         # lifecycle, so on Linux a stale one can survive the stop and keep holding
         # an inbound port with an outdated secret, silently breaking new clients.
-        # The new panel respawns a clean mtg per inbound on next start.
+        # The new panel replaces legacy mtg sidecars with Telemt on start.
         pkill -f 'mtg-linux-[^ ]* run ' > /dev/null 2>&1 || true
         pkill -f 'tuic-server.*-c .*bin/tuic/tuic_[0-9]+\.json' > /dev/null 2>&1 || true
         echo -e "${green}Removing old x-ui version...${plain}"
@@ -1190,21 +1190,23 @@ update_x-ui() {
 
     # Check the system's architecture and rename the file accordingly.
     # The panel binary maps GOARCH=arm to "arm32" (internal/xray/process.go),
-    # so the Xray binary must be named xray-linux-arm32; mtg keeps plain "arm".
+    # so the Xray binary must be named xray-linux-arm32.
     if [[ ${machine_arch} == "armv5" || ${machine_arch} == "armv6" || ${machine_arch} == "armv7" ]]; then
         mv "bin/xray-linux-${machine_arch}" bin/xray-linux-arm32 > /dev/null 2>&1
         chmod +x bin/xray-linux-arm32 > /dev/null 2>&1
-        if [[ -f "bin/mtg-linux-${machine_arch}" ]]; then
-            mv "bin/mtg-linux-${machine_arch}" bin/mtg-linux-arm > /dev/null 2>&1
-            chmod +x bin/mtg-linux-arm > /dev/null 2>&1
-        fi
     fi
 
     chmod +x x-ui "bin/xray-linux-${machine_arch}" > /dev/null 2>&1
-    if [[ -f bin/mtg-linux-arm ]]; then
-        chmod +x bin/mtg-linux-arm > /dev/null 2>&1
-    elif [[ -f "bin/mtg-linux-${machine_arch}" ]]; then
-        chmod +x "bin/mtg-linux-${machine_arch}" > /dev/null 2>&1
+    [[ -f bin/telemt ]] && chmod 0755 bin/telemt
+    [[ -f telemt-meko-fix.sh ]] && chmod 0755 telemt-meko-fix.sh
+    [[ -f telemt-update.sh ]] && chmod 0755 telemt-update.sh
+    # Replace managed units on upgrades while preserving the user's settings.
+    # Standalone telemt.service remains opt-in; MTProto inbounds run as sidecars.
+    if [[ $release != "alpine" ]]; then
+        for unit in telemt.service telemt-meko-fix.service telemt-update.service telemt-update.timer; do
+            [[ ! -f "$unit" ]] || install -m 0644 "$unit" "${xui_service}/$unit"
+        done
+        systemctl daemon-reload > /dev/null 2>&1
     fi
     [[ -f bin/pingtunnel ]] && chmod 0755 bin/pingtunnel
     [[ -f bin/trusttunnel_endpoint ]] && chmod 0755 bin/trusttunnel_endpoint

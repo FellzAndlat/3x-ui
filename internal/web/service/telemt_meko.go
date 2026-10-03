@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -34,6 +36,7 @@ type TelemtMekoConfig struct {
 
 func defaultTelemtMekoConfig() TelemtMekoConfig {
 	return TelemtMekoConfig{
+		Enabled:       runtime.GOOS == "linux",
 		RatePerMinute: 54,
 		Burst:         1,
 		Fingerprint:   "MEKO V3/u32",
@@ -165,7 +168,9 @@ func runTelemtMekoScript(action string, cfg TelemtMekoConfig) ([]byte, error) {
 	if _, err := os.Stat(telemtMekoScriptPath); err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(context.Background(), telemtMekoScriptPath, action)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, telemtMekoScriptPath, action)
 	cmd.Env = append(os.Environ(), mekoEnv(cfg)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -338,11 +343,22 @@ func (TelemtService) RefreshMekoFix() error {
 		}
 		return nil
 	}
-	if cfg.Applied && sameMekoPorts(cfg.Ports, cfg.AppliedPorts) {
+	if !cfg.Applied && len(cfg.Ports) == 0 {
 		return nil
 	}
 	if err := ensureTelemtMekoAssets(); err != nil {
 		return err
+	}
+	if _, err := os.Stat(telemtMekoEnvPath); errors.Is(err, os.ErrNotExist) {
+		if err := writeTelemtMekoEnv(cfg); err != nil {
+			return err
+		}
+		if err := systemctl("enable", "--now", telemtMekoServiceName); err != nil {
+			return err
+		}
+	}
+	if cfg.Applied && sameMekoPorts(cfg.Ports, cfg.AppliedPorts) {
+		return nil
 	}
 	_, err := runTelemtMekoScript("apply", cfg)
 	return err

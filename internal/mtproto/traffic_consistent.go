@@ -51,11 +51,12 @@ func (m *Manager) CollectTrafficConsistent() ([]Traffic, []string) {
 	defer consistentTrafficCollectMu.Unlock()
 
 	type snap struct {
-		id       int
-		apiPort  int
-		apiToken string
-		owner    *managed
-		last     map[string]clientCounters
+		id         int
+		apiPort    int
+		apiToken   string
+		owner      *managed
+		last       map[string]clientCounters
+		userEmails map[string]string
 	}
 
 	m.mu.Lock()
@@ -67,11 +68,12 @@ func (m *Manager) CollectTrafficConsistent() ([]Traffic, []string) {
 		lastCopy := make(map[string]clientCounters, len(cur.last))
 		maps.Copy(lastCopy, cur.last)
 		snaps = append(snaps, snap{
-			id:       id,
-			apiPort:  cur.apiPort,
-			apiToken: cur.apiToken,
-			owner:    cur,
-			last:     lastCopy,
+			id:         id,
+			apiPort:    cur.apiPort,
+			apiToken:   cur.apiToken,
+			owner:      cur,
+			last:       lastCopy,
+			userEmails: maps.Clone(cur.userEmails),
 		})
 	}
 	m.mu.Unlock()
@@ -97,11 +99,13 @@ func (m *Manager) CollectTrafficConsistent() ([]Traffic, []string) {
 		tag := cur.tag
 		m.mu.Unlock()
 
-		online = append(online, instanceOnline...)
+		for _, name := range instanceOnline {
+			online = append(online, panelUsername(name, s.userEmails))
+		}
 		for email, delta := range deltas {
 			out = append(out, Traffic{
 				Tag:   tag,
-				Email: email,
+				Email: panelUsername(email, s.userEmails),
 				Up:    delta.up,
 				Down:  delta.down,
 			})

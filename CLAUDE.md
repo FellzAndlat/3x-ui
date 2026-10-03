@@ -11,19 +11,11 @@ file locations when it can answer in one hop.
 - Backend: Go 1.27 (`module github.com/SawaMEN/3x-ui/v3`), Gin, GORM.
   Runs Xray-core as a managed child process (`internal/xray/process.go`) and
   imports `github.com/xtls/xray-core` for config types + gRPC stats/handler/router
-  API. MTProto inbounds run a second managed child — the `mtg-multi` binary
-  (a multi-secret mtg fork — NOT a Go dependency; its prebuilt release binary is
-  fetched at image/release build time by `DockerInit.sh` + `release.yml`,
-  panel-side code in `internal/mtproto/`) — outside Xray, one process per inbound
-  serving each
-  client's FakeTLS secret via the fork's `[secrets]` section (plus per-client
-  ad-tags via `[secret-ad-tags]` and per-client data quota / expiry via
-  `[secret-limits]`, mapped from the client's `totalGB`/`expiryTime`). Client,
-  ad-tag and quota/expiry edits are hot-applied through the fork's management API
-  (`PUT /secrets`, bearer-token guarded) so connections survive; the manager
-  falls back to a process restart on older binaries. A client's panel-side
-  traffic reset also calls `POST /secrets/{name}/reset-quota` so a renewed client
-  is not re-blocked by the sidecar's quota counter.
+  API. MTProto inbounds use a managed Telemt sidecar per inbound
+  (`internal/mtproto/`). The panel renders native TOML (`[access.users]`,
+  `[access.user_ad_tags]`, quotas and expirations) and applies user updates through
+  `POST /v1/system/reload`, polling reload completion before restart fallback.
+  Traffic resets call `POST /v1/users/{name}/reset-quota`.
 - Storage: SQLite by default (`/etc/x-ui/x-ui.db` on Linux; the executable dir on
   Windows), PostgreSQL optional (`XUI_DB_TYPE` / `XUI_DB_DSN`). The CGo SQLite
   driver (`mattn/go-sqlite3`) needs a C compiler — `CGO_ENABLED=0` builds fail.
@@ -40,7 +32,7 @@ file locations when it can answer in one hop.
 - `internal/xray/` — Xray child-process lifecycle, config generation, gRPC API.
 - `internal/xray/geodata/` — streaming geosite/geoip `.dat` reader (cached
   category index + paged entries) and `geosite:`/`geoip:`/`ext:` token parsing.
-- `internal/mtproto/` — MTProto inbounds via the bundled `mtg-multi` binary.
+- `internal/mtproto/` — MTProto inbounds via the bundled `telemt` binary.
 - `internal/tuic/` — TUIC v5 inbounds: `tuic-server` sidecar supervisor, native Go UDP relay traffic metering.
 - `internal/amneziawg/` — AmneziaWG protocol shape: instance/peer derivation
   from an inbound, 3.1 obfuscation param generation + validation, port-forward

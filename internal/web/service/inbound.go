@@ -1086,6 +1086,9 @@ func (s *InboundService) normalizeMtprotoXrayPort(inbound *model.Inbound, oldSet
 	if inbound.Protocol != model.MTProto {
 		return nil
 	}
+	if err := mtproto.ValidateSettings(inbound.Settings); err != nil {
+		return err
+	}
 	var parsed map[string]any
 	if err := json.Unmarshal([]byte(inbound.Settings), &parsed); err != nil || parsed == nil {
 		return nil

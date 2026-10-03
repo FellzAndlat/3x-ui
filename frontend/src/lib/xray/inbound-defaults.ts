@@ -258,6 +258,10 @@ export function generateMtprotoSecret(domain: string): string {
 export function createDefaultMtprotoInboundSettings(): MtprotoInboundSettings {
   return {
     fakeTlsDomain: 'www.cloudflare.com',
+    tlsMask: true,
+    allowLegacyModes: false,
+    tlsEmulation: true,
+    unknownSniAction: 'mask',
     clients: [],
   };
 }

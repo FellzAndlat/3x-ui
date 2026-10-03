@@ -22,11 +22,10 @@ question it already answers.
   stats/handler/router API. The release the panel BUNDLES is pinned in
   `DockerInit.sh`; the version it COMPILES against is pinned in `go.mod`, and
   the two are not always the same.
-- MTProto inbounds run a SECOND managed child, the `mtg-multi` binary (a
-  multi-secret mtg fork, panel-side code in `internal/mtproto/`), one process
-  per inbound. Client, ad-tag and quota/expiry edits are hot-applied through the
-  fork's management API (`PUT /secrets`) so connections survive, with a process
-  restart as the fallback on older binaries.
+- MTProto inbounds run a managed `telemt` child per inbound
+  (`internal/mtproto/`). Native TOML and the authenticated
+  `POST /v1/system/reload` API control users, sponsor tags, quotas and expiry.
+  The manager waits for reload activation before falling back to a restart.
 - AmneziaWG inbounds run IN-PROCESS, not as a child: `internal/amneziawgnet/`
   drives an amneziawg-go device over a gVisor userspace netstack and relays into a
   loopback SOCKS5 Xray inbound. `internal/amneziawg/` derives the instance and
@@ -131,10 +130,10 @@ configs for the same inbound.
 - **amnezia-vpn/amneziawg-go** — the obfuscation parameters the panel generates
   (`Jc`/`Jmin`/`Jmax`, `S1`-`S4`, `H1`-`H4`, `I1`-`I5`). Its `device/uapi.go` is the
   symbol that decides which keys are accepted.
-- **mhsanaei/mtg-multi** — the MTProto sidecar whose TOML (`[secrets]`,
-  `[secret-ad-tags]`, `[secret-limits]`) and management API
-  (`PUT /secrets`, `POST /secrets/{name}/reset-quota`) `internal/mtproto/`
-  writes and calls.
+- **telemt/telemt** — the MTProto sidecar whose native TOML
+  (`[access.users]`, `[access.user_ad_tags]`, quotas and expirations) and API
+  (`POST /v1/system/reload`, `POST /v1/users/{name}/reset-quota`)
+  `internal/mtproto/` writes and calls.
 
 ## What CI runs
 

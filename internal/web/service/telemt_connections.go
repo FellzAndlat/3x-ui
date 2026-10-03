@@ -194,7 +194,7 @@ func refreshTelemtConnectionSnapshot() error {
 }
 
 func fetchTelemtUserStats(client *http.Client) ([]telemtUserStats, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://127.0.0.1:9091/v1/users", nil)
+	req, err := telemtAPIRequest(http.MethodGet, "/v1/users")
 	if err != nil {
 		return nil, fmt.Errorf("telemt: create users request: %w", err)
 	}

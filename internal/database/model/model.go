@@ -618,8 +618,8 @@ func HealShadowsocksClientMethods(settings string) (string, bool) {
 
 // GenerateFakeTLSSecret builds an MTProto FakeTLS secret for the given domain:
 // the "ee" FakeTLS marker, 16 random bytes, then the domain encoded as hex.
-// MTProto is multi-client, so this value belongs to one client: mtg's [secrets]
-// config and that client's tg:// link both read it per client.
+// MTProto is multi-client; the panel keeps the link secret per client and
+// normalizes its raw 16-byte portion into Telemt's [access.users] config.
 func GenerateFakeTLSSecret(domain string) string {
 	return "ee" + mtprotoRandomMiddle() + hex.EncodeToString([]byte(domain))
 }
@@ -636,7 +636,7 @@ func mtprotoRandomMiddle() string {
 // when it is well-formed, otherwise a freshly generated one. Reusing the middle
 // keeps the secret stable when only the FakeTLS domain changes.
 func mtprotoSecretMiddle(secret string) string {
-	s := secret
+	s := strings.ToLower(strings.TrimSpace(secret))
 	if strings.HasPrefix(s, "ee") || strings.HasPrefix(s, "dd") {
 		s = s[2:]
 	}
@@ -711,7 +711,7 @@ func StripMtprotoInboundAdTag(settings string) (string, bool) {
 // client carries its own domain inside its secret, so healing preserves it
 // instead of forcing every client onto the inbound-level default.
 func mtprotoSecretDomain(secret string) string {
-	s := secret
+	s := strings.ToLower(strings.TrimSpace(secret))
 	if strings.HasPrefix(s, "ee") || strings.HasPrefix(s, "dd") {
 		s = s[2:]
 	}

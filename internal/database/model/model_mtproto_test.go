@@ -25,6 +25,15 @@ func TestGenerateFakeTLSSecret(t *testing.T) {
 	}
 }
 
+func TestHealUppercaseMtprotoSecretPreservesKey(t *testing.T) {
+	raw := "0123456789ABCDEF0123456789ABCDEF"
+	in := `{"fakeTlsDomain":"new.example.com","clients":[{"secret":"EE` + raw + `6578616D706C652E636F6D"}]}`
+	out, changed := HealMtprotoClientSecrets(in)
+	if !changed || !strings.Contains(out, "ee0123456789abcdef0123456789abcdef6578616d706c652e636f6d") {
+		t.Fatalf("normalization must preserve both the original key and SNI: %s", out)
+	}
+}
+
 func TestStripMtprotoInboundAdTag(t *testing.T) {
 	in := `{"adTag":"0123456789abcdef0123456789abcdef","clients":[{"email":"a","adTag":"fedcba9876543210fedcba9876543210"}]}`
 	out, changed := StripMtprotoInboundAdTag(in)

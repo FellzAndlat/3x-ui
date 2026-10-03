@@ -1,4 +1,4 @@
-# Telemt — optional standalone MTProto proxy alongside the built-in mtg implementation.
+# Telemt — optional standalone proxy alongside panel-managed Telemt inbounds.
 # The example follows the Telemt 3.5.7 configuration schema.
 #
 # Before starting the service:
@@ -36,6 +36,12 @@ ip = "0.0.0.0"
 
 [[server.listeners]]
 ip = "::"
+
+[censorship]
+tls_domain = "www.cloudflare.com"
+mask = true
+tls_emulation = true
+unknown_sni_action = "mask"
 
 [access]
 replay_check_len = 65536

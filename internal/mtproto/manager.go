@@ -38,18 +38,24 @@ type Instance struct {
 	Port    int
 	Secrets []SecretEntry
 
-	Debug                  bool
-	ProxyProtocolListener  bool
-	PreferIP               string
-	FrontingIP             string
-	FrontingPort           int
-	FrontingProxyProtocol  bool
-	ThrottleMaxConnections int
-	PublicIPv4             string
-	PublicIPv6             string
-	RouteThroughXray       bool
-	XrayRoutePort          int
-	FakeTLSDomain          string
+	Debug                     bool
+	ProxyProtocolListener     bool
+	PreferIP                  string
+	ThrottleMaxConnections    int
+	PublicIPv4                string
+	PublicIPv6                string
+	RouteThroughXray          bool
+	XrayRoutePort             int
+	FakeTLSDomain             string
+	FakeTLSDomains            []string
+	TLSMask                   *bool
+	AllowLegacyModes          *bool
+	TLSEmulation              *bool
+	UnknownSNIAction          string
+	ProxyProtocolTrustedCIDRs []string
+	MaskHost                  string
+	MaskPort                  int
+	MaskProxyProtocol         int
 }
 
 func (inst Instance) bindTo() string {
@@ -72,6 +78,16 @@ func (inst Instance) structuralFingerprint() string {
 		inst.PublicIPv4,
 		inst.PublicIPv6,
 		inst.FakeTLSDomain,
+		strings.Join(inst.FakeTLSDomains, ","),
+		strconv.FormatBool(inst.maskEnabled()),
+		strconv.FormatBool(inst.emulationEnabled()),
+		strconv.FormatBool(inst.legacyModesEnabled()),
+		inst.sniAction(),
+		strconv.FormatBool(inst.useMiddleProxy()),
+		strings.Join(inst.ProxyProtocolTrustedCIDRs, ","),
+		inst.MaskHost,
+		strconv.Itoa(inst.MaskPort),
+		strconv.Itoa(inst.MaskProxyProtocol),
 	}, "|")
 }
 
@@ -114,6 +130,7 @@ type managed struct {
 	apiPort      int
 	apiToken     string
 	last         map[string]clientCounters
+	userEmails   map[string]string
 }
 
 type Manager struct {
@@ -137,7 +154,7 @@ func GetManager() *Manager {
 // decodeLegacySecret converts a Telegram-link MTProxy secret to Telemt's raw
 // 32-hex user secret and recovers the FakeTLS host embedded after an ee secret.
 func decodeLegacySecret(secret string) (raw, domain string) {
-	s := strings.TrimSpace(secret)
+	s := strings.ToLower(strings.TrimSpace(secret))
 	if len(s) >= 34 && (strings.HasPrefix(s, "ee") || strings.HasPrefix(s, "dd")) {
 		raw = s[2:34]
 		if strings.HasPrefix(s, "ee") && len(s) > 34 {
@@ -166,10 +183,18 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 		return Instance{}, false
 	}
 	var parsed struct {
-		ProxyProtocolListener bool   `json:"proxyProtocolListener"`
-		Debug                 bool   `json:"debug"`
-		FakeTLSDomain         string `json:"fakeTlsDomain"`
-		DomainFronting        struct {
+		ProxyProtocolListener     bool     `json:"proxyProtocolListener"`
+		Debug                     bool     `json:"debug"`
+		FakeTLSDomain             string   `json:"fakeTlsDomain"`
+		TLSMask                   *bool    `json:"tlsMask"`
+		AllowLegacyModes          *bool    `json:"allowLegacyModes"`
+		TLSEmulation              *bool    `json:"tlsEmulation"`
+		UnknownSNIAction          string   `json:"unknownSniAction"`
+		ProxyProtocolTrustedCIDRs []string `json:"proxyProtocolTrustedCidrs"`
+		MaskHost                  *string  `json:"maskHost"`
+		MaskPort                  int      `json:"maskPort"`
+		MaskProxyProtocol         int      `json:"maskProxyProtocol"`
+		DomainFronting            struct {
 			IP            string `json:"ip"`
 			Port          int    `json:"port"`
 			ProxyProtocol bool   `json:"proxyProtocol"`
@@ -195,6 +220,7 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 	}
 	secrets := make([]SecretEntry, 0, len(parsed.Clients))
 	domain := strings.TrimSpace(parsed.FakeTLSDomain)
+	domains := map[string]struct{}{}
 	for _, c := range parsed.Clients {
 		if !c.Enable || c.Secret == "" || c.Email == "" {
 			continue
@@ -205,6 +231,9 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 		}
 		if domain == "" && embeddedDomain != "" {
 			domain = embeddedDomain
+		}
+		if embeddedDomain != "" {
+			domains[strings.ToLower(embeddedDomain)] = struct{}{}
 		}
 		e := SecretEntry{Name: c.Email, Secret: raw, AdTag: usableAdTag(c.AdTag), LimitIP: max(c.LimitIP, 0)}
 		if c.TotalGB > 0 {
@@ -218,24 +247,54 @@ func InstanceFromInbound(ib *model.Inbound) (Instance, bool) {
 	if len(secrets) == 0 {
 		return Instance{}, false
 	}
+	// Keep the primary and additional SNI set stable across client reordering.
+	additionalDomains := slices.Sorted(maps.Keys(domains))
+	if domain == "" {
+		domain = "www.cloudflare.com"
+	} else if strings.TrimSpace(parsed.FakeTLSDomain) == "" && len(additionalDomains) > 0 {
+		domain = additionalDomains[0]
+	}
+	domain = strings.ToLower(domain)
+	additionalDomains = slices.DeleteFunc(additionalDomains, func(s string) bool { return s == domain })
+	maskHost, maskPort, maskProxy := "", parsed.MaskPort, parsed.MaskProxyProtocol
+	if parsed.MaskHost != nil {
+		maskHost = strings.TrimSpace(*parsed.MaskHost)
+	}
+	if parsed.MaskHost == nil && strings.TrimSpace(parsed.DomainFronting.IP) != "" {
+		maskHost, maskPort = strings.TrimSpace(parsed.DomainFronting.IP), parsed.DomainFronting.Port
+		if parsed.DomainFronting.ProxyProtocol {
+			maskProxy = 1
+		}
+	}
+	if maskPort <= 0 {
+		maskPort = 443
+	}
+	trusted := parsed.ProxyProtocolTrustedCIDRs
+	if trusted == nil {
+		trusted = []string{"127.0.0.0/8", "::1/128"}
+	}
 	return Instance{
-		Id:                     ib.Id,
-		Tag:                    ib.Tag,
-		Listen:                 ib.Listen,
-		Port:                   ib.Port,
-		Secrets:                secrets,
-		Debug:                  parsed.Debug,
-		ProxyProtocolListener:  parsed.ProxyProtocolListener,
-		PreferIP:               parsed.PreferIP,
-		FrontingIP:             parsed.DomainFronting.IP,
-		FrontingPort:           parsed.DomainFronting.Port,
-		FrontingProxyProtocol:  parsed.DomainFronting.ProxyProtocol,
-		ThrottleMaxConnections: parsed.ThrottleMaxConnections,
-		RouteThroughXray:       parsed.RouteThroughXray,
-		XrayRoutePort:          parsed.RouteXrayPort,
-		PublicIPv4:             strings.TrimSpace(parsed.PublicIPv4),
-		PublicIPv6:             strings.TrimSpace(parsed.PublicIPv6),
-		FakeTLSDomain:          domain,
+		Id:                        ib.Id,
+		Tag:                       ib.Tag,
+		Listen:                    ib.Listen,
+		Port:                      ib.Port,
+		Secrets:                   secrets,
+		Debug:                     parsed.Debug,
+		ProxyProtocolListener:     parsed.ProxyProtocolListener,
+		PreferIP:                  parsed.PreferIP,
+		ThrottleMaxConnections:    parsed.ThrottleMaxConnections,
+		RouteThroughXray:          parsed.RouteThroughXray,
+		XrayRoutePort:             parsed.RouteXrayPort,
+		PublicIPv4:                strings.TrimSpace(parsed.PublicIPv4),
+		PublicIPv6:                strings.TrimSpace(parsed.PublicIPv6),
+		FakeTLSDomain:             domain,
+		FakeTLSDomains:            additionalDomains,
+		TLSMask:                   parsed.TLSMask,
+		AllowLegacyModes:          parsed.AllowLegacyModes,
+		TLSEmulation:              parsed.TLSEmulation,
+		UnknownSNIAction:          parsed.UnknownSNIAction,
+		ProxyProtocolTrustedCIDRs: trusted,
+		MaskHost:                  maskHost, MaskPort: maskPort, MaskProxyProtocol: maskProxy,
 	}, true
 }
 
@@ -302,6 +361,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 		switch ensureActionFor(cur.proc.IsRunning(), cur.structuralFP, cur.secretsFP, structFP, secFP) {
 		case ensureNoop:
 			cur.tag = inst.Tag
+			cur.userEmails = nativeUserEmails(inst.Secrets)
 			return nil
 		case ensureReload:
 			if err := writeConfig(configPathForID(inst.Id), inst, cur.apiPort, cur.apiToken); err != nil {
@@ -310,6 +370,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 			if reloadTelemt(cur.apiPort, cur.apiToken) {
 				cur.tag = inst.Tag
 				cur.secretsFP = secFP
+				cur.userEmails = nativeUserEmails(inst.Secrets)
 				logger.Infof("mtproto: reloaded Telemt users for inbound %d", inst.Id)
 				return nil
 			}
@@ -347,6 +408,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 		apiPort:      apiPort,
 		apiToken:     apiToken,
 		last:         map[string]clientCounters{},
+		userEmails:   nativeUserEmails(inst.Secrets),
 	}
 	logger.Infof("mtproto: started Telemt for inbound %d on %s", inst.Id, inst.bindTo())
 	return nil
@@ -442,53 +504,7 @@ func (m *Manager) StopAll() {
 }
 
 func (m *Manager) CollectTraffic() ([]Traffic, []string) {
-	type snap struct {
-		id       int
-		apiPort  int
-		apiToken string
-		tag      string
-		last     map[string]clientCounters
-	}
-	m.mu.Lock()
-	snaps := make([]snap, 0, len(m.procs))
-	for id, cur := range m.procs {
-		if cur.proc == nil || !cur.proc.IsRunning() {
-			continue
-		}
-		cp := make(map[string]clientCounters, len(cur.last))
-		maps.Copy(cp, cur.last)
-		snaps = append(snaps, snap{id: id, apiPort: cur.apiPort, apiToken: cur.apiToken, tag: cur.tag, last: cp})
-	}
-	m.mu.Unlock()
-
-	var out []Traffic
-	var online []string
-	for _, s := range snaps {
-		users, ok := scrapeStats(s.apiPort, s.apiToken)
-		if !ok {
-			continue
-		}
-		next := make(map[string]clientCounters, len(users))
-		for email, u := range users {
-			total := u.TotalOctets
-			next[email] = clientCounters{down: total}
-			if u.CurrentConnections > 0 {
-				online = append(online, email)
-			}
-			if prev, had := s.last[email]; had {
-				d := monotonicCounterDelta(total, prev.down)
-				if d > 0 {
-					out = append(out, Traffic{Tag: s.tag, Email: email, Down: d})
-				}
-			}
-		}
-		m.mu.Lock()
-		if cur, ok := m.procs[s.id]; ok {
-			cur.last = next
-		}
-		m.mu.Unlock()
-	}
-	return out, online
+	return m.CollectTrafficConsistent()
 }
 
 func (m *Manager) HasRunning() bool {
@@ -524,7 +540,7 @@ func (m *Manager) ResetQuota(email string) {
 }
 
 func resetQuota(port int, token, email string) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/v1/users/%s/reset-quota", port, url.PathEscape(email)), nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/v1/users/%s/reset-quota", port, url.PathEscape(nativeUsername(email))), nil)
 	if err != nil {
 		return
 	}
@@ -562,7 +578,7 @@ func networkOptions(preferIP string) (ipv4, ipv6 bool, prefer int) {
 func validAnnounceIP(value string, wantV6 bool) string {
 	value = strings.Trim(strings.TrimSpace(value), "[]")
 	ip := net.ParseIP(value)
-	if ip == nil {
+	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
 		return ""
 	}
 	if wantV6 {
@@ -584,9 +600,33 @@ func (inst Instance) listenerAnnounceIP(listen string) string {
 	return validAnnounceIP(inst.PublicIPv4, false)
 }
 
+func (inst Instance) maskEnabled() bool      { return inst.TLSMask == nil || *inst.TLSMask }
+func (inst Instance) emulationEnabled() bool { return inst.TLSEmulation == nil || *inst.TLSEmulation }
+func (inst Instance) legacyModesEnabled() bool {
+	return inst.AllowLegacyModes == nil || *inst.AllowLegacyModes
+}
+
+func (inst Instance) sniAction() string {
+	switch inst.UnknownSNIAction {
+	case "drop", "accept", "reject_handshake":
+		return inst.UnknownSNIAction
+	default:
+		return "mask"
+	}
+}
+
+// Sponsored-channel tags are delivered by Telegram's middle proxies. Enable
+// them automatically for tagged users, while preserving the local SOCKS route.
+func (inst Instance) useMiddleProxy() bool {
+	if inst.RouteThroughXray {
+		return false
+	}
+	return slices.ContainsFunc(inst.Secrets, func(e SecretEntry) bool { return e.AdTag != "" })
+}
+
 func renderConfig(inst Instance, apiPort int, apiToken string) string {
 	var b strings.Builder
-	b.WriteString("[general]\nfast_mode = true\nuse_middle_proxy = false\n")
+	fmt.Fprintf(&b, "[general]\ndata_path = %s\nfast_mode = true\nuse_middle_proxy = %t\n", tomlQuote(filepath.Join(configDir(), "state", strconv.Itoa(inst.Id))), inst.useMiddleProxy())
 	if inst.Debug {
 		b.WriteString("log_level = \"debug\"\n")
 	} else {
@@ -596,11 +636,23 @@ func renderConfig(inst Instance, apiPort int, apiToken string) string {
 	// Telemt can serve all MTProxy handshakes from the same raw 32-hex user
 	// secret. Keep all three modes enabled so existing classic, dd (secure) and
 	// ee (FakeTLS) Telegram links continue to work after migration from mtg.
-	b.WriteString("\n[general.modes]\nclassic = true\nsecure = true\ntls = true\n")
-	b.WriteString("\n[general.links]\nshow = \"*\"\n")
+	fmt.Fprintf(&b, "\n[general.modes]\nclassic = %t\nsecure = %t\ntls = true\n", inst.legacyModesEnabled(), inst.legacyModesEnabled())
+	// The panel generates share links. Do not print user secrets into its logs.
+	b.WriteString("\n[general.links]\nshow = []\n")
 	ipv4, ipv6, prefer := networkOptions(inst.PreferIP)
 	fmt.Fprintf(&b, "\n[network]\nipv4 = %t\nipv6 = %t\nprefer = %d\n", ipv4, ipv6, prefer)
 	fmt.Fprintf(&b, "\n[server]\nport = %d\n", inst.Port)
+	if inst.ProxyProtocolListener {
+		trusted := inst.ProxyProtocolTrustedCIDRs
+		if trusted == nil {
+			trusted = []string{"127.0.0.0/8", "::1/128"}
+		}
+		quoted := make([]string, 0, len(trusted))
+		for _, cidr := range trusted {
+			quoted = append(quoted, tomlQuote(cidr))
+		}
+		fmt.Fprintf(&b, "proxy_protocol_trusted_cidrs = [%s]\n", strings.Join(quoted, ", "))
+	}
 	listen := strings.TrimSpace(inst.Listen)
 	if listen == "" {
 		listen = "0.0.0.0"
@@ -611,7 +663,26 @@ func renderConfig(inst Instance, apiPort int, apiToken string) string {
 	}
 	fmt.Fprintf(&b, "\n[server.api]\nenabled = true\nlisten = %s\nwhitelist = [\"127.0.0.0/8\"]\nauth_header = %s\nread_only = false\n", tomlQuote(fmt.Sprintf("127.0.0.1:%d", apiPort)), tomlQuote("Bearer "+apiToken))
 	if inst.FakeTLSDomain != "" {
-		fmt.Fprintf(&b, "\n[censorship]\ntls_domain = %s\nmask = true\ntls_emulation = true\n", tomlQuote(inst.FakeTLSDomain))
+		fmt.Fprintf(&b, "\n[censorship]\ntls_domain = %s\nmask = %t\ntls_emulation = %t\nunknown_sni_action = %s\n", tomlQuote(inst.FakeTLSDomain), inst.maskEnabled(), inst.emulationEnabled(), tomlQuote(inst.sniAction()))
+		if !inst.emulationEnabled() {
+			// Telemt randomizes the default 2048 length on every config load
+			// without emulation, making a user-only reload appear structural.
+			b.WriteString("fake_cert_len = 2049\n")
+		}
+		if inst.MaskHost != "" {
+			fmt.Fprintf(&b, "mask_host = %s\n", tomlQuote(inst.MaskHost))
+		}
+		if inst.MaskPort > 0 {
+			fmt.Fprintf(&b, "mask_port = %d\n", inst.MaskPort)
+		}
+		fmt.Fprintf(&b, "mask_proxy_protocol = %d\n", inst.MaskProxyProtocol)
+		if len(inst.FakeTLSDomains) > 0 {
+			quoted := make([]string, 0, len(inst.FakeTLSDomains))
+			for _, domain := range inst.FakeTLSDomains {
+				quoted = append(quoted, tomlQuote(domain))
+			}
+			fmt.Fprintf(&b, "tls_domains = [%s]\n", strings.Join(quoted, ", "))
+		}
 	}
 	b.WriteString("\n[access]\nreplay_check_len = 65536\nignore_time_skew = false\n")
 	if inst.ThrottleMaxConnections > 0 {
@@ -619,7 +690,7 @@ func renderConfig(inst Instance, apiPort int, apiToken string) string {
 	}
 	b.WriteString("\n[access.users]\n")
 	for _, e := range inst.Secrets {
-		fmt.Fprintf(&b, "%s = %s\n", tomlQuote(e.Name), tomlQuote(e.Secret))
+		fmt.Fprintf(&b, "%s = %s\n", tomlQuote(nativeUsername(e.Name)), tomlQuote(e.Secret))
 	}
 	tagged := false
 	for _, e := range inst.Secrets {
@@ -628,7 +699,7 @@ func renderConfig(inst Instance, apiPort int, apiToken string) string {
 				b.WriteString("\n[access.user_ad_tags]\n")
 				tagged = true
 			}
-			fmt.Fprintf(&b, "%s = %s\n", tomlQuote(e.Name), tomlQuote(e.AdTag))
+			fmt.Fprintf(&b, "%s = %s\n", tomlQuote(nativeUsername(e.Name)), tomlQuote(e.AdTag))
 		}
 	}
 	quota := false
@@ -638,7 +709,7 @@ func renderConfig(inst Instance, apiPort int, apiToken string) string {
 				b.WriteString("\n[access.user_data_quota]\n")
 				quota = true
 			}
-			fmt.Fprintf(&b, "%s = %d\n", tomlQuote(e.Name), e.QuotaBytes)
+			fmt.Fprintf(&b, "%s = %d\n", tomlQuote(nativeUsername(e.Name)), e.QuotaBytes)
 		}
 	}
 	exp := false
@@ -648,7 +719,7 @@ func renderConfig(inst Instance, apiPort int, apiToken string) string {
 				b.WriteString("\n[access.user_expirations]\n")
 				exp = true
 			}
-			fmt.Fprintf(&b, "%s = %s\n", tomlQuote(e.Name), tomlQuote(expiresString(e.ExpiresUnix)))
+			fmt.Fprintf(&b, "%s = %s\n", tomlQuote(nativeUsername(e.Name)), tomlQuote(expiresString(e.ExpiresUnix)))
 		}
 	}
 	ipLimits := false
@@ -658,7 +729,7 @@ func renderConfig(inst Instance, apiPort int, apiToken string) string {
 				b.WriteString("\n[access.user_max_unique_ips]\n")
 				ipLimits = true
 			}
-			fmt.Fprintf(&b, "%s = %d\n", tomlQuote(e.Name), e.LimitIP)
+			fmt.Fprintf(&b, "%s = %d\n", tomlQuote(nativeUsername(e.Name)), e.LimitIP)
 		}
 	}
 	if inst.RouteThroughXray && inst.XrayRoutePort > 0 {
@@ -673,7 +744,23 @@ func writeConfig(path string, inst Instance, apiPort int, apiToken string) error
 	if err := os.MkdirAll(configDir(), 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(renderConfig(inst, apiPort, apiToken)), 0o640)
+	if err := os.MkdirAll(filepath.Join(configDir(), "state", strconv.Itoa(inst.Id)), 0o700); err != nil {
+		return err
+	}
+	// Reload reads this file concurrently; replace it only after a full write.
+	f, err := os.CreateTemp(filepath.Dir(path), ".telemt-*.toml")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.WriteString(renderConfig(inst, apiPort, apiToken)); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }
 
 func expiresString(unix int64) string { return time.Unix(unix, 0).UTC().Format(time.RFC3339) }
@@ -701,7 +788,10 @@ type telemtReloadEnvelope struct {
 }
 
 func reloadTelemt(port int, token string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Current Telemt reloads prepare a fresh runtime, including network probes
+	// that can take ten seconds. A five-second deadline restarts a healthy
+	// sidecar while its accepted native reload is still in progress.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	client := &http.Client{Timeout: 4 * time.Second}
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)

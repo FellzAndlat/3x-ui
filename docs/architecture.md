@@ -22,12 +22,14 @@ separate HTTP server serves **subscription links** to end users.
 The panel supervises **managed child processes**: Xray-core itself and — when MTProto or
 TUIC inbounds exist — dedicated child proxy binaries:
 
-- **`mtg-multi` for MTProto inbounds** (`github.com/mhsanaei/mtg-multi`, a multi-secret fork
-  built from source; `internal/mtproto/`): One process per inbound serves every attached
-  client's FakeTLS secret through the fork's `[secrets]` section, plus optional per-client
-  sponsored-channel ad-tags via `[secret-ad-tags]`. A client or ad-tag edit is hot-applied via
-  the fork's management API (`PUT /secrets`, guarded by a per-process bearer token), with a
-  process restart as the fallback on older binaries.
+- **`telemt` for MTProto inbounds** (`telemt/telemt`; `internal/mtproto/`):
+  One managed process per inbound uses native `[access.users]` secrets, per-user
+  sponsor tags, quotas and expiry. Client changes use the authenticated
+  `POST /v1/system/reload` API and wait for runtime activation; failures fall
+  back to restarting that sidecar. Legacy client SNI domains are collected into
+  `censorship.tls_domains` automatically. The automatic MEKO V3 helper reconciles
+  active inbound ports and serializes firewall updates across callers, preferring
+  native nftables for IPv4/IPv6 with an IPv4 iptables fallback.
 - **`tuic-server` for TUIC v5 inbounds** (`internal/tuic/`): One process per inbound runs on
   loopback behind an in-process native Go UDP relay that owns the public port and meters
   traffic deltas. The sidecar handles decrypted client traffic standalone, independent of
@@ -40,7 +42,7 @@ Servers and processes, all launched from `main.go`:
 | **Panel**        | `internal/web`                    | Admin REST/WS API + serves the embedded SPA                        | 2053              |
 | **Subscription** | `internal/sub`                    | Public endpoint that hands out client configs (raw / JSON / Clash) | `subPort` setting |
 | **Xray-core**    | supervised via `internal/xray`    | The actual proxy engine; a child process, not Go code              | `inbounds[].port` |
-| **mtg-multi**    | supervised via `internal/mtproto` | MTProto proxy child process for MTProto inbounds (multi-secret)    | per inbound       |
+| **Telemt**    | supervised via `internal/mtproto` | MTProto proxy child process for MTProto inbounds (multi-secret)    | per inbound       |
 | **tuic-server**  | supervised via `internal/tuic`    | TUIC v5 proxy child process fronted by a Go UDP relay              | per inbound       |
 
 Two key ideas that explain most of the complexity:
@@ -381,7 +383,7 @@ All registered in `web.go` → `startTask()`. Each is a struct with a `Run()` me
 | `@every 5s`         | `node_heartbeat_job`                                                                             | Probe child nodes (online/offline)                                                    |
 | `@every 5s`         | `node_traffic_sync_job`                                                                          | Pull + merge node traffic; push reconciliation                                        |
 | `@every 10s`        | `check_client_ip_job`                                                                            | Enforce per-client IP limits                                                          |
-| `@every 10s`        | `mtproto_job`                                                                                    | Reconcile `mtg` sidecars against enabled MTProto inbounds                             |
+| `@every 10s`        | `mtproto_job`                                                                                    | Reconcile `Telemt` sidecars against enabled MTProto inbounds                             |
 | `@every 10s`        | `amneziawg_job`                                                                                  | Reconcile embedded AmneziaWG interfaces against enabled local inbounds                |
 | `@every 5m`         | `outbound_subscription_job`                                                                      | Refresh outbound provider configs                                                     |
 | `@every 10m`        | `clear_logs_job` (`PruneXrayLogsJob`)                                                            | Truncate Xray access/error logs once either exceeds 64 MiB                            |

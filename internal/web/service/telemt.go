@@ -14,10 +14,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/SawaMEN/3x-ui/v3/internal/mtproto"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -104,7 +106,7 @@ func renderTelemtConfig(c TelemtConfig) (string, error) {
 	if c.TLS && sni == "" {
 		sni = defaultTelemtSNI
 	}
-	if strings.ContainsAny(sni, "\"\r\n\t ") {
+	if sni != "" && !mtproto.ValidDomain(sni) {
 		return "", errors.New("telemt: invalid SNI")
 	}
 
@@ -118,10 +120,15 @@ func renderTelemtConfig(c TelemtConfig) (string, error) {
 
 	censorship := ""
 	if c.TLS {
-		censorship = fmt.Sprintf("[censorship]\ntls_domain = \"%s\"\nmask = true\ntls_emulation = true\ntls_front_dir = \"tlsfront\"\n\n", sni)
+		censorship = fmt.Sprintf("[censorship]\ntls_domain = %s\nmask = true\ntls_emulation = true\ntls_front_dir = \"tlsfront\"\n\n", strconv.Quote(sni))
 	}
 
+	api, err := telemtAPISettingsForRender(c.Port)
+	if err != nil {
+		return "", err
+	}
 	base := fmt.Sprintf("[general]\nfast_mode = %t\nuse_middle_proxy = false\nlog_level = \"normal\"\n\n[general.modes]\nclassic = %t\nsecure = %t\ntls = %t\n\n[general.links]\nshow = \"*\"\n\n[server.api]\nenabled = true\nlisten = \"127.0.0.1:9091\"\nwhitelist = [\"127.0.0.1/32\", \"::1/128\"]\nread_only = false\n\n[network]\nipv4 = %t\nipv6 = %t\n\n[server]\nport = %d\n\n%s%s[access]\nreplay_check_len = 65536\nignore_time_skew = false\n\n[access.users]\nxui = \"%s\"\n\n[[upstreams]]\ntype = \"direct\"\nweight = 1\nenabled = true\n", c.FastMode, c.Classic, c.Secure, c.TLS, c.IPv4, c.IPv6, c.Port, listeners, censorship, strings.ToLower(c.Secret))
+	base = strings.Replace(base, "listen = \"127.0.0.1:9091\"", "listen = "+strconv.Quote(api.Listen)+"\nauth_header = "+strconv.Quote(api.Auth), 1)
 	base = preserveTelemtUsers(base)
 	state, err := readTelemtWebState()
 	if err != nil {
@@ -528,7 +535,7 @@ type telemtRuntimeConfigResponse struct {
 
 func fetchTelemtRuntimeConfig() (telemtRuntimeConfigResponse, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://127.0.0.1:9091/v1/config", nil)
+	req, err := telemtAPIRequest(http.MethodGet, "/v1/config")
 	if err != nil {
 		return telemtRuntimeConfigResponse{}, err
 	}
@@ -751,8 +758,8 @@ func (TelemtService) DeleteProxy(username string) error {
 		return errors.New("telemt: invalid proxy username")
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	endpoint := "http://127.0.0.1:9091/v1/users/" + url.PathEscape(username)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, endpoint, nil)
+	endpoint := "/v1/users/" + url.PathEscape(username)
+	req, err := telemtAPIRequest(http.MethodDelete, endpoint)
 	if err != nil {
 		return fmt.Errorf("telemt: create delete request: %w", err)
 	}
@@ -781,10 +788,10 @@ func (TelemtService) DeleteProxy(username string) error {
 
 func telemtGeneratedLink(username string, tls bool) (string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	endpoint := "http://127.0.0.1:9091/v1/users/" + url.PathEscape(username)
+	endpoint := "/v1/users/" + url.PathEscape(username)
 	var lastErr error
 	for i := 0; i < 10; i++ {
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
+		req, err := telemtAPIRequest(http.MethodGet, endpoint)
 		if err != nil {
 			lastErr = err
 			time.Sleep(300 * time.Millisecond)
@@ -839,17 +846,10 @@ func (TelemtService) Apply(action string) error {
 		return systemctl(action, telemtServiceName)
 	case "update":
 		return telemtUpdate()
-	case "meko-enable":
-		if err := ensureTelemtMekoFixInstalled(); err != nil {
-			return err
-		}
-		if err := systemctl("enable", "--now", telemtMekoServiceName); err != nil {
-			return fmt.Errorf("telemt meko: enable failed: %w", err)
-		}
-		return nil
-	case "meko-disable":
-		_ = systemctl("disable", "--now", telemtMekoServiceName)
-		return nil
+	case "meko-enable", "meko-disable":
+		cfg := TelemtService{}.GetMekoConfig()
+		cfg.Enabled = action == "meko-enable"
+		return TelemtService{}.SaveMekoConfig(cfg)
 	default:
 		return errors.New("telemt: unsupported action")
 	}

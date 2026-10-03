@@ -1020,29 +1020,40 @@ show_telemt_status() {
     fi
 }
 
-# show_mtproto_status reports each mtproto inbound's mtg sidecar (one process per
-# inbound, run outside xray). Silent when no mtproto inbound is configured.
+# MTProto inbounds use panel-managed Telemt sidecars, independently of the
+# optional standalone telemt.service. Read native TOML listener settings.
 show_mtproto_status() {
     local cfg_dir="${xui_folder}/bin/mtproto"
-    local cfgs=()
+    local cfgs=() f
     if [[ -d "${cfg_dir}" ]]; then
-        for f in "${cfg_dir}"/mtg-*.toml; do
+        for f in "${cfg_dir}"/telemt-*.toml; do
             [[ -e "$f" ]] && cfgs+=("$f")
         done
     fi
     [[ ${#cfgs[@]} -eq 0 ]] && return
 
     local running
-    running=$(ps -ef | grep "mtg-linux" | grep -v "grep" | grep -oE 'mtg-[0-9]+\.toml')
+    running=$(ps -eo args= | awk -v dir="${cfg_dir}/" '
+        $1 ~ /\/telemt$/ && $2 == "run" && index($3, dir) == 1 {
+            name=$3; sub(/^.*\//, "", name); print name
+        }')
     for f in "${cfgs[@]}"; do
         local name id bind
         name=$(basename "$f")
-        id=$(echo "${name}" | sed -E 's/mtg-([0-9]+)\.toml/\1/')
-        bind=$(grep -E '^[[:space:]]*bind-to' "$f" | head -1 | cut -d'"' -f2)
+        id="${name#telemt-}"
+        id="${id%.toml}"
+        bind=$(awk '
+            /^\[server\]$/ { section="server"; next }
+            /^\[\[server.listeners\]\]$/ { section="listener"; next }
+            /^\[/ { section="" }
+            section=="server" && /^[[:space:]]*port[[:space:]]*=/ { port=$3 }
+            section=="listener" && /^[[:space:]]*ip[[:space:]]*=/ && ip=="" { ip=$3; gsub(/"/, "", ip) }
+            END { printf "[%s]:%s", ip, port }
+        ' "$f")
         if echo "${running}" | grep -qx "${name}"; then
-            echo -e "mtproto inbound ${id} (${bind}): ${green}Running${plain}"
+            echo -e "MTProto Telemt inbound ${id} (${bind}): ${green}Running${plain}"
         else
-            echo -e "mtproto inbound ${id} (${bind}): ${red}Not Running${plain}"
+            echo -e "MTProto Telemt inbound ${id} (${bind}): ${red}Not Running${plain}"
         fi
     done
 }

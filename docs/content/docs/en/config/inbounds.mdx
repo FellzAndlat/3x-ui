@@ -63,7 +63,7 @@ The inbound editor accepts these protocols:
 | **HTTP**               | HTTP proxy.                                                             |
 | **Mixed (SOCKS/HTTP)** | A combined SOCKS + HTTP listener.                                        |
 | **Dokodemo-door / Tunnel** | Port forwarding / traffic redirect.                                 |
-| **MTProto**            | Telegram MTProto proxy, served by a bundled `mtg` process (not Xray).    |
+| **MTProto**            | Telegram MTProto proxy, served by a bundled `Telemt` process (not Xray).    |
 | **TUIC**               | QUIC-based proxy protocol (v5), served by a bundled `tuic-server` process. See [TUIC](/docs/config/tuic). |
 
 <Callout type="info">
@@ -100,3 +100,27 @@ Use the wizard to get a recommendation based on your goals and clients:
   XTLS-Vision** is the usual best choice — continue to
   [REALITY](/docs/config/reality).
 </Callout>
+
+### MTProto with Telemt
+
+Each enabled MTProto inbound runs its own Telemt process, independently of the
+selected Xray or Sing-box core. Existing raw, `dd` and `ee` secrets are preserved;
+SNI domains embedded in client secrets are accepted automatically alongside the
+inbound's default FakeTLS domain. TLS camouflage and certificate emulation are
+enabled by default; the inbound form also controls the unknown-SNI policy.
+
+Sponsor tags automatically enable Telegram middle proxies for direct egress.
+When routing through the local Xray or Sing-box SOCKS bridge, that route takes precedence
+and sponsor tags are not delivered through middle proxies.
+
+**MEKO V3** is applied automatically on Linux and follows active MTProto ports.
+The defaults are 54 SYN/minute per source IP, burst 1, and an exemption for the
+MEKO V3 iOS fingerprint. Native nftables handles IPv4 and IPv6; older systems
+fall back to IPv4 iptables with `xt_u32` and `hashlimit`. util-linux `flock` is
+required. An explicitly saved disabled state is respected.
+
+New inbounds use FakeTLS only; existing raw/dd clients retain legacy mode
+compatibility. Advanced settings include camouflage destination, trusted PROXY
+sender CIDRs and legacy modes. Legacy domain-fronting settings migrate to the
+native camouflage configuration. Control API ports, bearer tokens and isolated
+per-inbound state directories are generated automatically.

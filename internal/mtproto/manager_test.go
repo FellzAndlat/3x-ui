@@ -1,6 +1,8 @@
 package mtproto
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -21,6 +23,77 @@ func TestDecodeLegacySecret(t *testing.T) {
 	got, domain = decodeLegacySecret(raw)
 	if got != raw || domain != "" {
 		t.Fatalf("raw secret migration failed: raw=%q domain=%q", got, domain)
+	}
+}
+
+func TestMigratedClientDomainsRemainUsable(t *testing.T) {
+	clients := []map[string]any{}
+	for _, domain := range []string{"b.example.com", "a.example.com", "b.example.com"} {
+		clients = append(clients, map[string]any{
+			"email": domain, "enable": true,
+			"secret": "EE0123456789ABCDEF0123456789ABCDEF" + hex.EncodeToString([]byte(domain)),
+		})
+	}
+	settings, _ := json.Marshal(map[string]any{"clients": clients})
+	inst, ok := InstanceFromInbound(&model.Inbound{Protocol: model.MTProto, Settings: string(settings)})
+	if !ok || inst.FakeTLSDomain != "a.example.com" || strings.Join(inst.FakeTLSDomains, ",") != "b.example.com" {
+		t.Fatalf("legacy SNI migration lost domains: %+v", inst)
+	}
+	if !strings.Contains(renderConfig(inst, 9000, "token"), `tls_domains = ["b.example.com"]`) {
+		t.Fatal("additional legacy client SNI must be accepted by Telemt")
+	}
+	clients[0], clients[1] = clients[1], clients[0]
+	settings, _ = json.Marshal(map[string]any{"clients": clients})
+	reordered, _ := InstanceFromInbound(&model.Inbound{Protocol: model.MTProto, Settings: string(settings)})
+	if inst.structuralFingerprint() != reordered.structuralFingerprint() {
+		t.Fatal("client reordering must not restart the sidecar")
+	}
+	settings, _ = json.Marshal(map[string]any{"fakeTlsDomain": "new.example.com", "clients": clients})
+	changed, _ := InstanceFromInbound(&model.Inbound{Protocol: model.MTProto, Settings: string(settings)})
+	if strings.Join(changed.FakeTLSDomains, ",") != "a.example.com,b.example.com" {
+		t.Fatal("changing the default domain must preserve existing client links")
+	}
+}
+
+func TestTelemtAutomaticMiddleProxy(t *testing.T) {
+	inst := Instance{FakeTLSDomain: "example.com", Secrets: []SecretEntry{{Name: "a", Secret: "0123456789abcdef0123456789abcdef"}}}
+	initialFP := inst.structuralFingerprint()
+	inst.Secrets[0].AdTag = "fedcba9876543210fedcba9876543210"
+	if !inst.useMiddleProxy() || initialFP == inst.structuralFingerprint() {
+		t.Fatal("adding a sponsor tag must enable middle proxies and restart Telemt")
+	}
+	if !strings.Contains(renderConfig(inst, 9000, "token"), "use_middle_proxy = true") {
+		t.Fatal("sponsor tags require Telegram middle proxies")
+	}
+	inst.RouteThroughXray, inst.XrayRoutePort = true, 50000
+	if inst.useMiddleProxy() {
+		t.Fatal("a configured local SOCKS route must take precedence")
+	}
+}
+
+func TestTelemtNativeMaskSettings(t *testing.T) {
+	off := false
+	inst := Instance{FakeTLSDomain: "example.com", TLSMask: &off, TLSEmulation: &off, UnknownSNIAction: "reject_handshake"}
+	cfg := renderConfig(inst, 9000, "token")
+	for _, want := range []string{"mask = false", "tls_emulation = false", `unknown_sni_action = "reject_handshake"`, "show = []"} {
+		if !strings.Contains(cfg, want) {
+			t.Fatalf("missing native Telemt setting: %s", want)
+		}
+	}
+	inst.TLSMask, inst.TLSEmulation, inst.UnknownSNIAction = nil, nil, "invalid"
+	if !inst.maskEnabled() || !inst.emulationEnabled() || inst.sniAction() != "mask" {
+		t.Fatal("old inbounds must receive automatic camouflage defaults")
+	}
+}
+
+func TestAnnounceIPRejectsUnreachableAddresses(t *testing.T) {
+	for _, value := range []string{"0.0.0.0", "127.0.0.1", "224.0.0.1", "169.254.1.2", "::", "::1", "ff02::1", "fe80::1"} {
+		if validAnnounceIP(value, false) != "" || validAnnounceIP(value, true) != "" {
+			t.Fatalf("unreachable announcement accepted: %s", value)
+		}
+	}
+	if validAnnounceIP("1.2.3.4", false) != "1.2.3.4" || validAnnounceIP("2001:db8::1", true) != "2001:db8::1" {
+		t.Fatal("valid family-specific announcement rejected")
 	}
 }
 
@@ -126,13 +199,6 @@ func TestFingerprintSplit(t *testing.T) {
 		t.Fatal("client order must not alter fingerprint")
 	}
 
-	legacy := base
-	legacy.FrontingIP = "203.0.113.1"
-	legacy.FrontingPort = 443
-	legacy.FrontingProxyProtocol = true
-	if base.structuralFingerprint() != legacy.structuralFingerprint() {
-		t.Fatal("compatibility-only domainFronting fields must not restart Telemt")
-	}
 }
 
 func TestMonotonicCounterDelta(t *testing.T) {
@@ -144,5 +210,31 @@ func TestMonotonicCounterDelta(t *testing.T) {
 	}
 	if got := monotonicCounterDelta(0, 100); got != 0 {
 		t.Fatalf("zero delta=%d", got)
+	}
+}
+
+func TestLegacyFrontingMigratesToNativeMask(t *testing.T) {
+	settings := `{"clients":[{"email":"alice","enable":true,"secret":"0123456789abcdef0123456789abcdef"}],"domainFronting":{"ip":"127.0.0.1","port":8443,"proxyProtocol":true}}`
+	inst, ok := InstanceFromInbound(&model.Inbound{Protocol: model.MTProto, Settings: settings})
+	if !ok || inst.MaskHost != "127.0.0.1" || inst.MaskPort != 8443 || inst.MaskProxyProtocol != 1 {
+		t.Fatalf("legacy mask not migrated: %+v", inst)
+	}
+	settings = `{"clients":[{"email":"alice","enable":true,"secret":"0123456789abcdef0123456789abcdef"}],"maskHost":"","domainFronting":{"ip":"127.0.0.1","port":8443,"proxyProtocol":true}}`
+	inst, _ = InstanceFromInbound(&model.Inbound{Protocol: model.MTProto, Settings: settings})
+	if inst.MaskHost != "" || inst.MaskPort != 443 || inst.MaskProxyProtocol != 0 {
+		t.Fatal("explicit automatic mask must override legacy fronting")
+	}
+	off := false
+	inst.AllowLegacyModes = &off
+	cfg := renderConfig(inst, 9000, "token")
+	if !strings.Contains(cfg, "classic = false") || !strings.Contains(cfg, "secure = false") || !strings.Contains(cfg, "tls = true") {
+		t.Fatal("new FakeTLS-only defaults not rendered")
+	}
+	inst.ProxyProtocolListener = true
+	inst.ProxyProtocolTrustedCIDRs = []string{"10.0.0.0/8"}
+	inst.MaskPort = 8443
+	cfg = renderConfig(inst, 9000, "token")
+	if !strings.Contains(cfg, `proxy_protocol_trusted_cidrs = ["10.0.0.0/8"]`) || !strings.Contains(cfg, "mask_port = 8443") {
+		t.Fatal("native PROXY/mask options missing")
 	}
 }

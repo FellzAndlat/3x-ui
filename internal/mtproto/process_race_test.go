@@ -51,6 +51,39 @@ func TestProcessLifecycleFieldsRaceSafe(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 }
 
+func TestUnexpectedSuccessfulExitRemovesConfig(t *testing.T) {
+	pidFile := installFakeTelemt(t)
+	t.Setenv("TELEMT_FAKE_EXIT_SUCCESS", "1")
+	exitFile := filepath.Join(t.TempDir(), "exit")
+	t.Setenv("TELEMT_FAKE_EXIT_FILE", exitFile)
+	path := filepath.Join(t.TempDir(), "telemt.toml")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proc := newProcess(path, "test")
+	if err := proc.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = proc.Stop() })
+	waitSpawnCount(t, pidFile, 1)
+	proc.mu.RLock()
+	done := proc.done
+	proc.mu.RUnlock()
+	if err := os.WriteFile(exitFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A race-instrumented Go child waits one second on a successful exit.
+	if err := waitForExit(done, 3*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("dead sidecar must not retain a MEKO-discoverable config: %v", err)
+	}
+	if !strings.Contains(proc.GetResult(), "exited unexpectedly") {
+		t.Fatalf("successful unexpected exit must report a failure: %s", proc.GetResult())
+	}
+}
+
 func TestProcessStatusDuringExit(t *testing.T) {
 	pidFile := installFakeTelemt(t)
 	exitFile := filepath.Join(t.TempDir(), "exit")

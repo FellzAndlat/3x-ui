@@ -445,7 +445,7 @@ export function formValuesToWirePayload(values: InboundFormValues): WireInboundP
     protocol: legacyShadowsocksWrapper ? 'shadowtls' : values.protocol,
     settings: JSON.stringify(settingsPruned),
     streamSettings: streamPruned ? JSON.stringify(streamPruned) : '',
-    // mtproto is mtg-served, not Xray, so sniffing never applies — emit empty
+    // mtproto is Telemt-served, not Xray, so sniffing never applies — emit empty
     // rather than the default { enabled: false } so the row carries no sniffing.
     sniffing:
       !shadowTlsEnabled && canEnableSniffing({ protocol: values.protocol })
