@@ -24,7 +24,7 @@ const SettingsPage = lazy(() =>
 );
 const XrayPage = lazy(() => importWithChunkRecovery(() => import('@/pages/xray/XrayPage')));
 const SingBoxPage = lazy(() =>
-  importWithChunkRecovery(() => import('@/pages/singbox/SingBoxPage')),
+  importWithChunkRecovery(() => import('@/pages/singbox/SingBoxRoutePage')),
 );
 const ApiDocsPage = lazy(() =>
   importWithChunkRecovery(() => import('@/pages/api-docs/ApiDocsPage')),
