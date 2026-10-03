@@ -58,7 +58,7 @@ describe('simple sing-box page', () => {
   });
 
   it('saves simple edits with custom rules intact and omits panel-managed sections', async () => {
-    mount();
+    mount('/singbox#dns');
     fireEvent.click(await screen.findByLabelText('Кэш DNS'));
     fireEvent.click(screen.getByText('Save').closest('button')!);
     await waitFor(() =>
@@ -77,8 +77,8 @@ describe('simple sing-box page', () => {
   });
 
   it('asks before discarding unsaved edits', async () => {
-    mount();
-    await screen.findByText('Быстрая настройка');
+    mount('/singbox#dns');
+    await screen.findByText('Определение адресов сайтов (DNS)');
     fireEvent.click(screen.getByLabelText('Кэш DNS'));
     const loads = vi.mocked(HttpUtil.get).mock.calls.length;
     fireEvent.click(screen.getByText('Refresh').closest('button')!);

@@ -1,4 +1,5 @@
 import { Alert, Button, Card, Col, Row, Select, Space, Switch } from 'antd';
+import { useTranslation } from 'react-i18next';
 import {
   applyDnsPreset,
   currentDnsPreset,
@@ -16,6 +17,7 @@ type Props = {
 };
 
 export default function SimpleSettings({ config, onChange, section = 'basic', onNavigate }: Props) {
+  const { t } = useTranslation();
   const dns = object(config.dns);
   const route = object(config.route);
   const outbounds = [...records(config.outbounds), ...records(config.endpoints)].filter(
@@ -43,6 +45,9 @@ export default function SimpleSettings({ config, onChange, section = 'basic', on
           <Space wrap>
             <Button onClick={() => onNavigate('/inbounds')}>Входящие подключения</Button>
             <Button onClick={() => onNavigate('/settings#subscription')}>Подписка</Button>
+            <Button onClick={() => onNavigate('/singbox#advanced')}>
+              {t('pages.singBox.sections.advanced')}
+            </Button>
           </Space>
         </Card>
       )}

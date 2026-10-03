@@ -20,7 +20,7 @@ const nativeSingBoxProtocolPrefix = "singbox:"
 //
 // Only settings is flattened intentionally: Xray-only top-level fields must
 // not leak into the sing-box JSON. Common dialer options are translated below
-// through the compatibility helpers.
+// through the compatibility helpers for outbound types that support them.
 func translateNativeSingBoxOutbound(raw map[string]any, protocol, tag string) (map[string]any, error) {
 	protocol = strings.ToLower(strings.TrimSpace(protocol))
 	if protocol == "" {
@@ -54,13 +54,27 @@ func translateNativeSingBoxOutbound(raw map[string]any, protocol, tag string) (m
 	out["type"] = nativeProtocol
 	out["tag"] = tag
 
-	if err := applyXrayOutboundCompatibility(out, raw, rawObject(raw, "streamSettings")); err != nil {
-		return nil, err
+	if nativeOutboundSupportsDialCompatibility(nativeProtocol) {
+		if err := applyXrayOutboundCompatibility(out, raw, rawObject(raw, "streamSettings")); err != nil {
+			return nil, err
+		}
 	}
 	if err := validateNativeSingBoxOutbound(out, nativeProtocol, tag); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+func nativeOutboundSupportsDialCompatibility(protocol string) bool {
+	// These outbounds do not expose sing-box Dial Fields. Their configuration
+	// must come exclusively from native settings; translating Xray sendThrough
+	// or sockopt here would emit fields rejected by sing-box.
+	switch protocol {
+	case "bridge", "selector", "urltest":
+		return false
+	default:
+		return true
+	}
 }
 
 func nativeOutboundGroupTags(value any, ownerTag, protocol string) ([]string, error) {
