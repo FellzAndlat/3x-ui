@@ -190,6 +190,13 @@ func startOutbound(tag string, proc *managedOutbound) error {
 		}
 		proc.cmd = exec.CommandContext(ctx, binary(model.OpenFlux), "--config", path)
 	} else {
+		checkCtx, checkCancel := context.WithTimeout(ctx, 10*time.Second)
+		checkErr := exec.CommandContext(checkCtx, "docker", "image", "inspect", "3x-ui-fptn-client:0.4.6").Run()
+		checkCancel()
+		if checkErr != nil {
+			cancel()
+			return fmt.Errorf("FPTN outbound requires a running Docker daemon and the installed FPTN client image: %w", checkErr)
+		}
 		if err := writePrivate(filepath.Join(folder, "token"), []byte(s.Token)); err != nil {
 			cancel()
 			return err

@@ -16,7 +16,7 @@ Use **Install OpenFlux** before enabling an OpenFlux profile. The installer uses
 
 Open the incoming connection form and choose the protocol. FPTN generates a certificate, metrics key and client secrets automatically. Its standard and mobile presets use MTU 1400 and 1280 respectively. Session limits, bandwidth, permitted SNI names and the upstream traffic filters remain configurable. Bandwidth 0 uses the largest supported upstream rate (2000 Mibit/s), because upstream does not implement an unlimited zero-rate bucket.
 
-OpenFlux enables encrypted, negotiated batched sessions. The direct preset advertises the inbound's public address and port. Additional channel transports require their own HTTPS URLs. Each inbound needs a separate client and separate channel resources: upstream replaces the active session when another client joins. Stream-mode and unencrypted legacy links are rejected.
+OpenFlux enables encrypted, negotiated batched sessions. The direct preset advertises the inbound's public address and port. Yandex, VYandex, Boards and Mail.ru channel transports require their own HTTPS URLs. CupsOnline room creation and MAX/Oneme authentication are not integrated. Each inbound needs a separate client and separate channel resources: upstream replaces the active session when another client joins. Stream-mode and unencrypted legacy links are rejected.
 
 Snell generates a deployment PSK and individual user keys. The automatic preset selects v6. Server v5 uses the v4-compatible client setting; QUIC-only client v5 is not offered. Client applications must understand the selected version and individual user-key settings; a `snell://` URI alone does not imply support in every application.
 

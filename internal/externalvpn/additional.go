@@ -182,7 +182,7 @@ func (inst Instance) validateAdditional() error {
 			}
 			switch t.Type {
 			case "direct":
-			case "yandex", "vyandex", "boards", "mailru", "cupsonline":
+			case "yandex", "vyandex", "boards", "mailru":
 				u, err := url.Parse(t.URL)
 				if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
 					return fmt.Errorf("transport requires a HTTPS channel URL")
