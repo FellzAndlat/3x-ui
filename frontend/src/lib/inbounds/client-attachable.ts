@@ -11,6 +11,8 @@ const CLIENT_ATTACHABLE_PROTOCOLS = new Set([
   'amneziawg',
   'tuic',
   'trusttunnel',
+  'fptn',
+  'openflux',
   'naive',
   'snell',
   'anytls',

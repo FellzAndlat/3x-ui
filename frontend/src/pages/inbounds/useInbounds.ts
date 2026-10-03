@@ -71,6 +71,8 @@ const TRACKED_PROTOCOLS: readonly string[] = [
   Protocols.TUIC,
   Protocols.SNELL,
   Protocols.TRUSTTUNNEL,
+  Protocols.FPTN,
+  Protocols.OPENFLUX,
   Protocols.SUDOKU,
 ];
 

@@ -1,3 +1,7 @@
+import {
+  FptnInboundSettingsSchema,
+  OpenFluxInboundSettingsSchema,
+} from '@/schemas/protocols/inbound/additional-vpn';
 import { RandomUtil, Wireguard } from '@/utils';
 import { generateAwgObfuscation } from '@/lib/xray/amneziawg-obfuscation';
 
@@ -521,6 +525,10 @@ export function createDefaultInboundSettings(protocol: string): AnyInboundSettin
       return createDefaultVkTurnProxyInboundSettings();
     case 'amneziawg':
       return createDefaultAmneziawgInboundSettings();
+    case 'fptn':
+      return FptnInboundSettingsSchema.parse({});
+    case 'openflux':
+      return OpenFluxInboundSettingsSchema.parse({});
     case 'snell':
       return {
         version: 6,

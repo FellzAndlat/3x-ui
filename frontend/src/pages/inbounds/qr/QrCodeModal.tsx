@@ -1,6 +1,7 @@
+import { useServerLinks } from '../useServerLinks';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Collapse, Modal } from 'antd';
+import { Alert, Collapse, Modal, Spin } from 'antd';
 import type { CollapseProps } from 'antd';
 
 import { Protocols } from '@/schemas/primitives';
@@ -169,6 +170,11 @@ export default function QrCodeModal({
     setSubJsonLink(nextSubJson);
   }
 
+  const serverLinks = useServerLinks(open, dbInbound?.id, dbInbound?.protocol, client?.email);
+  const displayLinks = ['fptn', 'openflux', 'trusttunnel'].includes(dbInbound?.protocol ?? '')
+    ? (serverLinks.data ?? [])
+    : links;
+
   const qrItems = useMemo<QrItem[]>(() => {
     const items: QrItem[] = [];
     if (subLink) {
@@ -181,7 +187,7 @@ export default function QrCodeModal({
         value: subJsonLink,
       });
     }
-    links.forEach((link, idx) => {
+    displayLinks.forEach((link, idx) => {
       items.push({ key: `l${idx}`, header: link.remark || `Link ${idx + 1}`, value: link.link });
     });
     wireguardConfigs.forEach((cfg, idx) => {
@@ -220,7 +226,7 @@ export default function QrCodeModal({
   }, [
     subLink,
     subJsonLink,
-    links,
+    displayLinks,
     wireguardConfigs,
     wireguardLinks,
     amneziawgConfigs,
@@ -261,6 +267,8 @@ export default function QrCodeModal({
       width={420}
       destroyOnHidden
     >
+      {serverLinks.isFetching && <Spin />}
+      {serverLinks.error && <Alert type="error" showIcon description={serverLinks.error.message} />}
       {dbInbound && collapseItems && collapseItems.length > 0 && (
         <Collapse
           ghost

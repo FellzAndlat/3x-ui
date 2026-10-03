@@ -30,6 +30,8 @@ export const SINGBOX_NATIVE_OUTBOUND_PROTOCOLS = [
   'singbox:hysteria2',
   'anytls',
   'snell',
+  'fptn',
+  'openflux',
   'tor',
   'ssh',
   'selector',
@@ -45,7 +47,9 @@ export const PROTOCOL_OPTIONS = [
   ...Object.values(Protocols).map((p) => ({ value: p, label: p })),
   ...SINGBOX_NATIVE_OUTBOUND_PROTOCOLS.map((p) => ({
     value: p,
-    label: `${p.replace(/^singbox:/, '')} (sing-box)`,
+    label: ['fptn', 'openflux'].includes(p)
+      ? `${p} (managed)`
+      : `${p.replace(/^singbox:/, '')} (sing-box)`,
   })),
 ];
 export const SECURITY_OPTIONS = Object.values(USERS_SECURITY).map((v) => ({ value: v, label: v }));

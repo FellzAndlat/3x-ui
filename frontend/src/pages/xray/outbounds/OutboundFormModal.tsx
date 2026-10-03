@@ -1,3 +1,4 @@
+import AdditionalOutboundEditor from './AdditionalOutboundEditor';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Form, Input, InputNumber, Modal, Radio, Select, Space, Tabs, message } from 'antd';
@@ -5,7 +6,7 @@ import { Controller, FormProvider, useForm, useWatch } from 'react-hook-form';
 import { FinalMaskField, SniffingField } from '@/lib/xray/forms/fields';
 import { FormField, rhfZodValidate } from '@/components/form/rhf';
 import { JsonEditor } from '@/components/form';
-import { Wireguard } from '@/utils';
+import { HttpUtil, Wireguard } from '@/utils';
 import { formValuesToWirePayload, rawOutboundToFormValues } from '@/lib/xray/outbound-form-adapter';
 import { parseOutboundLink } from '@/lib/xray/outbound-link-parser';
 import { XMUX_FRESH_DEFAULTS } from '@/schemas/protocols/stream/xhttp';
@@ -127,12 +128,29 @@ export default function OutboundFormModal({
    * hysteria2:// / wireguard://) and replace form state with the result.
    * The current tag is preserved when the parsed link doesn't carry one.
    */
-  function importLink() {
+  async function importLink() {
     const link = linkInput.trim();
     if (!link) return;
-    const parsed = parseOutboundLink(link);
+    let parsed: Record<string, unknown> | null = null;
+    if (link.startsWith('fptn:') || link.startsWith('openflux://')) {
+      const result = await HttpUtil.post('/panel/api/server/externalvpn/parse-link', { link });
+      if (!result?.success) {
+        messageApi.error(result?.msg || 'Wrong Link!');
+        return;
+      }
+      parsed = result.obj as Record<string, unknown>;
+    } else {
+      parsed = parseOutboundLink(link);
+    }
     if (!parsed) {
       messageApi.error('Wrong Link!');
+      return;
+    }
+    if (!supportsBasicOutboundForm(parsed.protocol)) {
+      setJsonText(JSON.stringify(parsed, null, 2));
+      setJsonDirty(false);
+      setLinkInput('');
+      switchTab('2');
       return;
     }
     const currentTag = methods.getValues('tag');
@@ -639,10 +657,17 @@ export default function OutboundFormModal({
                     >
                       <Input.Search
                         value={linkInput}
-                        placeholder="vmess:// vless:// trojan:// ss:// hysteria2:// wireguard://"
+                        placeholder="vless:// snell:// fptn: openflux://"
                         enterButton="Import"
                         onChange={(e) => setLinkInput(e.target.value)}
                         onSearch={importLink}
+                      />
+                      <AdditionalOutboundEditor
+                        text={jsonText}
+                        onChange={(next) => {
+                          setJsonText(next);
+                          setJsonDirty(true);
+                        }}
                       />
                       <JsonEditor
                         value={jsonText}

@@ -1,3 +1,4 @@
+import { FptnFields, OpenFluxFields } from './protocols/additional-vpn';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { QuestionCircleOutlined } from '@ant-design/icons';
@@ -339,6 +340,8 @@ export default function InboundFormModal({
     protocol !== Protocols.TUIC &&
     protocol !== Protocols.PINGTUNNEL &&
     protocol !== Protocols.TRUSTTUNNEL &&
+    protocol !== Protocols.FPTN &&
+    protocol !== Protocols.OPENFLUX &&
     protocol !== Protocols.NAIVE &&
     protocol !== Protocols.MIERU &&
     protocol !== Protocols.SUDOKU &&
@@ -366,6 +369,8 @@ export default function InboundFormModal({
       Protocols.MIERU,
       Protocols.SUDOKU,
       Protocols.SNELL,
+      Protocols.FPTN,
+      Protocols.OPENFLUX,
       Protocols.ANYTLS,
       Protocols.SHADOWTLS,
     ]);
@@ -659,6 +664,8 @@ export default function InboundFormModal({
         next === Protocols.WIREGUARD ||
         next === Protocols.TUNNEL ||
         next === Protocols.SNELL ||
+        next === Protocols.FPTN ||
+        next === Protocols.OPENFLUX ||
         next === Protocols.ANYTLS ||
         next === Protocols.SHADOWTLS
       ) {
@@ -947,6 +954,8 @@ export default function InboundFormModal({
       {protocol === Protocols.TRUSTTUNNEL && <TrustTunnelFields />}
       {protocol === Protocols.NAIVE && <NaiveFields />}
       {protocol === Protocols.SNELL && <SnellFields />}
+      {protocol === Protocols.FPTN && <FptnFields />}
+      {protocol === Protocols.OPENFLUX && <OpenFluxFields />}
       {protocol === Protocols.ANYTLS && <AnyTlsFields />}
       {protocol === Protocols.MIERU && <MieruFields />}
       {protocol === Protocols.SUDOKU && <SudokuFields />}
@@ -1354,6 +1363,8 @@ export default function InboundFormModal({
                     Protocols.MTPROTO,
                     Protocols.AMNEZIAWG,
                     Protocols.SNELL,
+                    Protocols.FPTN,
+                    Protocols.OPENFLUX,
                     Protocols.ANYTLS,
                     Protocols.SHADOWTLS,
                     Protocols.TUIC,

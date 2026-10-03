@@ -23,6 +23,8 @@ export const NODE_ELIGIBLE_PROTOCOLS: Readonly<Record<string, true>> = {
   [Protocols.TUIC]: true,
   [Protocols.PINGTUNNEL]: true,
   [Protocols.TRUSTTUNNEL]: true,
+  [Protocols.FPTN]: true,
+  [Protocols.OPENFLUX]: true,
   [Protocols.NAIVE]: true,
   [Protocols.SNELL]: true,
   [Protocols.ANYTLS]: true,

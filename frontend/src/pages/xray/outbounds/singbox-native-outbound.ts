@@ -83,6 +83,16 @@ export function buildNativeSingBoxOutbound(protocol: string, tag = ''): NativeSi
         tls: { enabled: true, server_name: '' },
       };
       break;
+    case 'fptn':
+      settings = { token: '', mtu: 1400, sni: 'www.bing.com', bypass: 'sni-spoofing' };
+      break;
+    case 'openflux':
+      settings = {
+        secret: '',
+        context: '',
+        transports: [{ type: 'direct', priority: 100, dial: '' }],
+      };
+      break;
     case 'snell':
       settings = { server: '', server_port: 443, version: 4, psk: '' };
       break;
