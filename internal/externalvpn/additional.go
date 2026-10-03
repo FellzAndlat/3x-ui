@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"crypto/md5" // FPTN's token format requires MD5 certificate fingerprints.
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -80,7 +81,8 @@ func PrepareAdditional(ib *model.Inbound, previous string) error {
 			valid := false
 			if pair, err := tls.X509KeyPair([]byte(cert), []byte(key)); err == nil && len(pair.Certificate) > 0 {
 				if leaf, err := x509.ParseCertificate(pair.Certificate[0]); err == nil {
-					valid = leaf.VerifyHostname(host) == nil && time.Until(leaf.NotAfter) > 30*24*time.Hour
+					_, rsaKey := pair.PrivateKey.(*rsa.PrivateKey)
+					valid = rsaKey && !time.Now().Before(leaf.NotBefore) && leaf.VerifyHostname(host) == nil && time.Until(leaf.NotAfter) > 30*24*time.Hour
 				}
 			}
 			if !valid {
@@ -200,10 +202,13 @@ func (inst Instance) validateAdditional() error {
 	}
 	seen := map[string]bool{}
 	for _, c := range s.Clients {
-		if c.Email == "" || seen[c.Email] {
+		if c.Email == "" || strings.ContainsAny(c.Email, "\r\n\x00") || seen[c.Email] {
 			return fmt.Errorf("VPN clients require unique names")
 		}
 		seen[c.Email] = true
+		if inst.Protocol == model.OpenFlux && c.Enable && strings.TrimSpace(c.Password) != c.Password {
+			return fmt.Errorf("OpenFlux secret cannot begin or end with whitespace")
+		}
 		if c.Enable && (len(c.Password) < 32 || strings.ContainsAny(c.Password, "\r\n\x00")) {
 			return fmt.Errorf("VPN client secret must have at least 32 characters")
 		}

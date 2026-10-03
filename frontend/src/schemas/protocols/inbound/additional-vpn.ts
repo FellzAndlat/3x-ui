@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { NaiveClientSchema } from './naive';
 
 export const OpenFluxTransportSchema = z.object({
-  type: z.enum(['direct', 'yandex', 'vyandex', 'boards', 'mailru', 'cupsonline']),
+  type: z.enum(['direct', 'yandex', 'vyandex', 'boards', 'mailru']),
   url: z.string().default(''),
   priority: z.number().int().min(0).max(1000).default(50),
 });

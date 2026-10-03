@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"net"
 	"path/filepath"
 	"time"
 )
@@ -22,7 +23,12 @@ func newFPTNCertificate(host string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: host}, DNSNames: []string{host}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().AddDate(2, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
+	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: host}, NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().AddDate(2, 0, 0), KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, BasicConstraintsValid: true}
+	if ip := net.ParseIP(host); ip != nil {
+		cert.IPAddresses = []net.IP{ip}
+	} else {
+		cert.DNSNames = []string{host}
+	}
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
 	if err != nil {
 		return "", "", err
@@ -42,6 +48,12 @@ func fptnCertificateFiles(inst Instance, folder string) (string, string, error) 
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
 		return "", "", err
+	}
+	if _, ok := pair.PrivateKey.(*rsa.PrivateKey); !ok {
+		return "", "", fmt.Errorf("FPTN requires an RSA certificate for its RS256 access tokens")
+	}
+	if time.Now().Before(leaf.NotBefore) || !time.Now().Before(leaf.NotAfter) {
+		return "", "", fmt.Errorf("FPTN certificate is outside its validity period")
 	}
 	if err := leaf.VerifyHostname(s.Hostname); err != nil {
 		return "", "", err
