@@ -174,7 +174,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 				}
 			}
 			if rawRouting, ok := xrayCfg["routing"].(map[string]any); ok && len(rawRouting) > 0 {
-				if route, err := singbox.TranslateXrayRoutingWithGeoData(rawRouting, geodata.NewStore(filepath.Dir(singbox.GetBinaryPath()))); err != nil {
+				if route, err := singbox.TranslateXrayRoutingWithGeoData(rawRouting, geodata.NewStore(assetDir())); err != nil {
 					return nil, err
 				} else if len(route) > 0 {
 					cfg.Route = route
