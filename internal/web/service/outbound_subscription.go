@@ -2,24 +2,25 @@ package service
 
 import (
 	"context"
-	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"crypto/tls"
+	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/link"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
+	"net/http"
 )
 
 // filterOutboundsRejectedByCore drops outbounds the vendored xray-core config
@@ -36,6 +37,14 @@ func filterOutboundsRejectedByCore(label string, outbounds []any) ([]any, []stri
 	kept := make([]any, 0, len(outbounds))
 	var dropped []string
 	for _, ob := range outbounds {
+		if row, ok := ob.(map[string]any); ok && externalvpn.IsAdditionalOutbound(row) {
+			if err := externalvpn.ValidateAdditionalOutbound(row); err != nil {
+				dropped = append(dropped, err.Error())
+			} else {
+				kept = append(kept, ob)
+			}
+			continue
+		}
 		raw, err := json.Marshal(ob)
 		if err == nil {
 			if buildErr := xray.ValidateOutboundConfig(raw); buildErr != nil && !shouldSkipLegacyUnencryptedOutboundRejection(coreVersion, buildErr) {

@@ -1,18 +1,17 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
@@ -20,8 +19,8 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/json_util"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"go.uber.org/atomic"
+	"path/filepath"
 )
 
 var (
@@ -497,6 +496,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		return nil, err
 	}
 	if err := s.settingService.applyXrayYouTubeServer(xrayConfig); err != nil {
+		return nil, err
+	}
+	if err := transformAdditionalOutbounds(xrayConfig); err != nil {
 		return nil, err
 	}
 	return xrayConfig, nil

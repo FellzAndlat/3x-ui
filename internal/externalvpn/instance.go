@@ -1,15 +1,15 @@
 package externalvpn
 
 import (
-	"crypto/rand"
-	"encoding/json"
 	"fmt"
 	"net"
-	"net/url"
 	"strconv"
 	"strings"
 
+	"crypto/rand"
+	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"net/url"
 )
 
 type Client struct {
@@ -26,18 +26,20 @@ type OpenFluxTransport struct {
 }
 
 type Settings struct {
-	Image         string              `json:"image"`
-	MTU           int                 `json:"mtu"`
-	MaxSessions   int                 `json:"maxSessions"`
-	Bandwidth     int                 `json:"bandwidth"`
-	DetectProbing bool                `json:"detectProbing"`
-	AllowedSNI    string              `json:"allowedSni"`
-	AdsFilter     bool                `json:"adsFilter"`
-	TorrentFilter bool                `json:"torrentFilter"`
-	SpamFilter    bool                `json:"spamFilter"`
-	MetricsKey    string              `json:"metricsKey"`
-	Context       string              `json:"context"`
-	Transports    []OpenFluxTransport `json:"transports"`
+	CertificatePEM string              `json:"certificatePEM"`
+	PrivateKeyPEM  string              `json:"privateKeyPEM"`
+	Image          string              `json:"image"`
+	MTU            int                 `json:"mtu"`
+	MaxSessions    int                 `json:"maxSessions"`
+	Bandwidth      int                 `json:"bandwidth"`
+	DetectProbing  bool                `json:"detectProbing"`
+	AllowedSNI     string              `json:"allowedSni"`
+	AdsFilter      bool                `json:"adsFilter"`
+	TorrentFilter  bool                `json:"torrentFilter"`
+	SpamFilter     bool                `json:"spamFilter"`
+	MetricsKey     string              `json:"metricsKey"`
+	Context        string              `json:"context"`
+	Transports     []OpenFluxTransport `json:"transports"`
 
 	Key            int      `json:"key"`
 	Encrypt        string   `json:"encrypt"`

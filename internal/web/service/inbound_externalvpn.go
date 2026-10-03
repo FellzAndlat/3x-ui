@@ -1,9 +1,9 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 
+	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
@@ -124,4 +124,12 @@ func (s *InboundService) DesiredExternalVPNInstances() ([]externalvpn.Instance, 
 		out = append(out, inst)
 	}
 	return out, nil
+}
+
+func validateAdditionalVPNClients(ib *model.Inbound) error {
+	if ib.Protocol != model.FPTN && ib.Protocol != model.OpenFlux {
+		return nil
+	}
+	_, err := externalvpn.FromInbound(ib)
+	return err
 }

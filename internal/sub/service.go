@@ -1,14 +1,10 @@
 package sub
 
 import (
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
 	"net"
-	"net/url"
 	"slices"
 	"sort"
 	"strconv"
@@ -16,9 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"net/url"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
-
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
@@ -298,7 +297,7 @@ func (s *SubService) clientForLink(inbound *model.Inbound, email string) (model.
 // synced last (see TunnelAllowedIPsByInbound / amneziaWGClientAddresses).
 func (s *SubService) clientsForLinkExport(inbound *model.Inbound) ([]model.Client, error) {
 	if inbound.Protocol == model.WireGuard || inbound.Protocol == model.AmneziaWG ||
-		inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Sudoku || inbound.Protocol == model.TrustTunnel {
+		inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Sudoku || inbound.Protocol == model.TrustTunnel || inbound.Protocol == model.FPTN || inbound.Protocol == model.OpenFlux {
 		// These protocols keep the client password in the inbound settings JSON.
 		// Prefer that source so subscriptions also work for existing rows whose
 		// normalized clients record predates password persistence.
@@ -441,7 +440,7 @@ func (s *SubService) matchingClients(inbound *model.Inbound, subId string) []mod
 		}
 	}
 
-	if inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Sudoku {
+	if inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Sudoku || inbound.Protocol == model.FPTN || inbound.Protocol == model.OpenFlux {
 		if settingsClients, settingsErr := s.inboundService.GetClients(inbound); settingsErr == nil {
 			settingsByEmail := make(map[string]model.Client, len(settingsClients))
 			for _, settingsClient := range settingsClients {

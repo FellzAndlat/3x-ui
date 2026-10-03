@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"strings"
 	"time"
 
+	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
@@ -15,7 +15,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/util/random"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/runtime"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"gorm.io/gorm"
 )
 
@@ -124,6 +123,9 @@ func (s *ClientService) delInboundClients(inboundSvc *InboundService, inboundId 
 	}
 	prevSettings := oldInbound.Settings
 	oldInbound.Settings = string(newSettings)
+	if err := validateAdditionalVPNClients(oldInbound); err != nil {
+		return false, err
+	}
 
 	var sharedSet map[string]bool
 	if !keepTraffic {
@@ -448,7 +450,7 @@ func (s *ClientService) AddInboundClient(inboundSvc *InboundService, data *model
 			return false, common.NewError("client email is required")
 		}
 		switch oldInbound.Protocol {
-		case "trojan", "trusttunnel", "naive", "anytls", "shadowtls", "mieru":
+		case "trojan", "trusttunnel", "naive", "snell", "fptn", "openflux", "anytls", "shadowtls", "mieru":
 			if client.Password == "" {
 				return false, common.NewError("client password is required")
 			}
@@ -518,6 +520,9 @@ func (s *ClientService) AddInboundClient(inboundSvc *InboundService, data *model
 
 	prevSettings := oldInbound.Settings
 	oldInbound.Settings = string(newSettings)
+	if err := validateAdditionalVPNClients(oldInbound); err != nil {
+		return false, err
+	}
 
 	// From the stamped wire entries, not from clients: created_at / updated_at /
 	// subId are written onto interfaceClients above, after clients was parsed.
@@ -709,7 +714,7 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 
 	newClientId := ""
 	switch oldInbound.Protocol {
-	case "trojan", "trusttunnel", "naive", "anytls", "shadowtls", "mieru":
+	case "trojan", "trusttunnel", "naive", "snell", "fptn", "openflux", "anytls", "shadowtls", "mieru":
 		newClientId = clients[0].Password
 	case "shadowsocks":
 		newClientId = clients[0].Email
@@ -914,6 +919,9 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 
 	prevSettings := oldInbound.Settings
 	oldInbound.Settings = string(newSettings)
+	if err := validateAdditionalVPNClients(oldInbound); err != nil {
+		return false, err
+	}
 
 	// From the stamped wire entry, not from clients[0]: created_at, the
 	// preserved subId and the WireGuard carry-forward land on interfaceClients.
@@ -1172,6 +1180,9 @@ func (s *ClientService) DelInboundClientByEmail(inboundSvc *InboundService, inbo
 
 	prevSettings := oldInbound.Settings
 	oldInbound.Settings = string(newSettings)
+	if err := validateAdditionalVPNClients(oldInbound); err != nil {
+		return false, err
+	}
 
 	emailShared, err := inboundSvc.emailUsedByOtherInbounds(email, inboundId)
 	if err != nil {

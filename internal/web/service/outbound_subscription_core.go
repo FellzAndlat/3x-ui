@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/singbox"
 )
@@ -34,6 +35,14 @@ func filterSubscriptionOutboundsWithIssues(label string, members []any) ([]any, 
 		}
 		protocol, _ := ob["protocol"].(string)
 		var err error
+		if externalvpn.IsAdditionalOutbound(ob) {
+			if err := externalvpn.ValidateAdditionalOutbound(ob); err != nil {
+				issues = append(issues, fmt.Sprintf("%s: %v", tag, err))
+			} else {
+				kept = append(kept, raw)
+			}
+			continue
+		}
 		switch strings.ToLower(strings.TrimSpace(protocol)) {
 		case "loopback":
 			err = fmt.Errorf("Xray loopback members cannot be translated to sing-box")

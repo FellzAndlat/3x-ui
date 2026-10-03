@@ -5,16 +5,17 @@
 package link
 
 import (
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"encoding/base64"
+	"encoding/json"
+	"net/url"
 )
 
 // Outbound is the minimal shape we emit for each parsed link.
@@ -118,6 +119,10 @@ func splitLines(s string) []string {
 func ParseLink(link string) (*ParseResult, error) {
 	link = strings.TrimSpace(link)
 	switch {
+	case strings.HasPrefix(link, "fptn:"):
+		return parseAdditionalVPN(link, "fptn")
+	case strings.HasPrefix(link, "openflux://"):
+		return parseAdditionalVPN(link, "openflux")
 	case strings.HasPrefix(link, "snell://"):
 		return parseSnell(link)
 	case strings.HasPrefix(link, "vmess://"):

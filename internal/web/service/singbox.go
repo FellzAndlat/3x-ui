@@ -2,26 +2,27 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"encoding/json"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/singbox"
 	"github.com/SawaMEN/3x-ui/v3/internal/tuic"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/tail"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray/geodata"
+	"path/filepath"
 )
 
 var (
@@ -139,6 +140,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 		}}
 	}
 
+	managedOutboundTags := map[string]bool{}
 	dnsOutboundTags := make(map[string]struct{})
 	if template, err := singBoxSettingService.GetXrayConfigTemplate(); err == nil {
 		var xrayCfg map[string]any
@@ -250,6 +252,15 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 						if err := json.Unmarshal(bridged, &ob); err != nil {
 							return nil, fmt.Errorf("amneziawg outbound %d: invalid bridge: %w", i, err)
 						}
+					}
+					if externalvpn.IsAdditionalOutbound(ob) {
+						tag, _ := ob["tag"].(string)
+						managedOutboundTags[tag] = true
+						bridge, err := externalvpn.EnsureOutbound(ob)
+						if err != nil {
+							return nil, fmt.Errorf("outbound %q: %w", tag, err)
+						}
+						ob = bridge
 					}
 					translated, err := singbox.TranslateXrayOutbound(ob)
 					if err != nil {
@@ -497,6 +508,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 	if err := singBoxSettingService.applySingBoxYouTubeServer(cfg); err != nil {
 		return nil, err
 	}
+	externalvpn.KeepOutbounds(managedOutboundTags)
 	return cfg, nil
 }
 

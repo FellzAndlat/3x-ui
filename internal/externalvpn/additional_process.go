@@ -2,19 +2,19 @@ package externalvpn
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
+	"crypto/sha256"
+	"encoding/hex"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"os/exec"
+	"path/filepath"
 )
 
 func containerName(id int) string {
@@ -69,7 +69,7 @@ func (m *Manager) additionalCommand(inst Instance, metricsAddr string) (*exec.Cm
 	if _, err := exec.LookPath("docker"); err != nil {
 		return fail(fmt.Errorf("FPTN requires Docker for isolated networking: %w", err))
 	}
-	cert, key, err := certificate(inst, folder)
+	cert, key, err := fptnCertificateFiles(inst, folder)
 	if err != nil {
 		return fail(err)
 	}
@@ -87,7 +87,13 @@ func (m *Manager) additionalCommand(inst Instance, metricsAddr string) (*exec.Cm
 	for _, c := range inst.Settings.Clients {
 		if c.Enable {
 			sum := sha256.Sum256([]byte(c.Password))
-			fmt.Fprintf(&users, "%s %x %d\n", FPTNUsername(c.Email), sum, inst.Settings.Bandwidth)
+			bandwidth := inst.Settings.Bandwidth
+			// Upstream treats zero as a zero-rate bucket, not unlimited.
+			// Use its largest safe signed-int rate for the panel's unlimited preset.
+			if bandwidth == 0 {
+				bandwidth = 2000
+			}
+			fmt.Fprintf(&users, "%s %x %d\n", FPTNUsername(c.Email), sum, bandwidth)
 		}
 	}
 	if err := writePrivate(filepath.Join(folder, "users.list"), []byte(users.String())); err != nil {
@@ -98,7 +104,7 @@ func (m *Manager) additionalCommand(inst Instance, metricsAddr string) (*exec.Cm
 	args := []string{"run", "--rm", "--name", containerName(inst.ID), "--label", "app=3x-ui-fptn", "--cap-add", "NET_ADMIN", "--cap-add", "NET_RAW", "--device", "/dev/net/tun:/dev/net/tun", "--publish", inst.Bind() + ":443/tcp", "--publish", metricsAddr + ":443/tcp", "--mount", "type=bind,src=" + folder + ",dst=/etc/fptn", "--ulimit", "nofile=65536:65536"}
 	env := map[string]string{
 		"ENABLE_DETECT_PROBING": strconv.FormatBool(inst.Settings.DetectProbing), "ALLOWED_SNI_LIST": inst.Settings.AllowedSNI,
-		"ENABLE_DOMAIN_BLACKLIST_FILTER": "false", "DOMAIN_BLACKLIST_URLS": "", "ENABLE_ADS_FILTER": strconv.FormatBool(inst.Settings.AdsFilter), "ADS_BLOCKLIST_URLS": "",
+		"ENABLE_DOMAIN_BLACKLIST_FILTER": "false", "DOMAIN_BLACKLIST_URLS": "", "ENABLE_ADS_FILTER": strconv.FormatBool(inst.Settings.AdsFilter), "ADS_BLOCKLIST_URLS": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
 		"ENABLE_TORRENT_FILTER": strconv.FormatBool(inst.Settings.TorrentFilter), "ENABLE_SPAM_FILTER": strconv.FormatBool(inst.Settings.SpamFilter),
 		"PROMETHEUS_SECRET_ACCESS_KEY": inst.Settings.MetricsKey, "USE_REMOTE_SERVER_AUTH": "false", "MAX_ACTIVE_SESSIONS_PER_USER": strconv.Itoa(inst.Settings.MaxSessions),
 		"MTU_SIZE": strconv.Itoa(inst.Settings.MTU), "USING_DNS_SERVER": "unbound", "DNS_IPV6_ENABLE": "false", "DNS_IPV4_PRIMARY": "1.1.1.1", "DNS_IPV4_SECONDARY": "9.9.9.9", "DATA_DIR": "/etc/fptn/data",
@@ -133,7 +139,7 @@ func cleanupAdditional(id int, p model.Protocol) {
 func InstallOpenFlux(ctx context.Context) error {
 	externalVPNUpdateMu.Lock()
 	defer externalVPNUpdateMu.Unlock()
-	spec := releaseSpec{protocol: model.OpenFlux, api: "https://api.github.com/repos/p1neappleXpress/OpenFlux/releases/latest", binaryName: "openflux"}
+	spec := releaseSpec{protocol: model.OpenFlux, api: "https://api.github.com/repos/p1neappleXpress/OpenFlux/releases/tags/v0.3.0", binaryName: "openflux"}
 	rel, err := fetchLatestRelease(ctx, spec)
 	if err != nil {
 		return err

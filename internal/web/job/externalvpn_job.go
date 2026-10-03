@@ -28,6 +28,7 @@ func (j *ExternalVPNJob) Run() {
 		logger.Warning("external VPN reconcile:", err)
 		return
 	}
+	externalvpn.RefreshOutbounds()
 	mgr := externalvpn.GetManager()
 	mgr.Reconcile(desired)
 

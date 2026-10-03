@@ -3,23 +3,23 @@ package externalvpn
 import (
 	"bufio"
 	"context"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"regexp"
+	"strconv"
+	"time"
+
 	"crypto/rand"
 	"crypto/sha1" // Upstream FPTN's TLS session marker, not a credential hash.
 	"crypto/x509"
 	encodingbinary "encoding/binary"
 	"encoding/json"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strconv"
-	"time"
-
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	utls "github.com/refraction-networking/utls"
+	"net/http"
+	"path/filepath"
 )
 
 var fptnMetricPattern = regexp.MustCompile(`^fptn_user_(incoming|outgoing)_traffic_bytes\{[^}]*username="([a-zA-Z0-9]+)"[^}]*\}\s+([0-9.eE+\-]+)$`)
@@ -50,9 +50,13 @@ func collectFPTNTraffic(proc *running) (map[string]trafficCounters, error) {
 	if cert == "" {
 		cert = filepath.Join(directory(), strconv.Itoa(inst.ID), "cert.pem")
 	}
-	data, err := os.ReadFile(cert)
-	if err != nil {
-		return nil, err
+	data := []byte(inst.Settings.CertificatePEM)
+	if inst.Settings.Certificate != "" || len(data) == 0 {
+		var err error
+		data, err = os.ReadFile(cert)
+		if err != nil {
+			return nil, err
+		}
 	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(data) {

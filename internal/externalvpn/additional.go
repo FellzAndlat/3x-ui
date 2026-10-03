@@ -2,22 +2,25 @@ package externalvpn
 
 import (
 	"bytes"
+	"fmt"
+	"net"
+	"os"
+	"regexp"
+	"strings"
+	"time"
+
 	"compress/flate"
 	"crypto/md5" // FPTN's token format requires MD5 certificate fingerprints.
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"fmt"
-	"net"
-	"net/url"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"net/url"
+	"path/filepath"
 )
 
 const DefaultFPTNImage = "fptnvpn/fptn-vpn-server:0.4.4"
@@ -65,6 +68,29 @@ func PrepareAdditional(ib *model.Inbound, previous string) error {
 				}
 			}
 			raw["metricsKey"] = key
+		}
+
+		if raw["certificate"] == nil || raw["certificate"] == "" {
+			cert, _ := raw["certificatePEM"].(string)
+			key, _ := raw["privateKeyPEM"].(string)
+			if cert == "" && old.CertificatePEM != "" {
+				cert, key = old.CertificatePEM, old.PrivateKeyPEM
+			}
+			host, _ := raw["hostname"].(string)
+			valid := false
+			if pair, err := tls.X509KeyPair([]byte(cert), []byte(key)); err == nil && len(pair.Certificate) > 0 {
+				if leaf, err := x509.ParseCertificate(pair.Certificate[0]); err == nil {
+					valid = leaf.VerifyHostname(host) == nil && time.Until(leaf.NotAfter) > 30*24*time.Hour
+				}
+			}
+			if !valid {
+				var err error
+				cert, key, err = newFPTNCertificate(host)
+				if err != nil {
+					return err
+				}
+			}
+			raw["certificatePEM"], raw["privateKeyPEM"] = cert, key
 		}
 	} else {
 		if raw["transports"] == nil {
@@ -213,9 +239,13 @@ func ExportAdditionalLink(inst Instance, email, address string, port int, remark
 		if cert == "" {
 			cert = filepath.Join(directory(), fmt.Sprint(inst.ID), "cert.pem")
 		}
-		data, err := os.ReadFile(cert)
-		if err != nil {
-			return "", err
+		data := []byte(inst.Settings.CertificatePEM)
+		if inst.Settings.Certificate != "" || len(data) == 0 {
+			var err error
+			data, err = os.ReadFile(cert)
+			if err != nil {
+				return "", err
+			}
 		}
 		block, _ := pem.Decode(data)
 		if block == nil || block.Type != "CERTIFICATE" {
