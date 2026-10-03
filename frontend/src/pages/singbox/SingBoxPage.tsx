@@ -1187,7 +1187,7 @@ export default function SingBoxPage() {
     endpoints: 'Endpoints',
     certificates: 'Сертификаты',
     network: 'Сеть',
-    advanced: 'Расширенные',
+    advanced: t('pages.singBox.sections.advanced'),
   };
 
   const [outboundModalOpen, setOutboundModalOpen] = useState(false);

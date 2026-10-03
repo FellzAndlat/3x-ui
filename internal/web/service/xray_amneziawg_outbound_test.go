@@ -142,6 +142,7 @@ func TestTransformAmneziaWGOutbounds_NoopWithoutAWG(t *testing.T) {
 }
 
 func TestCheckXrayConfig_AcceptsValidAWGOutbound(t *testing.T) {
+	setupSettingTestDB(t)
 	// A syntactically valid AWG outbound must pass panel-side validation --
 	// the Xray-core loader would reject the unknown protocol outright.
 	priv, pub, err := wgKeypairForTest()
@@ -174,6 +175,7 @@ func TestCheckXrayConfig_AcceptsValidAWGOutbound(t *testing.T) {
 }
 
 func TestCheckXrayConfig_RejectsBrokenAWGOutbound(t *testing.T) {
+	setupSettingTestDB(t)
 	// The emptied field's partner must be a real key, or the case is decided
 	// by that partner and stays green with the empty-key guard removed.
 	priv, pub, err := wgKeypairForTest()
@@ -299,6 +301,7 @@ func TestTransformAmneziaWGOutbounds_EmptyTagIsAnError(t *testing.T) {
 }
 
 func TestCheckXrayConfig_RejectsEmptyTagAWGOutbound(t *testing.T) {
+	setupSettingTestDB(t)
 	priv, pub, err := wgKeypairForTest()
 	if err != nil {
 		t.Fatal(err)
@@ -321,6 +324,7 @@ func TestCheckXrayConfig_RejectsEmptyTagAWGOutbound(t *testing.T) {
 }
 
 func TestCheckXrayConfig_RejectsNonStringTagAWGOutbound(t *testing.T) {
+	setupSettingTestDB(t)
 	template := `{
 		"outbounds": [{
 			"protocol": "amneziawg",
