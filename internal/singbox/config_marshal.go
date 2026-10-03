@@ -234,7 +234,8 @@ func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string
 		if version != 4 && version != 6 {
 			return fmt.Errorf("sing-box outbound %q Snell requires version 4 or 6", tag)
 		}
-		if rawString(outbound, "psk") == "" {
+		if version == 6 && (len(rawString(outbound, "psk")) < 12 || len(rawString(outbound, "psk")) > 255) { return fmt.Errorf("sing-box outbound %q Snell v6 PSK must be 12..255 bytes", tag) }
+ if rawString(outbound, "psk") == "" {
 			return fmt.Errorf("sing-box outbound %q Snell requires PSK", tag)
 		}
 	}

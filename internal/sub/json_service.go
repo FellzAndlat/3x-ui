@@ -17,6 +17,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/singbox"
+ "github.com/SawaMEN/3x-ui/v3/internal/snell"
 	"github.com/SawaMEN/3x-ui/v3/internal/tuic"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/json_util"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/random"
@@ -613,7 +614,19 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 				}
 				continue
 			}
-			if inbound.Protocol == model.NaiveProxy {
+			if inbound.Protocol == model.Snell {
+ settings, err := snell.Parse(inbound.Settings)
+ generated := 0
+ if err == nil && client.Password != "" {
+ for _, endpoint := range subReq.shareEndpointsForInbound(inbound) {
+ native := settings.Outbound(endpoint.Address, endpoint.Port, client)
+ native["tag"] = fmt.Sprintf("Snell · %s-%d", client.Email, len(proxies)+1)
+ proxies = append(proxies, nativeOutbound{out:native}); generated++
+ }
+ }
+ if generated == 0 { formatUnsupported = true }; continue
+ }
+ if inbound.Protocol == model.NaiveProxy {
 				// Naive is not an Xray outbound, but sing-box has a native
 				// representation. Keep it in the structured profile instead of
 				// forcing the whole subscription back to raw links. Host/external

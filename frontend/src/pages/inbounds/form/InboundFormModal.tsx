@@ -59,6 +59,7 @@ import { AdvancedAllEditor, AdvancedSliceEditor } from './advanced-editors';
 import { formatInboundIssue, formatInboundValidation } from './formatValidationError';
 import {
   AmneziawgFields,
+  SnellFields,
   AnyTlsFields,
   ShadowTlsFields,
   HttpFields,
@@ -341,6 +342,7 @@ export default function InboundFormModal({
     protocol !== Protocols.NAIVE &&
     protocol !== Protocols.MIERU &&
     protocol !== Protocols.SUDOKU &&
+    protocol !== Protocols.SNELL &&
     protocol !== Protocols.SHADOWTLS;
 
   const wPort = useWatch({ control, name: 'port' });
@@ -363,6 +365,7 @@ export default function InboundFormModal({
       Protocols.NAIVE,
       Protocols.MIERU,
       Protocols.SUDOKU,
+      Protocols.SNELL,
       Protocols.ANYTLS,
       Protocols.SHADOWTLS,
     ]);
@@ -655,6 +658,7 @@ export default function InboundFormModal({
       } else if (
         next === Protocols.WIREGUARD ||
         next === Protocols.TUNNEL ||
+        next === Protocols.SNELL ||
         next === Protocols.ANYTLS ||
         next === Protocols.SHADOWTLS
       ) {
@@ -942,6 +946,7 @@ export default function InboundFormModal({
       {protocol === Protocols.PINGTUNNEL && <PingtunnelFields />}
       {protocol === Protocols.TRUSTTUNNEL && <TrustTunnelFields />}
       {protocol === Protocols.NAIVE && <NaiveFields />}
+      {protocol === Protocols.SNELL && <SnellFields />}
       {protocol === Protocols.ANYTLS && <AnyTlsFields />}
       {protocol === Protocols.MIERU && <MieruFields />}
       {protocol === Protocols.SUDOKU && <SudokuFields />}
@@ -1348,6 +1353,7 @@ export default function InboundFormModal({
                     Protocols.WIREGUARD,
                     Protocols.MTPROTO,
                     Protocols.AMNEZIAWG,
+                    Protocols.SNELL,
                     Protocols.ANYTLS,
                     Protocols.SHADOWTLS,
                     Protocols.TUIC,

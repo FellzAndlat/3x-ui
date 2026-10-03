@@ -1,0 +1,31 @@
+name: Protocol integration build
+on:
+  push:
+    branches: [update]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: protocol-build-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - name: Format Go sources
+        run: gofmt -w internal/snell internal/sub/snell_link.go
+      - name: Frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+      - name: Check frontend types and build
+        working-directory: frontend
+        run: npm run typecheck && npm run build:ci
+      - name: Build panel without running tests
+        run: go build -p 12 ./...

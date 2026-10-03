@@ -12,6 +12,7 @@ const CLIENT_ATTACHABLE_PROTOCOLS = new Set([
   'tuic',
   'trusttunnel',
   'naive',
+  'snell',
   'anytls',
   'shadowtls',
   'mieru',

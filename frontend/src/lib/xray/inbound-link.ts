@@ -1401,6 +1401,7 @@ export function getInboundClients(inbound: Inbound): ClientShape[] | null {
       return (inbound.settings.clients ?? []) as ClientShape[];
     case 'tuic':
       return (inbound.settings.clients ?? []) as ClientShape[];
+    case 'snell':
     case 'sudoku':
       return (inbound.settings.clients ?? []) as ClientShape[];
     case 'shadowsocks': {
@@ -1494,6 +1495,21 @@ export function genLink(input: GenLinkInput): string {
       });
     case 'mtproto':
       return genMtprotoLink({ inbound, address, port, clientSecret: client.secret ?? '' });
+    case 'snell': {
+      const settings = inbound.settings;
+      if (!settings.psk || !client.password) return '';
+      const params = new URLSearchParams({
+        version: String(settings.version === 5 ? 4 : 6),
+        userkey: client.password,
+      });
+      if (settings.version === 6) params.set('mode', settings.mode);
+      else {
+        params.set('obfs', settings.obfsMode);
+        params.set('obfs-host', settings.obfsHost);
+      }
+      const host = address.includes(':') ? `[${address.replace(/^\[|\]$/g, '')}]` : address;
+      return `snell://${encodeURIComponent(settings.psk)}@${host}:${port}?${params}#${encodeURIComponent(remark)}`;
+    }
     case 'sudoku':
       return genSudokuLink({
         address,

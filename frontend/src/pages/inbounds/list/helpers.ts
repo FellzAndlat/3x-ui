@@ -102,6 +102,7 @@ export function inboundNetworkLabels(record: {
       return ['ICMP'];
     case 'trusttunnel':
       return ['TCP', 'UDP'];
+    case 'snell':
     case 'anytls':
       return ['TCP'];
     case 'shadowtls':
@@ -167,6 +168,7 @@ export function isInboundMultiUser(record: { protocol: string; settings: unknown
     case 'amneziawg':
     case 'tuic':
     case 'trusttunnel':
+    case 'snell':
     case 'vk-turn-proxy':
       return true;
     case 'shadowsocks':

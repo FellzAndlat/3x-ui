@@ -1405,7 +1405,7 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 			inbound.Protocol == model.Pingtunnel || inbound.Protocol == model.TrustTunnel ||
 			inbound.Protocol == model.AmneziaWG ||
 			inbound.Protocol == model.NaiveProxy ||
-			inbound.Protocol == model.AnyTLS ||
+			inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS ||
 			inbound.Protocol == model.ShadowTLS) {
 			if inbound.NodeID != nil {
 				markDirty = true
@@ -1756,7 +1756,7 @@ func (s *InboundService) SetInboundEnable(id int, enable bool) (bool, error) {
 	}
 	inbound.Enable = enable
 
-	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS {
+	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS {
 		core, coreErr := s.coreTypeForInbound(inbound)
 		if coreErr != nil {
 			return false, coreErr
@@ -1884,7 +1884,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 			}
 		}
 	}
-	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Mieru {
+	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Mieru {
 		for _, client := range clients {
 			if client.Email == "" {
 				return inbound, false, common.NewError("empty client email")
@@ -2072,7 +2072,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		localSidecarTransition := oldProtocol == model.MTProto || oldInbound.Protocol == model.MTProto || oldProtocol == model.TUIC || oldInbound.Protocol == model.TUIC || oldProtocol == model.Mieru || oldInbound.Protocol == model.Mieru || oldProtocol == model.Pingtunnel || oldInbound.Protocol == model.Pingtunnel || oldProtocol == model.TrustTunnel || oldInbound.Protocol == model.TrustTunnel
 		naiveSingBoxRuntime := false
 		if oldProtocol == model.NaiveProxy || oldInbound.Protocol == model.NaiveProxy ||
-			oldProtocol == model.AnyTLS || oldInbound.Protocol == model.AnyTLS ||
+			oldProtocol == model.Snell || oldInbound.Protocol == model.Snell || oldProtocol == model.AnyTLS || oldInbound.Protocol == model.AnyTLS ||
 			oldProtocol == model.ShadowTLS || oldInbound.Protocol == model.ShadowTLS {
 			core, coreErr := s.coreTypeForInbound(oldInbound)
 			if coreErr != nil {

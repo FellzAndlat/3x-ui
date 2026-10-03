@@ -239,7 +239,7 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		if inbound.NodeID != nil {
 			continue
 		}
-		if model.ShadowTLSTransport(inbound.Settings) != nil || inbound.Protocol == model.MTProto || inbound.Protocol == model.AmneziaWG || inbound.Protocol == model.TUIC || inbound.Protocol == model.Pingtunnel || inbound.Protocol == model.TrustTunnel || inbound.Protocol == model.VKTurnProxy || inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Mieru || inbound.Protocol == model.Sudoku {
+		if model.ShadowTLSTransport(inbound.Settings) != nil || inbound.Protocol == model.MTProto || inbound.Protocol == model.AmneziaWG || inbound.Protocol == model.TUIC || inbound.Protocol == model.Pingtunnel || inbound.Protocol == model.TrustTunnel || inbound.Protocol == model.VKTurnProxy || inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Mieru || inbound.Protocol == model.Sudoku {
 			// NaiveProxy is a sing-box-only inbound. A legacy Naive row may still
 			// exist when the selected core was switched back to Xray; never emit it
 			// into an Xray config because xray-core has no Naive inbound handler.

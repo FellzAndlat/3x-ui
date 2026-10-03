@@ -89,6 +89,7 @@ export function canEnableSniffing(values: { protocol: string }): boolean {
     values.protocol !== 'naive' &&
     values.protocol !== 'mieru' &&
     values.protocol !== 'sudoku' &&
+    values.protocol !== 'snell' &&
     values.protocol !== 'anytls' &&
     values.protocol !== 'shadowtls'
   );

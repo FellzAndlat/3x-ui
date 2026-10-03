@@ -75,6 +75,7 @@ var nodeEligibleProtocols = map[model.Protocol]bool{
 	model.Pingtunnel:  true,
 	model.TrustTunnel: true,
 	model.NaiveProxy:  true,
+	model.Snell:       true,
 	model.AnyTLS:      true,
 	model.ShadowTLS:   true,
 	model.Mieru:       true,

@@ -1,3 +1,4 @@
+export { default as SnellFields } from './snell';
 export { default as AnyTlsFields } from './anytls';
 export { default as ShadowTlsFields } from './shadowtls';
 export { default as TunFields } from './tun';

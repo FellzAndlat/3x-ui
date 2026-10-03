@@ -316,6 +316,7 @@ function clientSchemaForProtocol(protocol: string): z.ZodType | null {
       return ShadowTlsClientSchema;
     case 'tuic':
       return TuicClientSchema;
+    case 'snell':
     case 'naive':
     case 'trusttunnel':
       return NaiveClientSchema;
