@@ -133,7 +133,11 @@ export default function OutboundFormModal({
     if (!link) return;
     let parsed: Record<string, unknown> | null = null;
     if (link.startsWith('fptn:') || link.startsWith('openflux://')) {
-      const result = await HttpUtil.post('/panel/api/server/externalvpn/parse-link', { link });
+      const result = await HttpUtil.post(
+        '/panel/api/server/externalvpn/parse-link',
+        { link },
+        { headers: { 'Content-Type': 'application/json' } },
+      );
       if (!result?.success) {
         messageApi.error(result?.msg || 'Wrong Link!');
         return;

@@ -851,7 +851,7 @@
         "vpnInstalled": "Компонент установлен",
         "vpnInstallFailed": "Не удалось установить компонент",
         "fptnSessions": "Сессий на пользователя",
-        "fptnBandwidth": "Скорость, Мибит/с (0 — без ограничения)",
+        "fptnBandwidth": "Скорость, Мибит/с (0 — максимум 2000)",
         "fptnProbing": "Защита от активного зондирования",
         "fptnAds": "Фильтр рекламы FPTN",
         "fptnTorrent": "Блокировать BitTorrent",

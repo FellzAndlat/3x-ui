@@ -851,7 +851,7 @@
         "vpnInstalled": "Component installed",
         "vpnInstallFailed": "Component installation failed",
         "fptnSessions": "Sessions per user",
-        "fptnBandwidth": "Bandwidth, Mibit/s (0 = unlimited)",
+        "fptnBandwidth": "Bandwidth, Mibit/s (0 = maximum 2000)",
         "fptnProbing": "Active probing protection",
         "fptnAds": "FPTN ad filter",
         "fptnTorrent": "Block BitTorrent",
