@@ -40,7 +40,12 @@ func (j *OutboundSubscriptionJob) Run() {
 	if count > 0 {
 		logger.Infof("Refreshed %d outbound subscription(s)", count)
 		// Ask the xray manager to restart/reload on the next 30s check.
-		j.xraySvc.SetToNeedRestart()
+		core, _ := (&service.SettingService{}).GetCoreType()
+		if core == service.CoreTypeSingBox {
+			(&service.SingBoxService{}).SetToNeedRestart()
+		} else {
+			j.xraySvc.SetToNeedRestart()
+		}
 		// Also broadcast an invalidate so the UI can refresh the xray setting
 		// view (new outbounds will be visible after the reload cycle).
 		websocket.BroadcastInvalidate(websocket.MessageTypeOutbounds)

@@ -107,3 +107,62 @@ func (p *singBoxBatchProcess) GetResult() string {
 	}
 	return ""
 }
+
+// automaticProbeContext includes only the tested outbounds and their dialer
+// dependencies. Unrelated loopbacks/DNS/unsupported protocols must not poison
+// an otherwise valid probe batch on the selected core.
+func automaticProbeContext(itemsJSON, allJSON string) (string, error) {
+	var items, all []map[string]any
+	if err := json.Unmarshal([]byte(itemsJSON), &items); err != nil {
+		return "", err
+	}
+	if err := json.Unmarshal([]byte(allJSON), &all); err != nil {
+		return "", err
+	}
+	byTag := make(map[string]map[string]any)
+	for _, ob := range all {
+		tag, _ := ob["tag"].(string)
+		byTag[tag] = ob
+	}
+	for _, ob := range items {
+		tag, _ := ob["tag"].(string)
+		byTag[tag] = ob
+	}
+	var contextOutbounds []map[string]any
+	visited := make(map[string]bool)
+	var add func(string)
+	add = func(tag string) {
+		if visited[tag] {
+			return
+		}
+		visited[tag] = true
+		ob, ok := byTag[tag]
+		if !ok {
+			return
+		}
+		contextOutbounds = append(contextOutbounds, ob)
+		for _, dependency := range probeOutboundDependencies(ob) {
+			add(dependency)
+		}
+		if proxy, ok := ob["proxySettings"].(map[string]any); ok {
+			if dependency, ok := proxy["tag"].(string); ok {
+				add(dependency)
+			}
+		}
+	}
+	for _, ob := range items {
+		tag, _ := ob["tag"].(string)
+		add(tag)
+	}
+	data, err := json.Marshal(contextOutbounds)
+	return string(data), err
+}
+
+func (s *OutboundService) TestAutomaticOutbounds(items, target, all, mode, core string) ([]*TestOutboundResult, error) {
+	contextJSON, err := automaticProbeContext(items, all)
+	if err != nil {
+		return nil, err
+	}
+	probe := &OutboundService{CoreType: core}
+	return probe.TestOutbounds(items, target, contextJSON, mode)
+}

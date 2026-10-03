@@ -96,7 +96,7 @@ type httpBatchItem struct {
 
 func probeModeLabel(mode string) string {
 	switch mode {
-	case "tcp", "real":
+	case "tcp", "real", "speed":
 		return mode
 	default:
 		return "http"
@@ -332,7 +332,11 @@ func runHTTPProbeBatchForCore(items []*httpBatchItem, allOutbounds []any, testUR
 		return err.exited, err
 	}
 
-	sem := make(chan struct{}, httpProbeConcurrency)
+	concurrency := httpProbeConcurrency
+	if items[0].result.Mode == "speed" {
+		concurrency = 1
+	}
+	sem := make(chan struct{}, concurrency)
 	var wg sync.WaitGroup
 	for i := range items {
 		wg.Add(1)
@@ -574,6 +578,28 @@ func probeThroughSocks(port int, testURL string, timeout time.Duration, realDela
 	coldDelay := time.Since(start).Milliseconds()
 	if err != nil {
 		result.Error = err.Error()
+		return
+	}
+	if result.Mode == "speed" {
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			result.Error = fmt.Sprintf("Speed probe HTTP status %d", resp.StatusCode)
+			return
+		}
+		bodyStart := time.Now()
+		n, err := io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		if err != nil || n < 64<<10 {
+			result.Error = "Speed probe requires at least 64 KiB of download data"
+			if err != nil {
+				result.Error = err.Error()
+			}
+			return
+		}
+		result.DownloadBytes = n
+		result.DownloadMbps = float64(n) * 8 / time.Since(bodyStart).Seconds() / 1e6
+		result.Delay = max(coldDelay, 1)
+		result.HTTPStatus = resp.StatusCode
+		result.Success = true
 		return
 	}
 	drainAndClose(resp)

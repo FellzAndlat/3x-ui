@@ -131,6 +131,9 @@ type TestOutboundResult struct {
 	TLSMs      int64 `json:"tlsMs,omitempty"`
 	TTFBMs     int64 `json:"ttfbMs,omitempty"`
 
+	DownloadMbps  float64 `json:"downloadMbps,omitempty"`
+	DownloadBytes int64   `json:"downloadBytes,omitempty"`
+
 	Endpoints []TestEndpointResult `json:"endpoints,omitempty"`
 	Egress    *TestEgressResult    `json:"egress,omitempty"`
 }

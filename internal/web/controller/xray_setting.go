@@ -67,6 +67,7 @@ func (a *XraySettingController) initRouter(g *gin.RouterGroup) {
 	g.GET("/outbound-subs", a.listOutboundSubs)
 	g.POST("/outbound-subs", a.createOutboundSub)
 	g.POST("/outbound-subs/:id/refresh", a.refreshOutboundSub)
+	g.POST("/outbound-subs/:id/probe", a.probeOutboundSub)
 	g.POST("/outbound-subs/:id/move", a.moveOutboundSub)
 	g.POST("/outbound-subs/:id", a.updateOutboundSub)
 	g.DELETE("/outbound-subs/:id", a.deleteOutboundSub)
@@ -526,6 +527,11 @@ func (a *XraySettingController) listOutboundSubs(c *gin.Context) {
 }
 
 func (a *XraySettingController) createOutboundSub(c *gin.Context) {
+	balance, err := parseOutboundBalanceOptions(c)
+	if err != nil {
+		jsonMsg(c, "Invalid automatic balancer settings", err)
+		return
+	}
 	remark := c.PostForm("remark")
 	rawURL := c.PostForm("url")
 	prefix := c.PostForm("tagPrefix")
@@ -541,15 +547,21 @@ func (a *XraySettingController) createOutboundSub(c *gin.Context) {
 			interval = v
 		}
 	}
-	sub, err := a.OutboundSubscriptionService.Create(remark, rawURL, prefix, userAgent, enabled, interval, allowPrivate, prepend, allowInsecure)
+	sub, err := a.OutboundSubscriptionService.Create(remark, rawURL, prefix, userAgent, enabled, interval, allowPrivate, prepend, allowInsecure, balance)
 	if err != nil {
 		jsonMsg(c, "Failed to create outbound subscription", err)
 		return
 	}
+	markOutboundCoreRestart()
 	jsonObj(c, sub, nil)
 }
 
 func (a *XraySettingController) updateOutboundSub(c *gin.Context) {
+	balance, err := parseOutboundBalanceOptions(c)
+	if err != nil {
+		jsonMsg(c, "Invalid automatic balancer settings", err)
+		return
+	}
 	id := c.Param("id")
 	var subID int
 	if _, err := fmt.Sscanf(id, "%d", &subID); err != nil {
@@ -571,10 +583,11 @@ func (a *XraySettingController) updateOutboundSub(c *gin.Context) {
 			interval = v
 		}
 	}
-	if err := a.OutboundSubscriptionService.Update(subID, remark, rawURL, prefix, userAgent, enabled, interval, allowPrivate, prepend, allowInsecure); err != nil {
+	if err := a.OutboundSubscriptionService.Update(subID, remark, rawURL, prefix, userAgent, enabled, interval, allowPrivate, prepend, allowInsecure, balance); err != nil {
 		jsonMsg(c, "Failed to update outbound subscription", err)
 		return
 	}
+	markOutboundCoreRestart()
 	jsonObj(c, "", nil)
 }
 
@@ -590,7 +603,7 @@ func (a *XraySettingController) deleteOutboundSub(c *gin.Context) {
 		return
 	}
 	// Signal that xray should drop this subscription's outbounds on next reload.
-	a.XrayService.SetToNeedRestart()
+	markOutboundCoreRestart()
 	jsonObj(c, "", nil)
 }
 
@@ -607,7 +620,7 @@ func (a *XraySettingController) refreshOutboundSub(c *gin.Context) {
 		return
 	}
 	// Signal that xray should pick up the new outbounds on next restart/reload
-	a.XrayService.SetToNeedRestart()
+	markOutboundCoreRestart()
 	jsonObj(c, obs, nil)
 }
 
@@ -624,7 +637,7 @@ func (a *XraySettingController) moveOutboundSub(c *gin.Context) {
 		return
 	}
 	// Order affects the merged outbounds, so xray needs a reload.
-	a.XrayService.SetToNeedRestart()
+	markOutboundCoreRestart()
 	jsonObj(c, "", nil)
 }
 
@@ -661,7 +674,59 @@ func (a *XraySettingController) parseOutboundSubURL(c *gin.Context) {
 }
 
 func parseIntSafe(s string) (int, error) {
-	var v int
-	_, err := fmt.Sscanf(s, "%d", &v)
-	return v, err
+	return strconv.Atoi(strings.TrimSpace(s))
+}
+
+func parseOutboundBalanceOptions(c *gin.Context) (*service.BalanceOptions, error) {
+	if _, present := c.GetPostForm("autoBalance"); !present {
+		return nil, nil
+	}
+	o := &service.BalanceOptions{Enabled: c.PostForm("autoBalance") == "true", Mode: c.PostForm("balanceMode"), URL: strings.TrimSpace(c.PostForm("probeURL")), Interval: 300, Tolerance: 50, SwitchInterval: 900, HealthInterval: 30}
+	for key, target := range map[string]*int{"probeInterval": &o.Interval, "tolerance": &o.Tolerance, "switchInterval": &o.SwitchInterval, "healthInterval": &o.HealthInterval} {
+		if raw, present := c.GetPostForm(key); present {
+			v, err := parseIntSafe(raw)
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s", key)
+			}
+			*target = v
+		}
+	}
+	if err := o.Validate(c.PostForm("allowPrivate") == "true"); err != nil {
+		return nil, err
+	}
+	return o, nil
+}
+func markOutboundCoreRestart() {
+	core, _ := (&service.SettingService{}).GetCoreType()
+	if core == service.CoreTypeSingBox {
+		(&service.SingBoxService{}).SetToNeedRestart()
+	} else {
+		(&service.XrayService{}).SetToNeedRestart()
+	}
+}
+func (a *XraySettingController) probeOutboundSub(c *gin.Context) {
+	id, err := parseIntSafe(c.Param("id"))
+	if err != nil || id <= 0 {
+		jsonMsg(c, "Invalid subscription id", fmt.Errorf("invalid id"))
+		return
+	}
+	sub, err := a.OutboundSubscriptionService.Get(id)
+	if err != nil {
+		jsonMsg(c, "Subscription not found", err)
+		return
+	}
+	if !sub.Enabled || !sub.AutoBalance {
+		jsonMsg(c, "Automatic balancing is disabled", fmt.Errorf("enable automatic balancing first"))
+		return
+	}
+	_, err = a.OutboundSubscriptionService.ProbeAutomaticSubscriptions(id)
+	if err == nil {
+		_, err = a.OutboundSubscriptionService.ApplyAutomaticSelections()
+	}
+	if err != nil {
+		jsonMsg(c, "Automatic check failed", err)
+		return
+	}
+	sub, err = a.OutboundSubscriptionService.Get(id)
+	jsonObj(c, sub, err)
 }

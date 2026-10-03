@@ -143,6 +143,12 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 	if template, err := singBoxSettingService.GetXrayConfigTemplate(); err == nil {
 		var xrayCfg map[string]any
 		if json.Unmarshal([]byte(template), &xrayCfg) == nil {
+			prepend, tail, err := (&OutboundSubscriptionService{}).activeOutboundsSplit()
+			if err != nil {
+				return nil, err
+			}
+			manual, _ := xrayCfg["outbounds"].([]any)
+			xrayCfg["outbounds"] = append(append(prepend, manual...), tail...)
 			if rawDNS, ok := xrayCfg["dns"].(map[string]any); ok && len(rawDNS) > 0 {
 				dns, err := singbox.TranslateXrayDNS(rawDNS)
 				if err != nil {
@@ -194,9 +200,32 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 				cfg.Outbounds = append(cfg.Outbounds, balancers...)
 			}
 			if rawOutbounds, ok := xrayCfg["outbounds"].([]any); ok {
+				if len(rawOutbounds) > 0 {
+					if first, ok := rawOutbounds[0].(map[string]any); ok {
+						if tag, ok := first["tag"].(string); ok && strings.HasPrefix(tag, "sub-auto-") {
+							cfg.Route["final"] = tag
+						}
+					}
+				}
+
 				for i, raw := range rawOutbounds {
 					ob, ok := raw.(map[string]any)
 					if !ok {
+						continue
+					}
+					if id, ok := automaticAliasID(ob); ok {
+						sub, err := (&OutboundSubscriptionService{}).Get(id)
+						if err != nil {
+							return nil, err
+						}
+						var members []any
+						if sub.LastFetchedOutbounds != "" {
+							if err := json.Unmarshal([]byte(sub.LastFetchedOutbounds), &members); err != nil {
+								return nil, err
+							}
+						}
+						members = filterSubscriptionOutbounds("sing-box automatic selector", members)
+						cfg.Outbounds = append(cfg.Outbounds, automaticSingBoxSelector(sub, members))
 						continue
 					}
 					if protocol, _ := ob["protocol"].(string); strings.EqualFold(strings.TrimSpace(protocol), "dns") {
@@ -455,6 +484,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 	if err := s.applyNativeTemplate(cfg); err != nil {
 		return nil, err
 	}
+	ensureAutomaticClashAPI(cfg)
 	applySingBoxInfrastructureEgress(cfg)
 	return cfg, nil
 }

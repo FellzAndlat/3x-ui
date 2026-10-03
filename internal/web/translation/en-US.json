@@ -2220,6 +2220,8 @@
         "moveToTop": "Move to top"
       },
       "outboundSub": {
+        "noHealthy": "No healthy node — route blocked",
+        "appliedNode": "Applied to core",
         "manage": "Subscriptions",
         "title": "Outbound Subscriptions",
         "remark": "Remark (optional)",
@@ -2263,7 +2265,33 @@
         "toastRefreshed": "Refreshed",
         "toastRefreshFailed": "Refresh failed",
         "toastDeleted": "Deleted",
-        "toastDeleteFailed": "Delete failed"
+        "toastDeleteFailed": "Delete failed",
+        "autoBalance": "Automatic outbound selection",
+        "autoBalanceHint": "Ready to use: new subscriptions automatically enable selection and Prepend, so routing tags do not need to be set manually. Existing routing rules still take precedence.",
+        "balanceMode": "Selection mode",
+        "modeLatency": "Lowest latency",
+        "modeSpeed": "Highest download speed",
+        "probeURL": "Test URL",
+        "speedHint": "Leave empty to use the built-in 1 MiB Cloudflare download test. Custom files must be at least 64 KiB. Each speed check downloads up to 1 MiB per node, sequentially. Switching for speed alone requires a 10% gain.",
+        "latencyHint": "An HTTP 2xx response through the proxy confirms availability. Leave empty for the default test URL.",
+        "probeInterval": "Check interval (seconds)",
+        "tolerance": "Switching tolerance (ms)",
+        "awaitProbe": "Awaiting a healthy node",
+        "probeNow": "Check now",
+        "probeFailed": "Automatic outbound check failed",
+        "switchInterval": "Switch node every (seconds)",
+        "switchIntervalHint": "Default: 15 minutes. Selects the best healthy alternative; a single healthy node is retained.",
+        "healthInterval": "Availability check interval (seconds)",
+        "healthIntervalHint": "Default: 30 seconds. A failed proxy HTTP probe triggers failover without waiting for the switching timer or speed test.",
+        "nextSwitch": "Next planned switch",
+        "lastHealth": "Last availability check",
+        "reasons": {
+          "initial": "Initial node selection",
+          "scheduled": "Scheduled switch",
+          "unreachable": "Previous node stopped responding",
+          "better": "A better node was found",
+          "unavailable": "No healthy nodes"
+        }
       },
       "pia": {
         "menu": "PIA",

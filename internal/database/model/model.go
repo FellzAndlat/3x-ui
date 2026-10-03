@@ -1292,6 +1292,22 @@ type OutboundSubscription struct {
 	CreatedAt            int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
 	UpdatedAt            int64  `json:"updatedAt" gorm:"autoUpdateTime:milli"`
 	OutboundCount        int    `json:"outboundCount" gorm:"-"`
+	AutoBalance          bool   `json:"autoBalance"`
+	BalanceMode          string `json:"balanceMode"`
+	ProbeURL             string `json:"probeURL"`
+	ProbeInterval        int    `json:"probeInterval"`
+	Tolerance            int    `json:"tolerance"`
+	SelectedTag          string `json:"selectedTag"`
+	LastProbe            int64  `json:"lastProbe"`
+	SwitchInterval       int    `json:"switchInterval" gorm:"default:900"`
+	HealthInterval       int    `json:"healthInterval" gorm:"default:30"`
+	LastHealth           int64  `json:"lastHealth"`
+	LastSwitch           int64  `json:"lastSwitch"`
+	SwitchReason         string `json:"switchReason"`
+	AppliedTag           string `json:"appliedTag"`
+	ApplyError           string `json:"applyError"`
+	ProbeError           string `json:"probeError"`
+	ProbeResults         string `json:"probeResults" gorm:"type:text"`
 }
 
 // SubBalancer is one extra JSON-subscription config document whose members are

@@ -166,7 +166,7 @@ func (s *OutboundSubscriptionService) nextDefaultSubPrefix(excludeId int) (strin
 	return fmt.Sprintf("sub%d-", defaultPrefixNumber(subs, excludeId)), nil
 }
 
-func (s *OutboundSubscriptionService) Create(remark, rawURL, tagPrefix, userAgent string, enabled bool, updateInterval int, allowPrivate, prepend, allowInsecure bool) (*model.OutboundSubscription, error) {
+func (s *OutboundSubscriptionService) Create(remark, rawURL, tagPrefix, userAgent string, enabled bool, updateInterval int, allowPrivate, prepend, allowInsecure bool, balance ...*BalanceOptions) (*model.OutboundSubscription, error) {
 	cleanURL, err := SanitizePublicHTTPURL(rawURL, allowPrivate)
 	if err != nil {
 		return nil, common.NewError("invalid subscription URL:", err)
@@ -201,6 +201,16 @@ func (s *OutboundSubscriptionService) Create(remark, rawURL, tagPrefix, userAgen
 		TagPrefix:      prefix,
 		UpdateInterval: updateInterval,
 	}
+	if len(balance) == 0 || balance[0] == nil {
+		balance = []*BalanceOptions{{Enabled: true, Mode: "latency", Interval: 300, Tolerance: 50, SwitchInterval: 900, HealthInterval: 30}}
+		sub.Prepend = true
+	}
+	if len(balance) > 0 && balance[0] != nil {
+		if err := balance[0].Validate(allowPrivate); err != nil {
+			return nil, err
+		}
+		balance[0].apply(sub)
+	}
 	if err := database.GetDB().Create(sub).Error; err != nil {
 		return nil, err
 	}
@@ -208,7 +218,7 @@ func (s *OutboundSubscriptionService) Create(remark, rawURL, tagPrefix, userAgen
 }
 
 // Update updates editable fields.
-func (s *OutboundSubscriptionService) Update(id int, remark, rawURL, tagPrefix, userAgent string, enabled bool, updateInterval int, allowPrivate, prepend, allowInsecure bool) error {
+func (s *OutboundSubscriptionService) Update(id int, remark, rawURL, tagPrefix, userAgent string, enabled bool, updateInterval int, allowPrivate, prepend, allowInsecure bool, balance ...*BalanceOptions) error {
 	sub, err := s.Get(id)
 	if err != nil {
 		return err
@@ -239,6 +249,12 @@ func (s *OutboundSubscriptionService) Update(id int, remark, rawURL, tagPrefix, 
 	sub.Prepend = prepend
 	sub.TagPrefix = prefix
 	sub.UpdateInterval = updateInterval
+	if len(balance) > 0 && balance[0] != nil {
+		if err := balance[0].Validate(allowPrivate); err != nil {
+			return err
+		}
+		balance[0].apply(sub)
+	}
 	return database.GetDB().Save(sub).Error
 }
 
@@ -453,6 +469,10 @@ func (s *OutboundSubscriptionService) fetchAndStore(sub *model.OutboundSubscript
 	// Persist the outbounds (as compact JSON array)
 	obsJSON, _ := json.Marshal(kept)
 
+	changed := sub.LastFetchedOutbounds != string(obsJSON)
+	if changed {
+		sub.LastProbe = 0
+	}
 	sub.LastFetchedOutbounds = string(obsJSON)
 	sub.LinkIdentities = string(identJSON)
 	sub.LastUpdated = time.Now().Unix()
@@ -461,10 +481,22 @@ func (s *OutboundSubscriptionService) fetchAndStore(sub *model.OutboundSubscript
 		sub.LastError = fmt.Sprintf("dropped %d outbound(s) the xray core rejects: %s", len(droppedByCore), droppedByCore[0])
 	}
 
-	if err := database.GetDB().Save(sub).Error; err != nil {
-		return nil, err
+	updates := map[string]any{
+		"last_fetched_outbounds": sub.LastFetchedOutbounds, "link_identities": sub.LinkIdentities,
+		"last_updated": sub.LastUpdated, "last_error": sub.LastError,
 	}
-
+	if changed {
+		updates["last_probe"] = 0
+	}
+	// A fetch must not overwrite automatic selection or concurrently edited settings.
+	result := database.GetDB().Model(&model.OutboundSubscription{}).
+		Where("id = ? AND url = ? AND tag_prefix = ?", sub.Id, sub.Url, sub.TagPrefix).Updates(updates)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, fmt.Errorf("subscription changed during refresh; retry")
+	}
 	return kept, nil
 }
 
@@ -558,15 +590,20 @@ func (s *OutboundSubscriptionService) activeOutboundsSplit() (prepend []any, app
 		return nil, nil, err
 	}
 	for _, sub := range subs {
-		if strings.TrimSpace(sub.LastFetchedOutbounds) == "" {
-			continue
+		raw := sub.LastFetchedOutbounds
+		if strings.TrimSpace(raw) == "" {
+			if !sub.AutoBalance {
+				continue
+			}
+			raw = "[]"
 		}
 		var arr []any
-		if err := json.Unmarshal([]byte(sub.LastFetchedOutbounds), &arr); err != nil {
+		if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 			logger.Warningf("outbound sub %d has corrupt LastFetchedOutbounds: %v", sub.Id, err)
 			continue
 		}
-		arr, _ = filterOutboundsRejectedByCore(fmt.Sprintf("outbound sub %d", sub.Id), arr)
+		arr = filterSubscriptionOutbounds(fmt.Sprintf("outbound sub %d", sub.Id), arr)
+		arr = subscriptionAutoOutbound(sub, arr)
 		if sub.Prepend {
 			prepend = append(prepend, arr...)
 		} else {
@@ -668,3 +705,9 @@ Consequences for balancers / routing:
 We deliberately do *not* mutate the saved xrayTemplateConfig. Subscription
 outbounds are always injected at runtime in GetXrayConfig.
 */
+
+func (s *OutboundSubscriptionService) activeAutomaticSubscriptions() ([]*model.OutboundSubscription, error) {
+	var subs []*model.OutboundSubscription
+	err := database.GetDB().Where("enabled = ? AND auto_balance = ?", true, true).Order("priority asc, id asc").Find(&subs).Error
+	return subs, err
+}

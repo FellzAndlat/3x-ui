@@ -10,6 +10,7 @@ import {
   Modal,
   Popconfirm,
   Radio,
+  Select,
   Row,
   Space,
   Switch,
@@ -73,6 +74,13 @@ interface OutboundSub {
   allowPrivate?: boolean;
   allowInsecure?: boolean;
   userAgent?: string;
+  autoBalance?: boolean;
+  balanceMode?: string;
+  probeURL?: string;
+  probeInterval?: number;
+  switchInterval?: number;
+  healthInterval?: number;
+  tolerance?: number;
   prepend?: boolean;
   priority?: number;
   tagPrefix?: string;
@@ -80,6 +88,36 @@ interface OutboundSub {
   lastUpdated?: number;
   lastError?: string;
   outboundCount?: number;
+  selectedTag?: string;
+  appliedTag?: string;
+  applyError?: string;
+  lastProbe?: number;
+  lastHealth?: number;
+  lastSwitch?: number;
+  switchReason?: string;
+  probeError?: string;
+  probeResults?: string;
+}
+
+function automaticProbeSummary(raw?: string): string {
+  try {
+    const results = JSON.parse(raw || '[]') as {
+      tag?: string;
+      success?: boolean;
+      delay?: number;
+      downloadMbps?: number;
+      error?: string;
+    }[];
+    if (!Array.isArray(results)) return '';
+    return results
+      .map(
+        (r) =>
+          `${r.tag || '—'}: ${r.success ? `${r.delay ?? 0} ms${r.downloadMbps ? ` / ${r.downloadMbps.toFixed(2)} Mbit/s` : ''}` : r.error || '—'}`,
+      )
+      .join('\n');
+  } catch {
+    return '';
+  }
 }
 
 interface OutboundsTabProps {
@@ -145,7 +183,14 @@ export default function OutboundsTab({
     enabled: true,
     allowPrivate: false,
     allowInsecure: false,
-    prepend: false,
+    prepend: true,
+    autoBalance: true,
+    balanceMode: 'latency',
+    probeURL: '',
+    probeInterval: 300,
+    switchInterval: 900,
+    healthInterval: 30,
+    tolerance: 50,
   });
   const [editingSubId, setEditingSubId] = useState<number | null>(null);
   const [savingSub, setSavingSub] = useState(false);
@@ -344,6 +389,13 @@ export default function OutboundsTab({
     enabled?: boolean;
     allowPrivate?: boolean;
     allowInsecure?: boolean;
+    autoBalance?: boolean;
+    balanceMode?: string;
+    probeURL?: string;
+    probeInterval?: number;
+    switchInterval?: number;
+    healthInterval?: number;
+    tolerance?: number;
     prepend?: boolean;
   }) {
     return {
@@ -356,6 +408,13 @@ export default function OutboundsTab({
       allowPrivate: src.allowPrivate ?? false,
       allowInsecure: src.allowInsecure ?? false,
       prepend: src.prepend ?? false,
+      autoBalance: src.autoBalance ?? false,
+      balanceMode: src.balanceMode || 'latency',
+      probeURL: src.probeURL ?? '',
+      probeInterval: src.probeInterval || 300,
+      switchInterval: src.switchInterval || 900,
+      healthInterval: src.healthInterval || 30,
+      tolerance: src.tolerance ?? 50,
     };
   }
   function resetSubForm() {
@@ -368,7 +427,14 @@ export default function OutboundsTab({
       enabled: true,
       allowPrivate: false,
       allowInsecure: false,
-      prepend: false,
+      prepend: true,
+      autoBalance: true,
+      balanceMode: 'latency',
+      probeURL: '',
+      probeInterval: 300,
+      switchInterval: 900,
+      healthInterval: 30,
+      tolerance: 50,
     });
     setEditingSubId(null);
     setPreviewData(null);
@@ -384,6 +450,13 @@ export default function OutboundsTab({
       allowPrivate: sub.allowPrivate ?? false,
       allowInsecure: sub.allowInsecure ?? false,
       prepend: sub.prepend ?? false,
+      autoBalance: sub.autoBalance ?? false,
+      balanceMode: sub.balanceMode || 'latency',
+      probeURL: sub.probeURL ?? '',
+      probeInterval: sub.probeInterval || 300,
+      switchInterval: sub.switchInterval || 900,
+      healthInterval: sub.healthInterval || 30,
+      tolerance: sub.tolerance ?? 50,
     });
     setEditingSubId(sub.id);
     setPreviewData(null);
@@ -788,6 +861,89 @@ export default function OutboundsTab({
                   {t('pages.hosts.hints.allowInsecure')}
                 </div>
               </Form.Item>
+              <Form.Item label={t('pages.xray.outboundSub.autoBalance')}>
+                <Switch
+                  checked={newSub.autoBalance}
+                  onChange={(v) =>
+                    setNewSub({ ...newSub, autoBalance: v, prepend: v ? true : newSub.prepend })
+                  }
+                />
+                <div style={{ marginTop: 4 }}>{t('pages.xray.outboundSub.autoBalanceHint')}</div>
+              </Form.Item>
+              {newSub.autoBalance && (
+                <>
+                  <Form.Item label={t('pages.xray.outboundSub.balanceMode')}>
+                    <Select
+                      value={newSub.balanceMode}
+                      onChange={(v) =>
+                        setNewSub({
+                          ...newSub,
+                          balanceMode: v,
+                          probeInterval: Math.max(newSub.probeInterval, v === 'speed' ? 300 : 30),
+                        })
+                      }
+                      options={[
+                        { value: 'latency', label: t('pages.xray.outboundSub.modeLatency') },
+                        { value: 'speed', label: t('pages.xray.outboundSub.modeSpeed') },
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item label={t('pages.xray.outboundSub.probeURL')}>
+                    <Input
+                      value={newSub.probeURL}
+                      placeholder={
+                        newSub.balanceMode === 'speed'
+                          ? 'https://speed.cloudflare.com/__down?bytes=1048576'
+                          : 'https://www.google.com/generate_204'
+                      }
+                      onChange={(e) => setNewSub({ ...newSub, probeURL: e.target.value })}
+                    />
+                    <div style={{ marginTop: 4 }}>
+                      {t(
+                        newSub.balanceMode === 'speed'
+                          ? 'pages.xray.outboundSub.speedHint'
+                          : 'pages.xray.outboundSub.latencyHint',
+                      )}
+                    </div>
+                  </Form.Item>
+                  <Form.Item label={t('pages.xray.outboundSub.probeInterval')}>
+                    <InputNumber
+                      min={newSub.balanceMode === 'speed' ? 300 : 30}
+                      max={86400}
+                      value={newSub.probeInterval}
+                      onChange={onNumber((v) => setNewSub({ ...newSub, probeInterval: v }))}
+                    />
+                  </Form.Item>
+                  <Form.Item label={t('pages.xray.outboundSub.switchInterval')}>
+                    <InputNumber
+                      min={30}
+                      max={86400}
+                      value={newSub.switchInterval}
+                      onChange={onNumber((v) => setNewSub({ ...newSub, switchInterval: v }))}
+                    />
+                    <div>{t('pages.xray.outboundSub.switchIntervalHint')}</div>
+                  </Form.Item>
+                  <Form.Item label={t('pages.xray.outboundSub.healthInterval')}>
+                    <InputNumber
+                      min={10}
+                      max={300}
+                      value={newSub.healthInterval}
+                      onChange={onNumber((v) => setNewSub({ ...newSub, healthInterval: v }))}
+                    />
+                    <div>{t('pages.xray.outboundSub.healthIntervalHint')}</div>
+                  </Form.Item>
+                  {newSub.balanceMode === 'latency' && (
+                    <Form.Item label={t('pages.xray.outboundSub.tolerance')}>
+                      <InputNumber
+                        min={0}
+                        max={10000}
+                        value={newSub.tolerance}
+                        onChange={onNumber((v) => setNewSub({ ...newSub, tolerance: v }))}
+                      />
+                    </Form.Item>
+                  )}
+                </>
+              )}
               <Form.Item label={t('pages.xray.outboundSub.prepend')}>
                 <Switch
                   checked={newSub.prepend}
@@ -908,6 +1064,77 @@ export default function OutboundsTab({
                     render: (_: unknown, r: OutboundSub) => (
                       <div>
                         <div>{r.remark || <em>{t('pages.xray.outboundSub.auto')}</em>}</div>
+                        {r.autoBalance && (
+                          <div>
+                            <Tooltip
+                              title={
+                                <div style={{ whiteSpace: 'pre-line' }}>
+                                  {automaticProbeSummary(r.probeResults)}
+                                </div>
+                              }
+                            >
+                              <Tag color="blue">{`sub-auto-${r.id}`}</Tag>
+                            </Tooltip>
+                            <div>
+                              {r.selectedTag ||
+                                t(
+                                  r.lastHealth
+                                    ? 'pages.xray.outboundSub.noHealthy'
+                                    : 'pages.xray.outboundSub.awaitProbe',
+                                )}
+                            </div>
+                            {r.lastProbe ? (
+                              <div>{new Date(r.lastProbe * 1000).toLocaleString()}</div>
+                            ) : null}
+                            {r.lastSwitch && r.selectedTag && (
+                              <div>
+                                {t('pages.xray.outboundSub.nextSwitch')}:{' '}
+                                {new Date(
+                                  (r.lastSwitch + (r.switchInterval || 900)) * 1000,
+                                ).toLocaleString()}
+                              </div>
+                            )}
+                            {r.switchReason && (
+                              <div>{t(`pages.xray.outboundSub.reasons.${r.switchReason}`)}</div>
+                            )}
+                            {r.lastHealth && (
+                              <div>
+                                {t('pages.xray.outboundSub.lastHealth')}:{' '}
+                                {new Date(r.lastHealth * 1000).toLocaleString()}
+                              </div>
+                            )}
+                            <div>
+                              {t('pages.xray.outboundSub.appliedNode')}: {r.appliedTag || '—'}
+                            </div>
+                            {r.applyError && <div style={{ color: '#e04141' }}>{r.applyError}</div>}
+                            {r.probeError && <div style={{ color: '#e04141' }}>{r.probeError}</div>}
+                            <Button
+                              size="small"
+                              loading={busyId === r.id}
+                              onClick={async () => {
+                                setBusyId(r.id);
+                                try {
+                                  const result = await HttpUtil.post<OutboundSub>(
+                                    `/panel/api/xray/outbound-subs/${r.id}/probe`,
+                                    {},
+                                  );
+                                  if (!result?.success)
+                                    messageApi.error(
+                                      result?.msg || t('pages.xray.outboundSub.probeFailed'),
+                                    );
+                                  await loadSubs();
+                                  onRefreshXrayData?.();
+                                } catch {
+                                  messageApi.error(t('pages.xray.outboundSub.probeFailed'));
+                                } finally {
+                                  setBusyId(null);
+                                }
+                              }}
+                            >
+                              {t('pages.xray.outboundSub.probeNow')}
+                            </Button>
+                          </div>
+                        )}
                         {r.tagPrefix && (
                           <div style={{ fontSize: 11, color: '#888' }}>{r.tagPrefix}</div>
                         )}
