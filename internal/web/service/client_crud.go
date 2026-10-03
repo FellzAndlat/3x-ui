@@ -15,14 +15,12 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
-
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/random"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"gorm.io/gorm"
 )
 
@@ -413,7 +411,7 @@ func (s *ClientService) fillProtocolDefaults(c *model.Client, ib *model.Inbound)
 		if c.Password == "" {
 			c.Password = strings.ReplaceAll(uuid.NewString(), "-", "")
 		}
-	case model.NaiveProxy, model.Mieru, model.AnyTLS, model.ShadowTLS, model.TrustTunnel:
+	case model.Snell, model.NaiveProxy, model.Mieru, model.AnyTLS, model.ShadowTLS, model.TrustTunnel, model.FPTN, model.OpenFlux:
 		if c.Password == "" {
 			c.Password = strings.ReplaceAll(uuid.NewString(), "-", "")
 		}

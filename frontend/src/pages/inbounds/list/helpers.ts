@@ -100,8 +100,11 @@ export function inboundNetworkLabels(record: {
       return ['UDP'];
     case 'pingtunnel':
       return ['ICMP'];
+    case 'fptn':
+    case 'openflux':
     case 'trusttunnel':
       return ['TCP', 'UDP'];
+    case 'snell':
     case 'anytls':
       return ['TCP'];
     case 'shadowtls':
@@ -166,7 +169,10 @@ export function isInboundMultiUser(record: { protocol: string; settings: unknown
     case 'wireguard':
     case 'amneziawg':
     case 'tuic':
+    case 'fptn':
+    case 'openflux':
     case 'trusttunnel':
+    case 'snell':
     case 'vk-turn-proxy':
       return true;
     case 'shadowsocks':

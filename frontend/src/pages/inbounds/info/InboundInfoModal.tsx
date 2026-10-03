@@ -1,6 +1,7 @@
+import { useServerLinks } from '../useServerLinks';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Divider, Modal, Space, Tabs, Tag, Tooltip } from 'antd';
+import { Alert, Button, Divider, Modal, Space, Spin, Tabs, Tag, Tooltip } from 'antd';
 import { CopyOutlined, SyncOutlined, DeleteOutlined, DownloadOutlined } from '@ant-design/icons';
 
 import { HttpUtil, IntlUtil, SizeFormatter, ColorUtils, Wireguard } from '@/utils';
@@ -53,6 +54,12 @@ export default function InboundInfoModal({
 
   const [inbound, setInbound] = useState<InboundInfo | null>(null);
   const [clientSettings, setClientSettings] = useState<ClientSetting | null>(null);
+  const serverLinks = useServerLinks(
+    open,
+    dbInbound?.id,
+    dbInbound?.protocol,
+    clientSettings?.email,
+  );
   const [clientStats, setClientStats] = useState<ClientStats | null>(null);
   const [links, setLinks] = useState<{ remark?: string; link: string }[]>([]);
   const [wireguardConfigs, setWireguardConfigs] = useState<string[]>([]);
@@ -317,6 +324,9 @@ export default function InboundInfoModal({
     );
   }
 
+  const displayLinks = ['fptn', 'openflux', 'trusttunnel'].includes(dbInbound.protocol)
+    ? (serverLinks.data ?? [])
+    : links;
   const clientTab = (
     <>
       <table className="info-table block">
@@ -543,10 +553,10 @@ export default function InboundInfoModal({
         </>
       )}
 
-      {hasShareLink(dbInbound.protocol) && links.length > 0 && (
+      {hasShareLink(dbInbound.protocol) && displayLinks.length > 0 && (
         <>
           <Divider>{t('pages.inbounds.copyLink')}</Divider>
-          {links.map((link, idx) => (
+          {displayLinks.map((link, idx) => (
             <div key={idx} className="link-panel">
               <div className="link-panel-header">
                 <Tag color="green">{link.remark || `Link ${idx + 1}`}</Tag>
@@ -1300,7 +1310,7 @@ export default function InboundInfoModal({
       {dbInbound.isSS && !inbound.isSSMultiUser && links.length > 0 && (
         <>
           <Divider>{t('pages.inbounds.copyLink')}</Divider>
-          {links.map((link, idx) => (
+          {displayLinks.map((link, idx) => (
             <div key={idx} className="link-panel">
               <div className="link-panel-header">
                 <Tag color="green">{link.remark || `Link ${idx + 1}`}</Tag>
@@ -1336,6 +1346,8 @@ export default function InboundInfoModal({
       width={640}
       destroyOnHidden
     >
+      {serverLinks.isFetching && <Spin />}
+      {serverLinks.error && <Alert type="error" showIcon description={serverLinks.error.message} />}
       <Tabs activeKey={activeTab} onChange={setActiveTab} items={tabItems} />
     </Modal>
   );

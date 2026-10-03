@@ -27,7 +27,7 @@ func validateInboundRuntimeTarget(inbound *model.Inbound) error {
 		}
 		return common.NewErrorf("%s is not supported by %s on the selected node", inbound.Protocol, core)
 	}
-	if inbound.Protocol != model.NaiveProxy && inbound.Protocol != model.AnyTLS && inbound.Protocol != model.ShadowTLS {
+	if inbound.Protocol != model.Snell && inbound.Protocol != model.NaiveProxy && inbound.Protocol != model.AnyTLS && inbound.Protocol != model.ShadowTLS {
 		return nil
 	}
 	if core == CoreTypeSingBox {
@@ -146,14 +146,14 @@ func validateShadowTLSTransport(inbound *model.Inbound) error {
 
 func isXrayManagedProtocol(protocol model.Protocol) bool {
 	return protocol != model.VKTurnProxy &&
-		protocol != model.NaiveProxy &&
+		protocol != model.Snell && protocol != model.NaiveProxy &&
 		protocol != model.AnyTLS &&
 		protocol != model.ShadowTLS &&
 		protocol != model.MTProto &&
 		protocol != model.AmneziaWG &&
 		protocol != model.TUIC &&
 		protocol != model.Pingtunnel &&
-		protocol != model.TrustTunnel &&
+		protocol != model.TrustTunnel && protocol != model.FPTN && protocol != model.OpenFlux &&
 		protocol != model.Mieru &&
 		protocol != model.Sudoku
 }

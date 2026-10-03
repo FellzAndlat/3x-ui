@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
@@ -26,7 +25,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"
 	wgutil "github.com/SawaMEN/3x-ui/v3/internal/util/wireguard"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -1448,10 +1446,10 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		if inbound.Enable && (isXrayManagedProtocol(inbound.Protocol) ||
 			inbound.Protocol == model.MTProto ||
 			inbound.Protocol == model.TUIC ||
-			inbound.Protocol == model.Pingtunnel || inbound.Protocol == model.TrustTunnel ||
+			inbound.Protocol == model.Pingtunnel || inbound.Protocol == model.TrustTunnel || inbound.Protocol == model.FPTN || inbound.Protocol == model.OpenFlux ||
 			inbound.Protocol == model.AmneziaWG ||
 			inbound.Protocol == model.NaiveProxy ||
-			inbound.Protocol == model.AnyTLS ||
+			inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS ||
 			inbound.Protocol == model.ShadowTLS) {
 			if inbound.NodeID != nil {
 				markDirty = true
@@ -1541,7 +1539,7 @@ func (s *InboundService) delInbound(id int) (bool, func(), error) {
 			(isXrayManagedProtocol(ib.Protocol) ||
 				ib.Protocol == model.MTProto ||
 				ib.Protocol == model.TUIC ||
-				ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel ||
+				ib.Protocol == model.Pingtunnel || ib.Protocol == model.TrustTunnel || ib.Protocol == model.FPTN || ib.Protocol == model.OpenFlux ||
 				ib.Protocol == model.AmneziaWG ||
 				naiveSingBox)
 		if shouldPushToRuntime {
@@ -1802,7 +1800,7 @@ func (s *InboundService) SetInboundEnable(id int, enable bool) (bool, error) {
 	}
 	inbound.Enable = enable
 
-	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS {
+	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS {
 		core, coreErr := s.coreTypeForInbound(inbound)
 		if coreErr != nil {
 			return false, coreErr
@@ -1935,7 +1933,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 			}
 		}
 	}
-	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Mieru {
+	if inbound.Protocol == model.NaiveProxy || inbound.Protocol == model.Snell || inbound.Protocol == model.AnyTLS || inbound.Protocol == model.ShadowTLS || inbound.Protocol == model.Mieru {
 		for _, client := range clients {
 			if client.Email == "" {
 				return inbound, false, common.NewError("empty client email")
@@ -2119,10 +2117,10 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		oldInbound.Tag = resolvedTag
 		inbound.Tag = oldInbound.Tag
 
-		localSidecarTransition := oldProtocol == model.MTProto || oldInbound.Protocol == model.MTProto || oldProtocol == model.TUIC || oldInbound.Protocol == model.TUIC || oldProtocol == model.Mieru || oldInbound.Protocol == model.Mieru || oldProtocol == model.Pingtunnel || oldInbound.Protocol == model.Pingtunnel || oldProtocol == model.TrustTunnel || oldInbound.Protocol == model.TrustTunnel
+		localSidecarTransition := oldProtocol == model.MTProto || oldInbound.Protocol == model.MTProto || oldProtocol == model.TUIC || oldInbound.Protocol == model.TUIC || oldProtocol == model.Mieru || oldInbound.Protocol == model.Mieru || oldProtocol == model.Pingtunnel || oldInbound.Protocol == model.Pingtunnel || oldProtocol == model.TrustTunnel || oldInbound.Protocol == model.TrustTunnel || oldProtocol == model.FPTN || oldInbound.Protocol == model.FPTN || oldProtocol == model.OpenFlux || oldInbound.Protocol == model.OpenFlux
 		naiveSingBoxRuntime := false
 		if oldProtocol == model.NaiveProxy || oldInbound.Protocol == model.NaiveProxy ||
-			oldProtocol == model.AnyTLS || oldInbound.Protocol == model.AnyTLS ||
+			oldProtocol == model.Snell || oldInbound.Protocol == model.Snell || oldProtocol == model.AnyTLS || oldInbound.Protocol == model.AnyTLS ||
 			oldProtocol == model.ShadowTLS || oldInbound.Protocol == model.ShadowTLS {
 			core, coreErr := s.coreTypeForInbound(oldInbound)
 			if coreErr != nil {
@@ -2164,7 +2162,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 						pushable = false
 					}
 				}
-				newProtocolIsSidecar := oldInbound.Protocol == model.MTProto || oldInbound.Protocol == model.TUIC || oldInbound.Protocol == model.Mieru || oldInbound.Protocol == model.Pingtunnel || oldInbound.Protocol == model.TrustTunnel
+				newProtocolIsSidecar := oldInbound.Protocol == model.MTProto || oldInbound.Protocol == model.TUIC || oldInbound.Protocol == model.Mieru || oldInbound.Protocol == model.Pingtunnel || oldInbound.Protocol == model.TrustTunnel || oldInbound.Protocol == model.FPTN || oldInbound.Protocol == model.OpenFlux
 				if pushable {
 					postCommitApply = func() {
 						if err2 := rt.UpdateInbound(context.Background(), &oldSnapshot, payload); err2 == nil {

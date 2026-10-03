@@ -8,7 +8,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"gorm.io/gorm"
 )
 
@@ -175,7 +174,7 @@ func coreSupportsInboundProtocol(core string, protocol model.Protocol) bool {
 	switch core {
 	case CoreTypeXray:
 		switch protocol {
-		case model.NaiveProxy, model.AnyTLS, model.ShadowTLS:
+		case model.NaiveProxy, model.Snell, model.AnyTLS, model.ShadowTLS:
 			return false
 		default:
 			return true

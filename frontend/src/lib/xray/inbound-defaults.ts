@@ -1,3 +1,7 @@
+import {
+  FptnInboundSettingsSchema,
+  OpenFluxInboundSettingsSchema,
+} from '@/schemas/protocols/inbound/additional-vpn';
 import { RandomUtil, Wireguard } from '@/utils';
 import { generateAwgObfuscation } from '@/lib/xray/amneziawg-obfuscation';
 
@@ -12,6 +16,7 @@ import type { HysteriaClient, HysteriaInboundSettings } from '@/schemas/protocol
 import type { MixedInboundSettings } from '@/schemas/protocols/inbound/mixed';
 import type { MtprotoClient, MtprotoInboundSettings } from '@/schemas/protocols/inbound/mtproto';
 import type { NaiveInboundSettings } from '@/schemas/protocols/inbound/naive';
+import type { SnellInboundSettings } from '@/schemas/protocols/inbound/snell';
 import type { MieruInboundSettings } from '@/schemas/protocols/inbound/mieru';
 import type { SudokuInboundSettings } from '@/schemas/protocols/inbound/sudoku';
 import type {
@@ -482,6 +487,7 @@ export type AnyInboundSettings =
   | MtprotoInboundSettings
   | VkTurnProxyInboundSettings
   | AmneziawgInboundSettings
+  | SnellInboundSettings
   | AnyTlsInboundSettings
   | ShadowTlsInboundSettings
   | TuicInboundSettings
@@ -519,6 +525,19 @@ export function createDefaultInboundSettings(protocol: string): AnyInboundSettin
       return createDefaultVkTurnProxyInboundSettings();
     case 'amneziawg':
       return createDefaultAmneziawgInboundSettings();
+    case 'fptn':
+      return FptnInboundSettingsSchema.parse({});
+    case 'openflux':
+      return OpenFluxInboundSettingsSchema.parse({});
+    case 'snell':
+      return {
+        version: 6,
+        psk: '',
+        mode: 'default',
+        obfsMode: 'none',
+        obfsHost: 'bing.com',
+        clients: [],
+      };
     case 'anytls':
       return createDefaultAnyTlsInboundSettings();
     case 'shadowtls':

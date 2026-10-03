@@ -85,10 +85,13 @@ export function canEnableSniffing(values: { protocol: string }): boolean {
     values.protocol !== 'tuic' &&
     values.protocol !== 'pingtunnel' &&
     values.protocol !== 'trusttunnel' &&
+    values.protocol !== 'fptn' &&
+    values.protocol !== 'openflux' &&
     values.protocol !== 'vk-turn-proxy' &&
     values.protocol !== 'naive' &&
     values.protocol !== 'mieru' &&
     values.protocol !== 'sudoku' &&
+    values.protocol !== 'snell' &&
     values.protocol !== 'anytls' &&
     values.protocol !== 'shadowtls'
   );

@@ -182,6 +182,12 @@ func fetchLatestRelease(ctx context.Context, spec releaseSpec) (githubRelease, e
 }
 
 func Update(ctx context.Context, protocol model.Protocol) error {
+	if protocol == model.OpenFlux {
+		return InstallOpenFlux(ctx)
+	}
+	if protocol == model.FPTN {
+		return InstallFPTNClient(ctx)
+	}
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("%s updater is supported only on Linux", protocol)
 	}

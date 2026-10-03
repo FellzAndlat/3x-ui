@@ -8,13 +8,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/common"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"gorm.io/gorm"
 )
 
@@ -245,7 +243,7 @@ func (s *InboundService) buildTargetClientFromSource(source model.Client, target
 		target.Auth = s.generateRandomCredential(targetProtocol)
 	case model.MTProto:
 		target.Secret = model.GenerateFakeTLSSecret(mtprotoDomainFromSettings(targetInbound.Settings))
-	case model.TUIC, model.AnyTLS, model.ShadowTLS, model.TrustTunnel:
+	case model.Snell, model.TUIC, model.AnyTLS, model.ShadowTLS, model.TrustTunnel, model.FPTN, model.OpenFlux:
 		if targetProtocol == model.TUIC {
 			target.ID = uuid.NewString()
 		}

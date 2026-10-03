@@ -16,6 +16,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
+	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/singbox"
 	"github.com/SawaMEN/3x-ui/v3/internal/tuic"
@@ -52,7 +53,7 @@ type SingBoxService struct{}
 
 func singBoxInboundRequiresUsers(protocol model.Protocol) bool {
 	switch protocol {
-	case model.VLESS, model.VMESS, model.Trojan, model.NaiveProxy, model.Hysteria, model.ShadowTLS, model.AnyTLS, model.TUIC:
+	case model.VLESS, model.VMESS, model.Trojan, model.Snell, model.NaiveProxy, model.Hysteria, model.ShadowTLS, model.AnyTLS, model.TUIC:
 		return true
 	default:
 		return false
@@ -64,7 +65,7 @@ func singBoxInboundRequiresUsers(protocol model.Protocol) bool {
 func isLocalSidecarInbound(protocol model.Protocol) bool {
 	switch protocol {
 	case model.MTProto, model.AmneziaWG, model.Mieru,
-		model.Pingtunnel, model.TrustTunnel, model.Sudoku, model.VKTurnProxy:
+		model.Pingtunnel, model.TrustTunnel, model.FPTN, model.OpenFlux, model.Sudoku, model.VKTurnProxy:
 		return true
 	default:
 		return false
@@ -139,6 +140,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 		}}
 	}
 
+	managedOutboundTags := map[string]bool{}
 	dnsOutboundTags := make(map[string]struct{})
 	if template, err := singBoxSettingService.GetXrayConfigTemplate(); err == nil {
 		var xrayCfg map[string]any
@@ -251,6 +253,15 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 							return nil, fmt.Errorf("amneziawg outbound %d: invalid bridge: %w", i, err)
 						}
 					}
+					if externalvpn.IsAdditionalOutbound(ob) {
+						tag, _ := ob["tag"].(string)
+						managedOutboundTags[tag] = true
+						bridge, err := externalvpn.EnsureOutbound(ob)
+						if err != nil {
+							return nil, fmt.Errorf("outbound %q: %w", tag, err)
+						}
+						ob = bridge
+					}
 					translated, err := singbox.TranslateXrayOutbound(ob)
 					if err != nil {
 						return nil, err
@@ -319,6 +330,23 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 			raw["listen"] = "0.0.0.0"
 		}
 		dbClients := clientsByInbound[inbound.Id]
+		// Snell user keys belong to this inbound. Keep the runtime credentials
+		// identical to the native subscription even when the global client has
+		// a different password for another protocol.
+		snellKeys := map[string]string{}
+		if inbound.Protocol == model.Snell {
+			var local struct {
+				Clients []model.Client `json:"clients"`
+			}
+			if err := json.Unmarshal([]byte(inbound.Settings), &local); err != nil {
+				return nil, err
+			}
+			for _, client := range local.Clients {
+				if client.Enable {
+					snellKeys[client.Email] = client.Password
+				}
+			}
+		}
 
 		enableMap := make(map[string]bool, len(inbound.ClientStats))
 		for _, stat := range inbound.ClientStats {
@@ -349,6 +377,12 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 				if client.Security != "" {
 					entry["security"] = client.Security
 				}
+			case model.Snell:
+				password, present := snellKeys[client.Email]
+				if !present {
+					continue
+				}
+				entry["password"] = password
 			case model.Trojan:
 				if client.Password != "" {
 					entry["password"] = client.Password
@@ -497,6 +531,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 	if err := singBoxSettingService.applySingBoxYouTubeServer(cfg); err != nil {
 		return nil, err
 	}
+	externalvpn.KeepOutbounds(managedOutboundTags)
 	return cfg, nil
 }
 

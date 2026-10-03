@@ -394,9 +394,9 @@ export default function ClientFormModal({
         ...EMPTY,
         email: RandomUtil.randomLowerAndNum(10),
         uuid: RandomUtil.randomUUID(),
-        subId: RandomUtil.randomLowerAndNum(16),
-        password: RandomUtil.randomLowerAndNum(16),
-        auth: RandomUtil.randomLowerAndNum(16),
+        subId: RandomUtil.randomLowerAndNum(48),
+        password: RandomUtil.randomLowerAndNum(48),
+        auth: RandomUtil.randomLowerAndNum(48),
         wgPrivateKey: wgKeypair.privateKey,
         wgPublicKey: wgKeypair.publicKey,
       });
@@ -485,7 +485,7 @@ export default function ClientFormModal({
       'password',
       ss2022Method
         ? RandomUtil.randomShadowsocksPassword(ss2022Method)
-        : RandomUtil.randomLowerAndNum(16),
+        : RandomUtil.randomLowerAndNum(48),
     );
   }
 

@@ -69,7 +69,10 @@ const TRACKED_PROTOCOLS: readonly string[] = [
   Protocols.MTPROTO,
   Protocols.AMNEZIAWG,
   Protocols.TUIC,
+  Protocols.SNELL,
   Protocols.TRUSTTUNNEL,
+  Protocols.FPTN,
+  Protocols.OPENFLUX,
   Protocols.SUDOKU,
 ];
 

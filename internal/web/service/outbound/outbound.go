@@ -2,19 +2,18 @@ package outbound
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"encoding/json"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"gorm.io/gorm"
 )
 
@@ -237,7 +236,7 @@ func outboundTransportIsUDP(ob map[string]any) bool {
 	if kind, _ := transport["type"].(string); equalsAnyFold(kind, "quic") {
 		return true
 	}
-	if protocol, _ := ob["protocol"].(string); equalsAnyFold(normalizedProbeProtocol(protocol), "hysteria", "hysteria2", "tuic", "wireguard", "amneziawg", "selector", "urltest") {
+	if protocol, _ := ob["protocol"].(string); equalsAnyFold(normalizedProbeProtocol(protocol), "hysteria", "hysteria2", "tuic", "wireguard", "amneziawg", "fptn", "openflux", "selector", "urltest") {
 		return true
 	}
 	if stream, ok := ob["streamSettings"].(map[string]any); ok {

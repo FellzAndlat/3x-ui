@@ -23,7 +23,10 @@ export const NODE_ELIGIBLE_PROTOCOLS: Readonly<Record<string, true>> = {
   [Protocols.TUIC]: true,
   [Protocols.PINGTUNNEL]: true,
   [Protocols.TRUSTTUNNEL]: true,
+  [Protocols.FPTN]: true,
+  [Protocols.OPENFLUX]: true,
   [Protocols.NAIVE]: true,
+  [Protocols.SNELL]: true,
   [Protocols.ANYTLS]: true,
   [Protocols.SHADOWTLS]: true,
   [Protocols.MIERU]: true,
@@ -65,6 +68,7 @@ export function nodeSupportsProtocol(node: NodeCoreInfo, protocol: string): bool
   // remain valid on an Xray node because the node panel owns their processes.
   return (
     protocol !== Protocols.NAIVE &&
+    protocol !== Protocols.SNELL &&
     protocol !== Protocols.ANYTLS &&
     protocol !== Protocols.SHADOWTLS
   );

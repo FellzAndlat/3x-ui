@@ -60,3 +60,19 @@ func (s *InboundService) GetAllClientLinks(host string, email string) ([]string,
 	}
 	return links, nil
 }
+
+// GetScopedInboundLinks uses the subscription renderer so server certificate
+// pins, node addresses and endpoint overrides match the actual subscription.
+func (s *InboundService) GetScopedInboundLinks(host string, inbound *model.Inbound, email string) ([]string, error) {
+	if registeredSubLinkProvider == nil {
+		return nil, common.NewError("sub link provider not registered")
+	}
+	if email == "" {
+		return nil, common.NewError("client email is required")
+	}
+	links := registeredSubLinkProvider.LinksForClient(host, inbound, email)
+	if len(links) == 0 {
+		return nil, common.NewError("no connection links available; check client, certificate and public endpoint")
+	}
+	return links, nil
+}

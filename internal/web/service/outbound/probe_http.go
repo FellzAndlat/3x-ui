@@ -293,6 +293,11 @@ func runHTTPProbeBatchForCore(items []*httpBatchItem, allOutbounds []any, testUR
 	defer release()
 
 	cfg := buildBatchTestConfig(items, allOutbounds, ports)
+	cleanupVPN, err := bridgeManagedProbeOutbounds(cfg)
+	if err != nil {
+		return false, err
+	}
+	defer cleanupVPN()
 
 	configPath, err := createTestConfigPath()
 	if err != nil {
@@ -417,6 +422,7 @@ func buildBatchTestConfig(items []*httpBatchItem, allOutbounds []any, ports []in
 			bridged = append(bridged, ob)
 			continue
 		}
+
 		if p, _ := m["protocol"].(string); !strings.EqualFold(p, "amneziawg") {
 			bridged = append(bridged, ob)
 			continue

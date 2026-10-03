@@ -1,10 +1,10 @@
 package controller
 
 import (
-	"encoding/json"
 	"net"
 	"strconv"
 	"strings"
+	"encoding/json"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/middleware"
@@ -12,7 +12,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/web/session"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/websocket"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"github.com/gin-gonic/gin"
 )
 
@@ -77,6 +76,7 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.GET("/options", a.getInboundOptions)
 	g.GET("/allLinks", a.getAllInboundLinks)
 	g.GET("/get/:id", a.getInbound)
+	g.GET("/get/:id/links", a.getScopedInboundLinks)
 	g.GET("/:id/fallbacks", a.getFallbacks)
 
 	g.POST("/add", a.addInbound)

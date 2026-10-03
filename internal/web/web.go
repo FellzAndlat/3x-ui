@@ -4,18 +4,18 @@ package web
 
 import (
 	"context"
-	"crypto/tls"
 	"embed"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"crypto/tls"
+	"io/fs"
+	"net/http"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
@@ -42,7 +42,6 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/web/service/tgbot"
 	"github.com/SawaMEN/3x-ui/v3/internal/web/websocket"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
-
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
@@ -891,6 +890,7 @@ func (s *Server) stop(stopXray bool, stopTgBot bool) error {
 		amneziawgnet.GetManager().StopAll()
 		tuic.GetManager().StopAll()
 		externalvpn.GetManager().StopAll()
+		externalvpn.KeepOutbounds(nil)
 		mieru.GetManager().StopAll()
 		amneziawgnet.GetOutboundManager().StopAll()
 	}

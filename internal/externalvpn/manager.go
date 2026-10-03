@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/config"
@@ -32,9 +33,12 @@ import (
 )
 
 type running struct {
+	statsMu     sync.Mutex
+	stopping    atomic.Bool
 	protocol    model.Protocol
 	metricsAddr string
 	tag         string
+	instance    Instance
 	counters    map[string]trafficCounters
 	fingerprint string
 	cancel      context.CancelFunc
@@ -255,7 +259,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 			m.removeLocked(inst.ID)
 		}
 	}
-	if inst.Protocol == model.TrustTunnel {
+	if inst.Protocol == model.TrustTunnel || inst.Protocol == model.FPTN || inst.Protocol == model.OpenFlux {
 		active := false
 		for _, c := range inst.Settings.Clients {
 			active = active || c.Enable
@@ -272,7 +276,7 @@ func (m *Manager) ensureLocked(inst Instance) error {
 		}
 	}
 	metricsAddr := ""
-	if inst.Protocol == model.TrustTunnel {
+	if inst.Protocol == model.TrustTunnel || inst.Protocol == model.FPTN {
 		listener, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
 		if err != nil {
 			return err
@@ -280,23 +284,35 @@ func (m *Manager) ensureLocked(inst Instance) error {
 		metricsAddr = listener.Addr().String()
 		_ = listener.Close()
 	}
-	args, err := files(inst, metricsAddr)
-	if err != nil {
-		return err
+	var cmd *exec.Cmd
+	var cancel context.CancelFunc
+	var ctx context.Context
+	if inst.Protocol == model.FPTN || inst.Protocol == model.OpenFlux {
+		var err error
+		cmd, cancel, err = m.additionalCommand(inst, metricsAddr)
+		if err != nil {
+			return err
+		}
+		ctx = context.Background()
+	} else {
+		args, err := files(inst, metricsAddr)
+		if err != nil {
+			return err
+		}
+		ctx, cancel = context.WithCancel(context.Background())
+		cmd = exec.CommandContext(ctx, binary(inst.Protocol), args...)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, binary(inst.Protocol), args...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return fmt.Errorf("%s: %w", inst.Protocol, err)
 	}
-	proc := &running{protocol: inst.Protocol, fingerprint: fp, cancel: cancel, cmd: cmd, done: make(chan struct{}), metricsAddr: metricsAddr, tag: inst.Tag, counters: map[string]trafficCounters{}}
+	proc := &running{instance: inst, protocol: inst.Protocol, fingerprint: fp, cancel: cancel, cmd: cmd, done: make(chan struct{}), metricsAddr: metricsAddr, tag: inst.Tag, counters: map[string]trafficCounters{}}
 	m.procs[inst.ID] = proc
 	go func() {
 		err := cmd.Wait()
 		close(proc.done)
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && !proc.stopping.Load() {
 			logger.Warningf("%s inbound %d exited: %v", inst.Protocol, inst.ID, err)
 		}
 	}()
@@ -305,6 +321,8 @@ func (m *Manager) ensureLocked(inst Instance) error {
 
 func (m *Manager) removeLocked(id int) {
 	if proc := m.procs[id]; proc != nil {
+		proc.stopping.Store(true)
+		cleanupAdditional(id, proc.protocol)
 		proc.cancel()
 		select {
 		case <-proc.done:
@@ -400,50 +418,83 @@ type (
 
 func (m *Manager) CollectTraffic() []TrafficDelta {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	processes := make([]*running, 0, len(m.procs))
+	for _, proc := range m.procs {
+		processes = append(processes, proc)
+	}
+	m.mu.Unlock()
+	// Poll independent processes concurrently without blocking inbound CRUD on
+	// every socket/HTTP timeout. Each process serializes its counter baseline.
+	var resultMu sync.Mutex
+	var wg sync.WaitGroup
+	limit := make(chan struct{}, 8)
+	var deltas []TrafficDelta
+	for _, proc := range processes {
+		limit <- struct{}{}
+		wg.Add(1)
+		go func(proc *running) {
+			defer wg.Done()
+			defer func() { <-limit }()
+			proc.statsMu.Lock()
+			defer proc.statsMu.Unlock()
+			if proc.stopping.Load() {
+				return
+			}
+			rows := m.collectProcessTraffic(proc)
+			resultMu.Lock()
+			deltas = append(deltas, rows...)
+			resultMu.Unlock()
+		}(proc)
+	}
+	wg.Wait()
+	return deltas
+}
+
+func (m *Manager) collectProcessTraffic(proc *running) []TrafficDelta {
 	var deltas []TrafficDelta
 	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil, DisableKeepAlives: true}}
-	for _, proc := range m.procs {
-		if proc.metricsAddr == "" {
-			continue
-		}
-		request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+proc.metricsAddr+"/clients", nil)
-		if err != nil {
-			continue
-		}
-		response, err := client.Do(request)
-		if err != nil {
-			continue
-		}
-		var clients []struct {
-			Username string `json:"username"`
-			Sessions int    `json:"sessions"`
-			Inbound  uint64 `json:"inbound"`
-			Outbound uint64 `json:"outbound"`
-		}
-		if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&clients) != nil {
-			response.Body.Close()
-			continue
-		}
+	if proc.protocol == model.FPTN || proc.protocol == model.OpenFlux {
+		return m.collectAdditionalTraffic(proc)
+	}
+	if proc.metricsAddr == "" {
+		return nil
+	}
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+proc.metricsAddr+"/clients", nil)
+	if err != nil {
+		return nil
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil
+	}
+	var clients []struct {
+		Username string `json:"username"`
+		Sessions int    `json:"sessions"`
+		Inbound  uint64 `json:"inbound"`
+		Outbound uint64 `json:"outbound"`
+	}
+	if response.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&clients) != nil {
 		response.Body.Close()
-		for _, row := range clients {
-			if row.Username == "" {
-				continue
-			}
-			old := proc.counters[row.Username]
-			up, down := row.Inbound, row.Outbound
-			delta := TrafficDelta{
-				Tag:    proc.tag,
-				Email:  row.Username,
-				Up:     cumulativeTrafficDelta(up, old.up),
-				Down:   cumulativeTrafficDelta(down, old.down),
-				Active: row.Sessions > 0,
-			}
-			if delta.Up > 0 || delta.Down > 0 || delta.Active {
-				deltas = append(deltas, delta)
-			}
-			proc.counters[row.Username] = trafficCounters{up: up, down: down}
+		return nil
+	}
+	response.Body.Close()
+	for _, row := range clients {
+		if row.Username == "" {
+			continue
 		}
+		old := proc.counters[row.Username]
+		up, down := row.Inbound, row.Outbound
+		delta := TrafficDelta{
+			Tag:    proc.tag,
+			Email:  row.Username,
+			Up:     cumulativeTrafficDelta(up, old.up),
+			Down:   cumulativeTrafficDelta(down, old.down),
+			Active: row.Sessions > 0,
+		}
+		if delta.Up > 0 || delta.Down > 0 || delta.Active {
+			deltas = append(deltas, delta)
+		}
+		proc.counters[row.Username] = trafficCounters{up: up, down: down}
 	}
 	return deltas
 }

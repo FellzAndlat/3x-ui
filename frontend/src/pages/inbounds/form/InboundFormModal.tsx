@@ -1,3 +1,4 @@
+import { FptnFields, OpenFluxFields } from './protocols/additional-vpn';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { QuestionCircleOutlined } from '@ant-design/icons';
@@ -59,6 +60,7 @@ import { AdvancedAllEditor, AdvancedSliceEditor } from './advanced-editors';
 import { formatInboundIssue, formatInboundValidation } from './formatValidationError';
 import {
   AmneziawgFields,
+  SnellFields,
   AnyTlsFields,
   ShadowTlsFields,
   HttpFields,
@@ -338,9 +340,12 @@ export default function InboundFormModal({
     protocol !== Protocols.TUIC &&
     protocol !== Protocols.PINGTUNNEL &&
     protocol !== Protocols.TRUSTTUNNEL &&
+    protocol !== Protocols.FPTN &&
+    protocol !== Protocols.OPENFLUX &&
     protocol !== Protocols.NAIVE &&
     protocol !== Protocols.MIERU &&
     protocol !== Protocols.SUDOKU &&
+    protocol !== Protocols.SNELL &&
     protocol !== Protocols.SHADOWTLS;
 
   const wPort = useWatch({ control, name: 'port' });
@@ -363,6 +368,9 @@ export default function InboundFormModal({
       Protocols.NAIVE,
       Protocols.MIERU,
       Protocols.SUDOKU,
+      Protocols.SNELL,
+      Protocols.FPTN,
+      Protocols.OPENFLUX,
       Protocols.ANYTLS,
       Protocols.SHADOWTLS,
     ]);
@@ -655,6 +663,9 @@ export default function InboundFormModal({
       } else if (
         next === Protocols.WIREGUARD ||
         next === Protocols.TUNNEL ||
+        next === Protocols.SNELL ||
+        next === Protocols.FPTN ||
+        next === Protocols.OPENFLUX ||
         next === Protocols.ANYTLS ||
         next === Protocols.SHADOWTLS
       ) {
@@ -942,6 +953,9 @@ export default function InboundFormModal({
       {protocol === Protocols.PINGTUNNEL && <PingtunnelFields />}
       {protocol === Protocols.TRUSTTUNNEL && <TrustTunnelFields />}
       {protocol === Protocols.NAIVE && <NaiveFields />}
+      {protocol === Protocols.SNELL && <SnellFields />}
+      {protocol === Protocols.FPTN && <FptnFields />}
+      {protocol === Protocols.OPENFLUX && <OpenFluxFields />}
       {protocol === Protocols.ANYTLS && <AnyTlsFields />}
       {protocol === Protocols.MIERU && <MieruFields />}
       {protocol === Protocols.SUDOKU && <SudokuFields />}
@@ -1348,6 +1362,9 @@ export default function InboundFormModal({
                     Protocols.WIREGUARD,
                     Protocols.MTPROTO,
                     Protocols.AMNEZIAWG,
+                    Protocols.SNELL,
+                    Protocols.FPTN,
+                    Protocols.OPENFLUX,
                     Protocols.ANYTLS,
                     Protocols.SHADOWTLS,
                     Protocols.TUIC,
