@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Divider, Input, InputNumber, Select, Switch, Typography } from 'antd';
+import { Divider, Input, Select, Switch, Typography } from 'antd';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 import { FormField } from '@/components/form/rhf';
@@ -9,9 +9,6 @@ export default function MtprotoFields() {
   const { t } = useTranslation();
   const { control } = useFormContext();
   const routeThroughXray = useWatch({ control, name: 'settings.routeThroughXray' }) as
-    | boolean
-    | undefined;
-  const mekoEnabled = useWatch({ control, name: 'settings.mekoFix.enabled' }) as
     | boolean
     | undefined;
   const proxyProtocolEnabled = useWatch({ control, name: 'settings.proxyProtocolListener' }) as
@@ -92,51 +89,6 @@ export default function MtprotoFields() {
       <FormField name={['settings', 'debug']} label="Telemt debug logging" valueProp="checked">
         <Switch />
       </FormField>
-
-      <Divider orientation="left">MEKO proxy fix</Divider>
-      <FormField
-        name={['settings', 'mekoFix', 'enabled']}
-        label="Enable MTPROTO_FIX_By_MEKO"
-        tooltip="Installs an inbound-scoped SYN filter for this Telemt port."
-        valueProp="checked"
-      >
-        <Switch />
-      </FormField>
-      {mekoEnabled !== false && (
-        <>
-          <FormField name={['settings', 'mekoFix', 'backend']} label="Firewall backend">
-            <Select
-              options={[
-                { value: 'auto', label: 'Auto (nftables → iptables)' },
-                { value: 'nftables', label: 'nftables' },
-                { value: 'iptables', label: 'iptables' },
-              ]}
-            />
-          </FormField>
-          <FormField
-            name={['settings', 'mekoFix', 'synRatePerMinute']}
-            label="Non-iOS SYN rate / minute"
-            tooltip="MEKO v3 default is 54 SYN/minute per source IP."
-          >
-            <InputNumber min={1} max={100000} style={{ width: '100%' }} />
-          </FormField>
-          <FormField
-            name={['settings', 'mekoFix', 'burst']}
-            label="SYN burst"
-            tooltip="MEKO v3 default is 1 packet."
-          >
-            <InputNumber min={1} max={10000} style={{ width: '100%' }} />
-          </FormField>
-          <FormField
-            name={['settings', 'mekoFix', 'iosBypass']}
-            label="iOS signature bypass"
-            tooltip="Recognize MEKO's iOS TCP signature and bypass the non-iOS SYN limiter."
-            valueProp="checked"
-          >
-            <Switch />
-          </FormField>
-        </>
-      )}
 
       <Divider orientation="left">Routing</Divider>
       <FormField
