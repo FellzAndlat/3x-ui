@@ -37,7 +37,9 @@ export interface OutboundProbeResult {
 const coreCapabilitiesKey = ['server', 'core-capabilities'] as const;
 
 async function fetchCoreCapabilities(): Promise<CoreCapabilitiesResponse> {
-  const msg = await HttpUtil.get('/panel/api/server/core/capabilities', undefined, { silent: true });
+  const msg = await HttpUtil.get('/panel/api/server/core/capabilities', undefined, {
+    silent: true,
+  });
   if (!msg?.success) throw new Error(msg?.msg || 'Failed to fetch core capabilities');
   if (!msg.obj?.core || !msg.obj?.capabilities) {
     throw new Error('Invalid core capabilities response');
@@ -55,7 +57,11 @@ export function useCoreCapabilitiesQuery() {
 
 export function useSingBoxOutboundProbe() {
   const mutation = useMutation({
-    mutationFn: async ({ tag, url, timeout }: OutboundProbeRequest): Promise<OutboundProbeResult> => {
+    mutationFn: async ({
+      tag,
+      url,
+      timeout,
+    }: OutboundProbeRequest): Promise<OutboundProbeResult> => {
       const payload: Record<string, string | number> = { tag };
       if (url) payload.url = url;
       if (timeout !== undefined) payload.timeout = timeout;
