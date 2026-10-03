@@ -18,8 +18,6 @@ type Props = {
 export default function SimpleSettings({ config, onChange, section = 'basic', onNavigate }: Props) {
   const dns = object(config.dns);
   const route = object(config.route);
-  const log = object(config.log);
-  const level = typeof log.level === 'string' ? log.level : 'info';
   const outbounds = [...records(config.outbounds), ...records(config.endpoints)].filter(
     (item) =>
       typeof item.tag === 'string' && item.tag && !['block', 'dns'].includes(String(item.type)),
@@ -28,13 +26,15 @@ export default function SimpleSettings({ config, onChange, section = 'basic', on
   const customOutbound =
     selectedOutbound && !outbounds.some((item) => item.tag === selectedOutbound);
   const preset = currentDnsPreset(config);
+
   return (
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       {section === 'basic' && (
         <Card title="Быстрая настройка">
           <p>
-            Для обычной работы достаточно настроек ниже. Измените нужные параметры и нажмите
-            «Сохранить».
+            Здесь оставлены только ссылки на основные связанные разделы. DNS, маршрутизация,
+            исходящие подключения и служебные параметры настраиваются в собственных вкладках без
+            повторения одних и тех же полей.
           </p>
           <p>
             Входящие подключения и пользователи настраиваются в разделе «Входящие», ссылки для
@@ -46,7 +46,8 @@ export default function SimpleSettings({ config, onChange, section = 'basic', on
           </Space>
         </Card>
       )}
-      {section !== 'routing' && (
+
+      {section === 'dns' && (
         <Card title="Определение адресов сайтов (DNS)">
           <p>
             Системный DNS использует настройки сервера. Зашифрованный DNS отправляет запросы
@@ -90,12 +91,13 @@ export default function SimpleSettings({ config, onChange, section = 'basic', on
           </Row>
           <p className="singbox-field-hint">
             Правила DNS сохраняются и имеют приоритет над выбранным сервисом. Индивидуальные
-            DNS-серверы доступны в расширенном режиме.
+            DNS-серверы доступны в расширенном режиме этой же вкладки.
           </p>
         </Card>
       )}
-      {section !== 'dns' && (
-        <Card title="Выход в интернет">
+
+      {section === 'routing' && (
+        <Card title="Выход по умолчанию">
           <p>Выберите, куда отправлять трафик, для которого нет отдельного правила.</p>
           <Select
             aria-label="Выход в интернет"
@@ -126,47 +128,16 @@ export default function SimpleSettings({ config, onChange, section = 'basic', on
             <Button onClick={() => onNavigate('/singbox#outbound')}>
               Настроить исходящие подключения
             </Button>
-            <Button onClick={() => onNavigate('/singbox?routingTab=adblock#routing')}>
-              Блокировка рекламы
-            </Button>
+            <Button onClick={() => onNavigate('/singbox#adblock')}>Блокировка рекламы</Button>
           </Space>
         </Card>
       )}
-      {section === 'basic' && (
-        <Card title="Журнал работы">
-          <Select
-            aria-label="Журнал работы"
-            style={{ width: '100%' }}
-            value={log.disabled === true ? 'off' : level}
-            options={[
-              { value: 'info', label: 'Обычный — события и ошибки' },
-              { value: 'warn', label: 'Только предупреждения и ошибки' },
-              { value: 'error', label: 'Только ошибки' },
-              { value: 'debug', label: 'Подробный — для поиска проблем' },
-              { value: 'off', label: 'Отключён' },
-              ...(!['info', 'warn', 'error', 'debug'].includes(level)
-                ? [{ value: level, label: `Текущий уровень: ${level}` }]
-                : []),
-            ]}
-            onChange={(next) =>
-              onChange({
-                ...config,
-                log: {
-                  ...log,
-                  disabled: next === 'off',
-                  ...(next === 'off' ? {} : { level: next }),
-                },
-              })
-            }
-          />
-          <p className="singbox-field-hint">Подробный журнал включайте на время диагностики.</p>
-        </Card>
-      )}
+
       <Alert
         type="info"
         showIcon
         title="Автоматическое управление"
-        description="Панель формирует входящие подключения, учёт трафика и служебные API. Для специальных параметров включите расширенный режим."
+        description="Панель формирует входящие подключения, учёт трафика и служебные API. Дополнительные параметры находятся в отдельных вкладках расширенного режима."
       />
     </Space>
   );

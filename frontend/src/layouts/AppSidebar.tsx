@@ -179,19 +179,19 @@ function AppSidebar() {
         label: t('pages.singBox.sections.basic'),
       },
       {
-        key: '/settings#gateway',
-        icon: <ApartmentOutlined />,
-        label: 'Режим шлюза',
-      },
-      {
         key: '/singbox#dns',
         icon: <DatabaseOutlined />,
         label: t('pages.singBox.sections.dns'),
       },
       {
         key: '/singbox#routing',
-        icon: <ApartmentOutlined />,
+        icon: <SwapOutlined />,
         label: t('pages.singBox.sections.route'),
+      },
+      {
+        key: '/singbox#adblock',
+        icon: <SafetyOutlined />,
+        label: 'AdBlock',
       },
       {
         key: '/singbox#outbound',
@@ -199,9 +199,29 @@ function AppSidebar() {
         label: t('pages.singBox.sections.outbounds'),
       },
       {
+        key: '/singbox#gateway',
+        icon: <ApartmentOutlined />,
+        label: 'Режим шлюза',
+      },
+      {
+        key: '/singbox#endpoints',
+        icon: <ClusterOutlined />,
+        label: 'Endpoints',
+      },
+      {
+        key: '/singbox#certificates',
+        icon: <SafetyOutlined />,
+        label: 'Сертификаты',
+      },
+      {
+        key: '/singbox#network',
+        icon: <GlobalOutlined />,
+        label: 'Сеть и HTTP-клиенты',
+      },
+      {
         key: '/singbox#advanced',
         icon: <CodeOutlined />,
-        label: t('pages.singBox.sections.advanced'),
+        label: 'Дополнительно / JSON',
       },
     ],
     [t],
@@ -307,7 +327,7 @@ function AppSidebar() {
         : pathname === ''
           ? '/'
           : pathname;
-  const gatewaySubmenu = isSingBox ? '/singbox' : isXray ? '/xray' : '/settings';
+  const gatewaySubmenu = isXray ? '/xray' : '/settings';
   const openSubmenu = gatewayActive
     ? gatewaySubmenu
     : settingsActive

@@ -80,6 +80,12 @@ func probeOutboundDependencies(outbound map[string]any) []string {
 	} else {
 		add(settings["detour"])
 	}
+	// Xray's proxySettings.tag is a real outbound dependency too. Without it,
+	// isolated health checks can drop the chained hop from the temporary core
+	// config and incorrectly report a valid cascade as broken.
+	if proxySettings, ok := outbound["proxySettings"].(map[string]any); ok {
+		add(proxySettings["tag"])
+	}
 	if normalizedProbeProtocol(protocol) == "selector" || normalizedProbeProtocol(protocol) == "urltest" {
 		switch members := settings["outbounds"].(type) {
 		case []any:

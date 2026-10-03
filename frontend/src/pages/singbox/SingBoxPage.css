@@ -48,12 +48,35 @@
   margin: 6px 0 0;
   padding-left: 20px;
 }
+
+/*
+ * Sing-box has one navigation layer: the application sidebar. The old top
+ * Tabs repeated the same destinations and made every settings item appear
+ * twice, so only the active tab content is kept here.
+ */
 .singbox-page .singbox-main-tabs > .ant-tabs-nav {
-  margin-bottom: 12px;
+  display: none;
 }
-.singbox-page .singbox-main-tabs > .ant-tabs-nav .ant-tabs-tab {
-  padding: 10px 12px;
+
+/* Routing used another Tabs level for Rules / AdBlock. Both are now direct
+ * sing-box menu destinations, so that duplicate navigation is hidden too. */
+.singbox-page .singbox-main-tabs > .ant-tabs-content-holder .ant-tabs > .ant-tabs-nav {
+  display: none;
 }
+
+/*
+ * The former Advanced page repeated Endpoints, certificates and network
+ * sections inside a Collapse. Those sections are now promoted to menu items;
+ * keep Advanced only for Experimental/full JSON controls.
+ */
+.singbox-page
+  .singbox-main-tabs
+  > .ant-tabs-content-holder
+  .ant-tabs-tabpane[aria-labelledby$='-tab-advanced']
+  .ant-collapse {
+  display: none;
+}
+
 .singbox-page .ant-card {
   border-radius: 12px;
 }
@@ -96,9 +119,6 @@
   .singbox-page .singbox-list-toolbar {
     align-items: stretch;
     flex-direction: column;
-  }
-  .singbox-page .singbox-main-tabs > .ant-tabs-nav-wrap {
-    overflow-x: auto;
   }
 }
 
