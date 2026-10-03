@@ -72,10 +72,16 @@ type Process struct {
 	startTime   time.Time
 	config      string
 	externalPID int
+	isolated    bool
 }
 
 func NewProcess(configPath string) *Process {
 	return &Process{config: resolvePath(configPath), version: "Unknown"}
+}
+
+// NewTestProcess never discovers or stops the managed production process.
+func NewTestProcess(configPath string) *Process {
+	return &Process{config: resolvePath(configPath), version: "Unknown", isolated: true}
 }
 
 func (p *Process) IsRunning() bool {
@@ -98,11 +104,14 @@ func (p *Process) IsRunning() bool {
 			return true
 		}
 	}
+	if p.isolated {
+		return false
+	}
 	if externalPID > 0 && processExists(externalPID) {
 		p.clearErrorWhileRunning()
 		return true
 	}
-	if pid := findRunningPID(GetBinaryPath()); pid > 0 {
+	if pid := p.managedPID(); pid > 0 {
 		p.mu.Lock()
 		p.externalPID = pid
 		p.exitErr = nil
@@ -167,7 +176,7 @@ func (p *Process) GetUptime() uint64 {
 	if !startTime.IsZero() {
 		return uint64(time.Since(startTime).Seconds())
 	}
-	if externalPID <= 0 {
+	if externalPID <= 0 && !p.isolated {
 		externalPID = findRunningPID(GetBinaryPath())
 	}
 	if externalPID <= 0 {
@@ -253,7 +262,7 @@ func (p *Process) startLocked(ctx context.Context) error {
 			return nil
 		}
 	}
-	if pid := findRunningPID(GetBinaryPath()); pid > 0 {
+	if pid := p.managedPID(); pid > 0 {
 		p.mu.Lock()
 		p.externalPID = pid
 		p.mu.Unlock()
@@ -314,7 +323,7 @@ func (p *Process) stopLocked() error {
 	cmd, done, externalPID := p.cmd, p.done, p.externalPID
 	p.mu.RUnlock()
 	if cmd == nil || cmd.Process == nil {
-		if externalPID <= 0 {
+		if externalPID <= 0 && !p.isolated {
 			externalPID = findRunningPID(GetBinaryPath())
 		}
 		if externalPID <= 0 {
@@ -449,4 +458,11 @@ func (w *processOutput) String() string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return strings.TrimSpace(string(w.buf))
+}
+
+func (p *Process) managedPID() int {
+	if p.isolated {
+		return 0
+	}
+	return findRunningPID(GetBinaryPath())
 }

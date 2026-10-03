@@ -23,6 +23,7 @@ import {
   NETWORK_OPTIONS,
   PROTOCOL_OPTIONS,
   SERVER_PROTOCOLS,
+  SINGBOX_NATIVE_OUTBOUND_PROTOCOL_SET,
   TARGET_STRATEGY_OPTIONS,
 } from './outbound-form-constants';
 import {
@@ -31,6 +32,10 @@ import {
   hysteriaStreamSlice,
   newStreamSlice,
 } from './outbound-form-helpers';
+import {
+  buildNativeSingBoxOutbound,
+  normalizeOutboundJsonForPanel,
+} from './singbox-native-outbound';
 import {
   BlackholeFields,
   DnsFields,
@@ -69,6 +74,13 @@ interface OutboundFormModalProps {
   dialerProxyTags?: string[];
   onClose: () => void;
   onConfirm: (outbound: Record<string, unknown>) => void;
+}
+
+function supportsBasicOutboundForm(protocol: unknown): boolean {
+  if (typeof protocol !== 'string') return false;
+  const normalized = protocol.toLowerCase();
+  if (SINGBOX_NATIVE_OUTBOUND_PROTOCOL_SET.has(normalized)) return false;
+  return PROTOCOL_OPTIONS.some((option) => option.value === normalized);
 }
 
 export default function OutboundFormModal({
@@ -136,6 +148,19 @@ export default function OutboundFormModal({
 
   useEffect(() => {
     if (!open) return;
+
+    // Native/future sing-box outbounds may not have a typed Basic form yet.
+    // Preserve their JSON byte-for-byte semantically instead of passing them
+    // through rawOutboundToFormValues(), whose typed adapter intentionally
+    // understands only the Xray-compatible form protocols.
+    if (outboundProp && !supportsBasicOutboundForm(outboundProp.protocol)) {
+      methods.reset(buildAddModeValues());
+      setActiveKey('2');
+      setJsonText(JSON.stringify(outboundProp, null, 2));
+      setJsonDirty(false);
+      return;
+    }
+
     const initial = outboundProp ? rawOutboundToFormValues(outboundProp) : buildAddModeValues();
     methods.reset(initial);
     setActiveKey('1');
@@ -190,7 +215,14 @@ export default function OutboundFormModal({
     /* eslint-disable-next-line react-hooks/incompatible-library */
     const sub = methods.watch((_value, { name, type }) => {
       if (name !== 'protocol' || type !== 'change') return;
-      const nextProtocol = methods.getValues('protocol');
+      const nextProtocol = String(methods.getValues('protocol') ?? '').toLowerCase();
+      if (SINGBOX_NATIVE_OUTBOUND_PROTOCOL_SET.has(nextProtocol)) {
+        const native = buildNativeSingBoxOutbound(nextProtocol, methods.getValues('tag') ?? '');
+        setJsonText(JSON.stringify(native, null, 2));
+        setJsonDirty(false);
+        setActiveKey('2');
+        return;
+      }
       const next = rawOutboundToFormValues({ protocol: nextProtocol });
       methods.setValue('settings', next.settings);
       if (nextProtocol === 'hysteria') {
@@ -260,20 +292,29 @@ export default function OutboundFormModal({
 
   /*
    * Bridge form <-> JSON tab: when leaving the JSON tab back to Basic, push
-   * any edits into form state. When entering JSON tab, snapshot current
-   * form values so the user sees the live shape.
+   * any edits into form state. Native/future sing-box protocols intentionally
+   * remain in JSON mode so the typed Xray adapter cannot rewrite their shape.
    */
   function applyJsonToForm(): boolean {
-    if (!jsonDirty) return true;
     const raw = jsonText.trim();
     if (!raw) return true;
     let parsed: Record<string, unknown>;
     try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
+      const value = JSON.parse(raw) as unknown;
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        messageApi.error('JSON outbound must be an object');
+        return false;
+      }
+      parsed = normalizeOutboundJsonForPanel(value as Record<string, unknown>);
     } catch (e) {
       messageApi.error(`JSON: ${(e as Error).message}`);
       return false;
     }
+    if (!supportsBasicOutboundForm(parsed.protocol)) {
+      messageApi.info('Native sing-box outbounds are edited in JSON mode');
+      return false;
+    }
+    if (!jsonDirty) return true;
     const next = rawOutboundToFormValues(parsed);
     methods.reset(next);
     setJsonDirty(false);
@@ -288,6 +329,7 @@ export default function OutboundFormModal({
   }
 
   function onTabChange(key: string) {
+    if (key === activeKey) return;
     if (key === '2') {
       const values = methods.getValues();
       setJsonText(JSON.stringify(formValuesToWirePayload(values), null, 2));
@@ -302,25 +344,40 @@ export default function OutboundFormModal({
   }
 
   async function onOk() {
-    let values: OutboundFormValues;
+    let payload: Record<string, unknown>;
+    let tagValue: string;
+
     if (activeKey === '2') {
       const raw = jsonText.trim();
       if (!raw) return;
       let parsed: Record<string, unknown>;
       try {
-        parsed = JSON.parse(raw) as Record<string, unknown>;
+        const value = JSON.parse(raw) as unknown;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          messageApi.error('JSON outbound must be an object');
+          return;
+        }
+        parsed = normalizeOutboundJsonForPanel(value as Record<string, unknown>);
       } catch (e) {
         messageApi.error(`JSON: ${(e as Error).message}`);
         return;
       }
-      values = rawOutboundToFormValues(parsed);
-      methods.reset(values);
+      const protocolValue =
+        typeof parsed.protocol === 'string' ? parsed.protocol.trim().toLowerCase() : '';
+      if (!protocolValue) {
+        messageApi.error('Protocol is required');
+        return;
+      }
+      tagValue = typeof parsed.tag === 'string' ? parsed.tag.trim() : '';
+      payload = { ...parsed, protocol: protocolValue };
       setJsonDirty(false);
     } else {
       if (!(await methods.trigger())) return;
-      values = methods.getValues();
+      const values = methods.getValues();
+      tagValue = (values.tag ?? '').trim();
+      payload = formValuesToWirePayload(values);
     }
-    const tagValue = (values.tag ?? '').trim();
+
     if (!tagValue) {
       messageApi.error(t('pages.xray.outboundForm.tagRequired'));
       return;
@@ -336,7 +393,9 @@ export default function OutboundFormModal({
       messageApi.error('Tag already used by another outbound');
       return;
     }
-    onConfirm(formValuesToWirePayload(values));
+
+    payload.tag = tagValue;
+    onConfirm(payload);
   }
 
   return (

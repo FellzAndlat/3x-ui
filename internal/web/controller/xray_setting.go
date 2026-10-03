@@ -322,7 +322,13 @@ func (a *XraySettingController) testOutbound(c *gin.Context) {
 		return
 	}
 
-	result, err := a.OutboundService.TestOutbound(outboundJSON, testURL, allOutboundsJSON, mode)
+	coreType, err := a.SettingService.GetCoreType()
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	probeService := outbound.OutboundService{CoreType: coreType}
+	result, err := probeService.TestOutbound(outboundJSON, testURL, allOutboundsJSON, mode)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
@@ -355,7 +361,13 @@ func (a *XraySettingController) testOutbounds(c *gin.Context) {
 		return
 	}
 
-	results, err := a.OutboundService.TestOutbounds(outboundsJSON, testURL, allOutboundsJSON, mode)
+	coreType, err := a.SettingService.GetCoreType()
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	probeService := outbound.OutboundService{CoreType: coreType}
+	results, err := probeService.TestOutbounds(outboundsJSON, testURL, allOutboundsJSON, mode)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return

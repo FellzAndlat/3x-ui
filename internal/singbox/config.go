@@ -65,7 +65,7 @@ func TranslateXrayOutbound(raw map[string]any) (map[string]any, error) {
 	case "wireguard":
 		return nil, fmt.Errorf("outbound %q is migrated to a sing-box WireGuard endpoint", tag)
 	default:
-		return nil, fmt.Errorf("sing-box does not support Xray outbound protocol %q through the compatibility translator", protocol)
+		return translateNativeSingBoxOutbound(raw, protocol, tag)
 	}
 	settings := rawObject(raw, "settings")
 	streamSettings := rawObject(raw, "streamSettings")

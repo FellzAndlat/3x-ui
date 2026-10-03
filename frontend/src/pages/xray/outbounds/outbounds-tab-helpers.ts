@@ -23,6 +23,28 @@ export function originalOutboundIndex(rows: OutboundRow[], positionalIndex: numb
   return row ? row.key : positionalIndex;
 }
 
+function nativeServerAddresses(settings?: Record<string, unknown>): string[] {
+  const server = typeof settings?.server === 'string' ? settings.server.trim() : '';
+  if (!server) return [];
+
+  const port = settings?.server_port;
+  if ((typeof port === 'number' && port > 0) || (typeof port === 'string' && port.trim())) {
+    return [`${server}:${String(port)}`];
+  }
+
+  const ports = Array.isArray(settings?.server_ports)
+    ? settings.server_ports.filter(
+        (value): value is string | number =>
+          (typeof value === 'string' && value.trim().length > 0) || typeof value === 'number',
+      )
+    : [];
+  if (ports.length > 0) return ports.map((value) => `${server}:${String(value)}`);
+
+  // SSH defaults to 22 and some future native protocols may have their own
+  // default port. Showing the hostname is still better than hiding the target.
+  return [server];
+}
+
 export function outboundAddresses(o: OutboundRow): string[] {
   const settings = o.settings as Record<string, unknown> | undefined;
   switch (true) {
@@ -57,12 +79,23 @@ export function outboundAddresses(o: OutboundRow): string[] {
         .map((p) => p.endpoint || '')
         .filter(Boolean);
     default:
-      return [];
+      // Native sing-box wrappers flatten settings into the final outbound, so
+      // their remote target is stored as server/server_port rather than in
+      // Xray's vnext/servers arrays. This also covers future native types.
+      return nativeServerAddresses(settings);
   }
 }
 
 export function isUntestable(o: OutboundRow): boolean {
   if (!o) return true;
+  const protocol =
+    typeof o.protocol === 'string'
+      ? o.protocol
+          .trim()
+          .toLowerCase()
+          .replace(/^singbox:/, '')
+      : '';
+  if (['direct', 'block', 'dns'].includes(protocol)) return true;
   if (
     isOutboundProtocol(o, Protocols.Blackhole) ||
     isOutboundProtocol(o, Protocols.Loopback) ||

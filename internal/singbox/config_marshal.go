@@ -20,6 +20,9 @@ func validateSingBoxOutboundType(protocol, tag string) error {
 	case "wireguard":
 		return fmt.Errorf("sing-box outbound %q uses legacy WireGuard outbound; sing-box 1.13+ requires a WireGuard endpoint", tag)
 	default:
+		if isKnownSingBoxEndpoint(protocol) {
+			return fmt.Errorf("sing-box outbound %q uses endpoint type %q; configure it as an endpoint instead", tag, protocol)
+		}
 		// Keep unknown future outbound types pass-through compatible. The installed
 		// sing-box binary remains the source of truth for types introduced after
 		// the panel version, while known removed/invalid types are rejected above.
@@ -248,6 +251,9 @@ func validateSingBoxOutbound(outbound map[string]any) error {
 		return err
 	}
 
+	if err := validateNativeOutboundGroup(outbound, protocol, tag); err != nil {
+		return err
+	}
 	knownProtocol := isKnownSingBoxOutbound(protocol)
 	tls, hasTLS := outbound["tls"].(map[string]any)
 	if knownProtocol && hasTLS && len(tls) > 0 {

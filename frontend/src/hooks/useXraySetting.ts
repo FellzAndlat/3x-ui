@@ -28,17 +28,35 @@ function normalizeOutboundTestUrl(url: string) {
 
 // The core lowercases a protocol id and a transport name before resolving
 // either, so "WireGuard"/"KCP" still build a UDP handler a TCP dial misreports.
+// Groups also need an HTTP probe: they do not have one TCP server endpoint.
 export function isUdpOutbound(outbound: unknown): boolean {
   const o = outbound as
-    | { protocol?: unknown; streamSettings?: { network?: unknown } }
+    | {
+        protocol?: unknown;
+        settings?: { detour?: unknown; transport?: { type?: unknown } };
+        streamSettings?: { network?: unknown; sockopt?: { dialerProxy?: unknown } };
+      }
     | null
     | undefined;
+  const protocol =
+    typeof o?.protocol === 'string'
+      ? o.protocol
+          .trim()
+          .toLowerCase()
+          .replace(/^singbox:/, '')
+      : '';
+  const detour = o?.settings?.detour;
+  const dialerProxy = o?.streamSettings?.sockopt?.dialerProxy;
+  const nativeTransport = o?.settings?.transport?.type;
   const rawNetwork = o?.streamSettings?.network;
   const network = typeof rawNetwork === 'string' ? rawNetwork.toLowerCase() : '';
   return (
-    isOutboundProtocol(o, 'wireguard') ||
-    isOutboundProtocol(o, 'hysteria') ||
-    isOutboundProtocol(o, 'amneziawg') ||
+    (typeof detour === 'string' && detour.trim() !== '') ||
+    (typeof dialerProxy === 'string' && dialerProxy.trim() !== '') ||
+    (typeof nativeTransport === 'string' && nativeTransport.toLowerCase() === 'quic') ||
+    ['wireguard', 'amneziawg', 'hysteria', 'hysteria2', 'tuic', 'selector', 'urltest'].includes(
+      protocol,
+    ) ||
     network === 'hysteria' ||
     network === 'kcp' ||
     // The core resolves "kcp" and "mkcp" to the same mKCP transport.

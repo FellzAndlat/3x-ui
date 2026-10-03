@@ -150,3 +150,42 @@ describe('OutboundFormModal', () => {
     expect(payload.settings.reverse?.tag).toBe('r1');
   });
 });
+
+describe('native sing-box JSON editing', () => {
+  it('preserves an unchanged native outbound when Basic is clicked', async () => {
+    const native = {
+      protocol: 'singbox:tuic',
+      tag: 'tuic-out',
+      settings: {
+        server: 'example.com',
+        server_port: 443,
+        uuid: 'id',
+        password: 'secret',
+        tls: { enabled: true },
+      },
+    };
+    const onConfirm = vi.fn();
+    const view = renderWithProviders(
+      <OutboundFormModal
+        open
+        outbound={native}
+        existingTags={[]}
+        onClose={() => {}}
+        onConfirm={onConfirm}
+      />,
+    );
+    const activeBefore = document.querySelector('.ant-tabs-tab-active')?.textContent;
+    const basic = view
+      .getAllByRole('tab')
+      .find((tab) => tab.getAttribute('aria-selected') === 'false');
+    expect(basic).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(basic!);
+    });
+    expect(document.querySelector('.ant-tabs-tab-active')?.textContent).toBe(activeBefore);
+    await act(async () => {
+      fireEvent.click(document.querySelector('.ant-modal-footer .ant-btn-primary')!);
+    });
+    expect(onConfirm).toHaveBeenCalledWith(native);
+  });
+});

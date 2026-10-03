@@ -55,6 +55,45 @@ Outbound-соединения, правила маршрутизации, бал
 
 <OutboundGenerator />
 
+## Нативные исходящие соединения sing-box
+
+При выборе ядра **sing-box** в настройках панели исходящие соединения можно
+добавлять через варианты **(sing-box)** в списке протоколов. Для них открывается
+JSON-редактор с нативным шаблоном. Поддерживаются Direct, Block, Bridge, SOCKS,
+HTTP, Shadowsocks, VMess, VLESS, Trojan, Hysteria, Hysteria2, TUIC, ShadowTLS,
+AnyTLS, Snell, Tor, SSH, Naive, Selector и URLTest.
+
+Можно вставить объект из документации sing-box с полем `type`. Панель сохранит
+его как `protocol: "singbox:<type>"`, а остальные параметры поместит в `settings`.
+При запуске ядра эта оболочка снимается: TLS, REALITY, multiplex, transport,
+UDP over TCP и другие нативные параметры сохраняются в исходном формате.
+
+```json title="Нативный VLESS outbound"
+{
+  "type": "vless",
+  "tag": "proxy",
+  "server": "vpn.example.com",
+  "server_port": 443,
+  "uuid": "00000000-0000-4000-8000-000000000001",
+  "tls": { "enabled": true, "server_name": "vpn.example.com" },
+  "packet_encoding": "xudp"
+}
+```
+
+Для цепочек укажите `detour` в нативных параметрах, для групп — список `outbounds`
+и, у Selector, `default`. Переименование outbound в панели обновляет эти ссылки.
+Тесты HTTP и реальной задержки запускаются на выбранном ядре в отдельном временном
+процессе. Hysteria, Hysteria2, TUIC и группы проверяются через HTTP даже при выборе
+TCP-теста: подключение к TCP-порту не проверяет UDP-прокси или группу.
+
+WireGuard из обычной формы панели преобразуется в endpoint для sing-box 1.13+.
+Другие endpoint-типы настраиваются в `endpoints` нативного шаблона ядра.
+Доступность протоколов и дополнительных параметров зависит от установленной
+версии и сборки sing-box; перед запуском выполняется проверка самим ядром.
+Naive требует сборку с поддержкой NaiveProxy и соответствующую библиотеку Cronet,
+Tor — установленный исполняемый файл Tor. Нативные outbound sing-box предназначены
+для ядра sing-box и не преобразуются в протоколы, которых нет у Xray.
+
 ## Cloudflare WARP
 
 WARP позволяет вашему серверу направлять исходящий трафик через сеть Cloudflare.

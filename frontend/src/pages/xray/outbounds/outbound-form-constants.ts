@@ -10,7 +10,44 @@ import {
 import { OutboundDomainStrategySchema } from '@/schemas/protocols/outbound';
 import { SSMethodSchema } from '@/schemas/protocols/shared/shadowsocks';
 
-export const PROTOCOL_OPTIONS = Object.values(Protocols).map((p) => ({ value: p, label: p }));
+// Native sing-box protocols supported by the stable 1.14.x line that don't
+// have a typed Xray-compatible form. The singbox: prefix is a panel-only
+// escape hatch for names that also have a legacy compatibility translator;
+// it is stripped before the final sing-box config is emitted.
+export const SINGBOX_NATIVE_OUTBOUND_PROTOCOLS = [
+  'bridge',
+  'shadowtls',
+  'singbox:direct',
+  'singbox:block',
+  'singbox:socks',
+  'singbox:http',
+  'singbox:shadowsocks',
+  'singbox:vmess',
+  'singbox:vless',
+  'singbox:trojan',
+  'singbox:hysteria',
+  'singbox:tuic',
+  'singbox:hysteria2',
+  'anytls',
+  'snell',
+  'tor',
+  'ssh',
+  'selector',
+  'urltest',
+  'naive',
+] as const;
+
+export const SINGBOX_NATIVE_OUTBOUND_PROTOCOL_SET = new Set<string>(
+  SINGBOX_NATIVE_OUTBOUND_PROTOCOLS,
+);
+
+export const PROTOCOL_OPTIONS = [
+  ...Object.values(Protocols).map((p) => ({ value: p, label: p })),
+  ...SINGBOX_NATIVE_OUTBOUND_PROTOCOLS.map((p) => ({
+    value: p,
+    label: `${p.replace(/^singbox:/, '')} (sing-box)`,
+  })),
+];
 export const SECURITY_OPTIONS = Object.values(USERS_SECURITY).map((v) => ({ value: v, label: v }));
 export const FLOW_OPTIONS = Object.values(TLS_FLOW_CONTROL).map((v) => ({ value: v, label: v }));
 export const SS_METHOD_OPTIONS = SSMethodSchema.options.map((v) => ({ value: v, label: v }));

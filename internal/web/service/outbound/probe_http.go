@@ -179,15 +179,15 @@ func (s *OutboundService) testOutboundsParsed(items []map[string]any, testURL st
 		results[i] = r
 		protocol, _ := ob["protocol"].(string)
 		// The core lowercases the id before it resolves the handler.
-		protocol = strings.ToLower(protocol)
+		protocol = normalizedProbeProtocol(protocol)
 		switch {
 		case tag == "":
 			r.Error = "Outbound has no tag"
-		case protocol == "blackhole" || tag == "blocked":
+		case protocol == "blackhole" || protocol == "block" || tag == "blocked":
 			r.Error = "Blocked/blackhole outbound cannot be tested"
 		case protocol == "loopback":
 			r.Error = "Loopback outbound cannot be tested"
-		case protocol == "freedom" || protocol == "dns":
+		case protocol == "freedom" || protocol == "direct" || protocol == "dns":
 			// Direct/DNS outbounds aren't proxies — an HTTP probe through them
 			// would only measure the host's own reachability, not a tunnel.
 			r.Error = "Direct/DNS outbound cannot be tested"
@@ -250,7 +250,7 @@ func (s *OutboundService) testOutboundsParsed(items []map[string]any, testURL st
 	}
 	defer httpTestSemaphore.Unlock()
 
-	retryPerItem, err := runHTTPProbeBatch(httpItems, allOutbounds, testURL, realDelay)
+	retryPerItem, err := runHTTPProbeBatchForCore(httpItems, allOutbounds, testURL, realDelay, s.CoreType)
 	if err == nil {
 		return results
 	}
@@ -263,7 +263,7 @@ func (s *OutboundService) testOutboundsParsed(items []map[string]any, testURL st
 	// instance so the broken outbound reports xray's real error and the
 	// rest still get tested. Serial: the poisoned case fails fast (~1s).
 	for _, it := range httpItems {
-		if _, ferr := runHTTPProbeBatch([]*httpBatchItem{it}, allOutbounds, testURL, realDelay); ferr != nil {
+		if _, ferr := runHTTPProbeBatchForCore([]*httpBatchItem{it}, allOutbounds, testURL, realDelay, s.CoreType); ferr != nil {
 			it.result.Success = false
 			it.result.Error = ferr.Error()
 		}
@@ -278,6 +278,14 @@ func (s *OutboundService) testOutboundsParsed(items []map[string]any, testURL st
 // start failures / early exits that a poisoned config would explain, false
 // for environmental failures like a missing binary or no free ports).
 func runHTTPProbeBatch(items []*httpBatchItem, allOutbounds []any, testURL string, realDelay bool) (retryPerItem bool, err error) {
+	return runHTTPProbeBatchForCore(items, allOutbounds, testURL, realDelay, "xray")
+}
+
+func runHTTPProbeBatchForCore(items []*httpBatchItem, allOutbounds []any, testURL string, realDelay bool, coreType string) (retryPerItem bool, err error) {
+	coreName := "xray"
+	if coreType == "sing-box" {
+		coreName = "sing-box"
+	}
 	ports, release, err := reserveLoopbackPorts(len(items))
 	if err != nil {
 		return false, fmt.Errorf("Failed to reserve test ports: %w", err)
@@ -292,7 +300,16 @@ func runHTTPProbeBatch(items []*httpBatchItem, allOutbounds []any, testURL strin
 	}
 	defer os.Remove(configPath)
 
-	proc := newBatchProcess(cfg, configPath)
+	var proc batchProcess
+	if coreType == "sing-box" {
+		singBoxConfig, err := buildSingBoxBatchTestConfig(cfg)
+		if err != nil {
+			return true, fmt.Errorf("Build sing-box test config: %w", err)
+		}
+		proc = newSingBoxBatchProcess(singBoxConfig, configPath)
+	} else {
+		proc = newBatchProcess(cfg, configPath)
+	}
 	defer func() {
 		if proc.IsRunning() {
 			_ = proc.Stop()
@@ -306,9 +323,9 @@ func runHTTPProbeBatch(items []*httpBatchItem, allOutbounds []any, testURL strin
 	if err := proc.Start(); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// Binary missing — per-item retries would all fail the same way.
-			return false, fmt.Errorf("Failed to start test xray instance: %w", err)
+			return false, fmt.Errorf("Failed to start test %s instance: %w", coreName, err)
 		}
-		return true, fmt.Errorf("Failed to start test xray instance: %w", err)
+		return true, fmt.Errorf("Failed to start test %s instance: %w", coreName, err)
 	}
 
 	if err := waitForPortsReady(proc, ports, batchPortsReadyTimeout); err != nil {
@@ -332,7 +349,7 @@ func runHTTPProbeBatch(items []*httpBatchItem, allOutbounds []any, testURL strin
 		detail := proc.GetResult()
 		for _, it := range items {
 			if !it.result.Success {
-				it.result.Error = "Xray process exited: " + detail
+				it.result.Error = "Proxy core process exited: " + detail
 			}
 		}
 	}
@@ -355,7 +372,7 @@ func waitForPortsReady(proc batchProcess, ports []int, timeout time.Duration) *p
 	for _, port := range ports {
 		for {
 			if !proc.IsRunning() {
-				return &portsReadyError{msg: "Xray process exited: " + proc.GetResult(), exited: true}
+				return &portsReadyError{msg: "Proxy core process exited: " + proc.GetResult(), exited: true}
 			}
 			conn, err := (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext(context.Background(), "tcp", fmt.Sprintf("127.0.0.1:%d", port))
 			if err == nil {
@@ -363,7 +380,7 @@ func waitForPortsReady(proc batchProcess, ports []int, timeout time.Duration) *p
 				break
 			}
 			if time.Now().After(deadline) {
-				return &portsReadyError{msg: fmt.Sprintf("Xray failed to open test inbounds: port %d not ready after %v", port, timeout)}
+				return &portsReadyError{msg: fmt.Sprintf("Proxy core failed to open test inbounds: port %d not ready after %v", port, timeout)}
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
