@@ -1,6 +1,11 @@
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
 const CSRF_TOKEN_PATH = '/csrf-token';
 
+// Most legacy panel mutations still use application/x-www-form-urlencoded.
+// Newer API families that bind JSON bodies must opt in here so callers cannot
+// accidentally send bracket-encoded form data to a JSON decoder.
+const JSON_ONLY_API_PREFIXES = ['/panel/api/adblock/'];
+
 let csrfToken: string | null = null;
 let csrfFetchPromise: Promise<string | null> | null = null;
 let sessionExpired = false;
@@ -129,7 +134,11 @@ async function performFetch(
     headers.delete('Content-Type');
   } else if (!SAFE_METHODS.has(upper)) {
     const declaredType = (headers.get('Content-Type') || '').toLowerCase();
-    if (declaredType.startsWith('application/json')) {
+    const jsonOnlyAPI = JSON_ONLY_API_PREFIXES.some((prefix) => url.startsWith(prefix));
+    if (declaredType.startsWith('application/json') || jsonOnlyAPI) {
+      if (!declaredType.startsWith('application/json')) {
+        headers.set('Content-Type', 'application/json; charset=UTF-8');
+      }
       if (data !== undefined) {
         body = typeof data === 'string' ? data : JSON.stringify(data);
       }
