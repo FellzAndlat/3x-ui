@@ -1,0 +1,237 @@
+package singbox
+
+import (
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// normalizeRouteForRuntime converts panel-friendly route values into the
+// strict sing-box JSON schema without mutating the stored editor template.
+// The UI keeps comments and a compact comma-separated port field for editing;
+// sing-box itself accepts neither the comment field nor mixed port/range text.
+func normalizeRouteForRuntime(route map[string]any) (map[string]any, error) {
+	if route == nil {
+		return nil, nil
+	}
+
+	data, err := json.Marshal(route)
+	if err != nil {
+		return nil, fmt.Errorf("clone route config: %w", err)
+	}
+	var normalized map[string]any
+	if err := json.Unmarshal(data, &normalized); err != nil {
+		return nil, fmt.Errorf("clone route config: %w", err)
+	}
+
+	if rawRules, exists := normalized["rules"]; exists {
+		rules, err := normalizeRuntimeRuleList(rawRules, "route.rules")
+		if err != nil {
+			return nil, err
+		}
+		normalized["rules"] = rules
+	}
+	return normalized, nil
+}
+
+func normalizeRuntimeRuleList(value any, path string) ([]any, error) {
+	rules, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s must be an array", path)
+	}
+
+	for index, rawRule := range rules {
+		rule, ok := rawRule.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("%s[%d] must be an object", path, index)
+		}
+		rulePath := fmt.Sprintf("%s[%d]", path, index)
+
+		// comment is panel-only metadata. sing-box uses strict JSON decoding and
+		// rejects unknown route-rule fields.
+		delete(rule, "comment")
+
+		// "selector" used to be exposed by the panel as a route action, but it
+		// is an outbound type rather than a sing-box route action. Reject it here
+		// instead of writing a configuration that can never start.
+		if action, ok := rule["action"].(string); ok && strings.EqualFold(strings.TrimSpace(action), "selector") {
+			return nil, fmt.Errorf("%s.action %q is not a sing-box route action; use route with an outbound tag", rulePath, action)
+		}
+
+		if err := normalizeRuntimePortField(rule, "port", "port_range", rulePath); err != nil {
+			return nil, err
+		}
+		if err := normalizeRuntimePortField(rule, "source_port", "source_port_range", rulePath); err != nil {
+			return nil, err
+		}
+
+		// Logical route rules contain another rules array. Normalize recursively
+		// so panel metadata never leaks through nested AND/OR groups either.
+		if nested, exists := rule["rules"]; exists {
+			normalizedNested, err := normalizeRuntimeRuleList(nested, rulePath+".rules")
+			if err != nil {
+				return nil, err
+			}
+			rule["rules"] = normalizedNested
+		}
+	}
+	return rules, nil
+}
+
+func normalizeRuntimePortField(rule map[string]any, field, rangeField, path string) error {
+	raw, exists := rule[field]
+	if !exists {
+		return nil
+	}
+	text, ok := raw.(string)
+	if !ok {
+		// Numeric arrays are already in the native sing-box shape.
+		return nil
+	}
+
+	ports, ranges, err := parsePanelPortSelector(text)
+	if err != nil {
+		return fmt.Errorf("%s.%s: %w", path, field, err)
+	}
+	delete(rule, field)
+	if len(ports) > 0 {
+		rule[field] = ports
+	}
+	if len(ranges) == 0 {
+		return nil
+	}
+
+	existing, err := runtimeStringSlice(rule[rangeField])
+	if err != nil {
+		return fmt.Errorf("%s.%s: %w", path, rangeField, err)
+	}
+	for _, item := range ranges {
+		if !containsString(existing, item) {
+			existing = append(existing, item)
+		}
+	}
+	rule[rangeField] = existing
+	return nil
+}
+
+func parsePanelPortSelector(value string) ([]int, []string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil, nil
+	}
+
+	var ports []int
+	var ranges []string
+	seenPorts := map[int]struct{}{}
+	seenRanges := map[string]struct{}{}
+	for _, rawToken := range strings.Split(value, ",") {
+		token := strings.TrimSpace(rawToken)
+		if token == "" {
+			continue
+		}
+		if strings.Contains(token, ":") {
+			normalized, err := parseRuntimePortRange(token)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, exists := seenRanges[normalized]; !exists {
+				seenRanges[normalized] = struct{}{}
+				ranges = append(ranges, normalized)
+			}
+			continue
+		}
+
+		port, err := parseRuntimePort(token)
+		if err != nil {
+			return nil, nil, err
+		}
+		if _, exists := seenPorts[port]; !exists {
+			seenPorts[port] = struct{}{}
+			ports = append(ports, port)
+		}
+	}
+	return ports, ranges, nil
+}
+
+func parseRuntimePortRange(value string) (string, error) {
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return "", fmt.Errorf("invalid port range %q", value)
+	}
+
+	startText := strings.TrimSpace(parts[0])
+	endText := strings.TrimSpace(parts[1])
+	if startText == "" && endText == "" {
+		return "", fmt.Errorf("invalid port range %q", value)
+	}
+
+	start := 0
+	end := 0
+	if startText != "" {
+		parsed, err := parseRuntimePort(startText)
+		if err != nil {
+			return "", fmt.Errorf("invalid port range %q: %w", value, err)
+		}
+		start = parsed
+		startText = strconv.Itoa(parsed)
+	}
+	if endText != "" {
+		parsed, err := parseRuntimePort(endText)
+		if err != nil {
+			return "", fmt.Errorf("invalid port range %q: %w", value, err)
+		}
+		end = parsed
+		endText = strconv.Itoa(parsed)
+	}
+	if start != 0 && end != 0 && start > end {
+		return "", fmt.Errorf("invalid port range %q: start exceeds end", value)
+	}
+	return startText + ":" + endText, nil
+}
+
+func parseRuntimePort(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return 0, fmt.Errorf("invalid port %q", value)
+	}
+	return port, nil
+}
+
+func runtimeStringSlice(value any) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	switch items := value.(type) {
+	case string:
+		items = strings.TrimSpace(items)
+		if items == "" {
+			return nil, nil
+		}
+		return []string{items}, nil
+	case []string:
+		return append([]string(nil), items...), nil
+	case []any:
+		result := make([]string, 0, len(items))
+		for _, item := range items {
+			text, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("must contain only strings")
+			}
+			result = append(result, text)
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("must be a string or array")
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
