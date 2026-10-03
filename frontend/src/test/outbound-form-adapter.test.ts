@@ -9,6 +9,41 @@ import { formValuesToWirePayload, rawOutboundToFormValues } from '@/lib/xray/out
 // emission, blackhole type wrap, dns rule normalization, mux gating.
 
 describe('outbound-form-adapter: round-trip', () => {
+  it('preserves proxySettings through Basic editing without mutating the original', () => {
+    const proxySettings = { tag: 'upstream', transportLayer: true };
+    const form = rawOutboundToFormValues({ protocol: 'vless', tag: 'chain', proxySettings });
+    const wire = formValuesToWirePayload(form);
+    expect(wire.proxySettings).toEqual(proxySettings);
+    expect(form.proxySettings).not.toBe(proxySettings);
+    expect(wire.proxySettings).not.toBe(form.proxySettings);
+    form.proxySettings!.tag = 'renamed';
+    expect(proxySettings.tag).toBe('upstream');
+  });
+  it('preserves a flat VMess target when editing an imported outbound', () => {
+    const form = rawOutboundToFormValues({
+      protocol: 'vmess',
+      tag: 'flat',
+      settings: {
+        address: 'vmess.example',
+        port: 8443,
+        id: '11111111-2222-4333-8444-555555555555',
+        security: 'chacha20-poly1305',
+      },
+    });
+    expect(formValuesToWirePayload(form)).toMatchObject({
+      protocol: 'vmess',
+      tag: 'flat',
+      settings: {
+        vnext: [
+          {
+            address: 'vmess.example',
+            port: 8443,
+            users: [{ id: '11111111-2222-4333-8444-555555555555', security: 'chacha20-poly1305' }],
+          },
+        ],
+      },
+    });
+  });
   it('vmess flattens vnext to address/port/id/security and re-nests', () => {
     const wire = {
       protocol: 'vmess',

@@ -19,6 +19,68 @@ function dialerProxyOf(tt: XraySettingsValue, tag: string): string | undefined {
 }
 
 describe('outbound deletion', () => {
+  it('repairs native groups and both core cascade references', () => {
+    const tt = tpl({
+      outbounds: [
+        { tag: 'gone' },
+        { tag: 'keep' },
+        {
+          tag: 'group',
+          protocol: 'singbox:selector',
+          settings: {
+            outbounds: ['gone', 'keep'],
+            default: 'gone',
+          },
+        },
+        { tag: 'auto', protocol: 'urltest', settings: { outbounds: ['gone', 'keep'] } },
+        {
+          tag: 'native-chain',
+          protocol: 'singbox:shadowsocks',
+          settings: { detour: 'gone', password: 'gone' },
+        },
+        { tag: 'xray-chain', proxySettings: { tag: 'gone', transportLayer: true } },
+      ],
+    });
+    const before = JSON.stringify(tt);
+    planOutboundDeletion(tt, 0);
+    expect(JSON.stringify(tt)).toBe(before);
+    applyOutboundDeletion(tt, 0);
+    expect(tt.outbounds).toEqual([
+      { tag: 'keep' },
+      { tag: 'group', protocol: 'singbox:selector', settings: { outbounds: ['keep'] } },
+      { tag: 'auto', protocol: 'urltest', settings: { outbounds: ['keep'] } },
+      { tag: 'native-chain', protocol: 'singbox:shadowsocks', settings: { password: 'gone' } },
+      { tag: 'xray-chain' },
+    ]);
+  });
+
+  it('previews and removes nested groups emptied by deletion, repairing routes', () => {
+    const tt = tpl({
+      outbounds: [
+        { tag: 'gone' },
+        { tag: 'outer', protocol: 'singbox:selector', settings: { outbounds: ['inner'] } },
+        { tag: 'inner', protocol: 'urltest', settings: { outbounds: ['gone'] } },
+        { tag: 'keep' },
+      ],
+      routing: {
+        rules: [
+          { type: 'field', outboundTag: 'outer' },
+          { type: 'field', balancerTag: 'pool' },
+        ],
+        balancers: [{ tag: 'pool', selector: ['inner'] }],
+      },
+    });
+    const before = JSON.stringify(tt);
+    const impact = planOutboundDeletion(tt, 0);
+    expect(JSON.stringify(tt)).toBe(before);
+    expect(impact.outbounds).toEqual(['inner', 'outer']);
+    expect(impact.rules.map((rule) => rule.fate)).toEqual(['removed', 'removed']);
+    expect(impact.balancers).toEqual([{ tag: 'pool', reason: 'selectorEmptied' }]);
+    applyOutboundDeletion(tt, 0);
+    expect(tt.outbounds).toEqual([{ tag: 'keep' }]);
+    expect(tt.routing!.rules).toEqual([]);
+    expect(tt.routing!.balancers).toEqual([]);
+  });
   it('drops a rule whose only destination was the deleted outbound', () => {
     const tt = tpl({
       outbounds: [{ tag: 'proxy-us' }],

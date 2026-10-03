@@ -15,6 +15,11 @@ const row = (protocol: string, settings: Record<string, unknown>): OutboundRow =
 const vnext = { vnext: [{ address: 'a.example.com', port: 443 }] };
 
 describe('outboundAddresses', () => {
+  it('shows the target of a flat VMess outbound', () => {
+    expect(outboundAddresses(row('vmess', { address: 'flat.example', port: 8443 }))).toEqual([
+      'flat.example:8443',
+    ]);
+  });
   it('reads a capitalised vmess id', () => {
     expect(outboundAddresses(row('VMess', vnext))).toEqual(['a.example.com:443']);
   });

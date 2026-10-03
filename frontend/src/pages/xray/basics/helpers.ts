@@ -173,10 +173,13 @@ export function propagateOutboundTagRename(
 
   if (Array.isArray(t.outbounds)) {
     for (const outbound of t.outbounds) {
+      if (!outbound) continue;
       const sockopt = (outbound as { streamSettings?: { sockopt?: { dialerProxy?: string } } })
         ?.streamSettings?.sockopt;
       if (sockopt?.dialerProxy === oldTag) sockopt.dialerProxy = newTag;
       const ob = outbound as Outbound;
+      const proxy = ob?.proxySettings as Outbound | undefined;
+      if (proxy?.tag === oldTag) proxy.tag = newTag;
       const protocol = typeof ob.protocol === 'string' ? ob.protocol.trim().toLowerCase() : '';
       const nativeType = protocol.replace(/^singbox:/, '');
       const settings = ob.settings as Outbound | undefined;

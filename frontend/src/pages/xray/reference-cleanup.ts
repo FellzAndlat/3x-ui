@@ -30,6 +30,7 @@ export interface BalancerImpact {
 }
 
 export interface DeletionImpact {
+  outbounds?: string[];
   rules: RuleImpact[];
   balancers: BalancerImpact[];
   observatory: boolean;
@@ -42,6 +43,43 @@ const emptyImpact = (): DeletionImpact => ({
   observatory: false,
   burst: false,
 });
+
+function nativeGroupSettings(outbound: unknown): Record<string, unknown> | undefined {
+  const ob = outbound as { protocol?: string; settings?: unknown } | null;
+  const protocol =
+    typeof ob?.protocol === 'string'
+      ? ob.protocol
+          .trim()
+          .toLowerCase()
+          .replace(/^singbox:/, '')
+      : '';
+  if (protocol !== 'selector' && protocol !== 'urltest') return;
+  const settings = ob?.settings;
+  if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+    return settings as Record<string, unknown>;
+  }
+}
+
+// Removing the last member empties a group, which can in turn empty its parent.
+// Compute the full cascade before repairing routing references or previewing it.
+function outboundDeletionTags(tt: XraySettingsValue, tag: string): Set<string> {
+  const removed = new Set([tag]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const outbound of tt.outbounds ?? []) {
+      const settings = nativeGroupSettings(outbound);
+      const members = settings?.outbounds;
+      const owner = outbound?.tag;
+      if (!owner || removed.has(owner) || !Array.isArray(members) || members.length === 0) continue;
+      if (members.every((member) => removed.has(member))) {
+        removed.add(owner);
+        changed = true;
+      }
+    }
+  }
+  return removed;
+}
 
 function ruleList(tt: XraySettingsValue): RuleObject[] {
   const r = tt.routing?.rules;
@@ -162,6 +200,7 @@ function applyCleanup(
       (o) => !(typeof o?.tag === 'string' && removedOutbounds.has(o.tag)),
     );
     for (const outbound of tt.outbounds) {
+      if (!outbound) continue;
       const sockopt = (outbound as { streamSettings?: { sockopt?: { dialerProxy?: string } } })
         ?.streamSettings?.sockopt;
       if (
@@ -170,6 +209,22 @@ function applyCleanup(
         removedOutbounds.has(sockopt.dialerProxy)
       ) {
         delete sockopt.dialerProxy;
+      }
+      const ob = outbound as unknown as Record<string, unknown>;
+      const proxy = ob.proxySettings as { tag?: string } | undefined;
+      if (proxy?.tag && removedOutbounds.has(proxy.tag)) delete ob.proxySettings;
+      const settings = ob.settings as Record<string, unknown> | undefined;
+      if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+        if (typeof settings.detour === 'string' && removedOutbounds.has(settings.detour)) {
+          delete settings.detour;
+        }
+      }
+      const group = nativeGroupSettings(outbound);
+      if (group && Array.isArray(group.outbounds)) {
+        group.outbounds = group.outbounds.filter((member) => !removedOutbounds.has(member));
+        if (typeof group.default === 'string' && removedOutbounds.has(group.default)) {
+          delete group.default;
+        }
       }
     }
   }
@@ -220,11 +275,14 @@ export function applyBalancerDeletion(tt: XraySettingsValue, index: number): voi
 export function planOutboundDeletion(tt: XraySettingsValue, index: number): DeletionImpact {
   const tag = outboundTagAt(tt, index);
   if (!tag) return emptyImpact();
-  const removedOutbounds = new Set([tag]);
+  const removedOutbounds = outboundDeletionTags(tt, tag);
   const cascaded = balancersEmptiedBy(tt, removedOutbounds);
   const removedBalancers = new Set(cascaded);
   const obs = observersRemovedBy(tt, removedOutbounds, removedBalancers);
   return {
+    ...(removedOutbounds.size > 1
+      ? { outbounds: [...removedOutbounds].filter((t) => t !== tag) }
+      : {}),
     rules: ruleImpacts(tt, removedOutbounds, removedBalancers),
     balancers: cascaded.map((bTag) => ({ tag: bTag, reason: 'selectorEmptied' as const })),
     observatory: obs.observatory,
@@ -239,7 +297,7 @@ export function applyOutboundDeletion(tt: XraySettingsValue, index: number): voi
     syncObservatories(tt);
     return;
   }
-  const removedOutbounds = new Set([tag]);
+  const removedOutbounds = outboundDeletionTags(tt, tag);
   const removedBalancers = new Set(balancersEmptiedBy(tt, removedOutbounds));
   applyCleanup(tt, removedOutbounds, removedBalancers);
 }

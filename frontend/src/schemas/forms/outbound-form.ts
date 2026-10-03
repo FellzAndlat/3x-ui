@@ -235,6 +235,9 @@ export const OutboundFormBaseSchema = z.object({
   sendThrough: z.string().default(''),
   targetStrategy: z.union([OutboundDomainStrategySchema, z.literal('')]).default(''),
   streamSettings: OutboundStreamFormSchema.optional(),
+  // The Basic form has no controls for Xray proxySettings, but must preserve
+  // the chained hop when an imported outbound is edited or shown as JSON.
+  proxySettings: z.record(z.string(), z.unknown()).optional(),
   mux: MuxFormSchema.default({
     enabled: false,
     concurrency: 8,

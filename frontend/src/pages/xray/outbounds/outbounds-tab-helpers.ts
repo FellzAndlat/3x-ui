@@ -50,7 +50,9 @@ export function outboundAddresses(o: OutboundRow): string[] {
   switch (true) {
     case isOutboundProtocol(o, Protocols.VMess): {
       const serverObj = settings?.vnext as Array<{ address: string; port: number }> | undefined;
-      return serverObj ? serverObj.map((s) => `${s.address}:${s.port}`) : [];
+      if (serverObj?.length) return serverObj.map((s) => `${s.address}:${s.port}`);
+      const address = settings?.address;
+      return typeof address === 'string' && address ? [`${address}:${settings?.port || ''}`] : [];
     }
     case isOutboundProtocol(o, Protocols.VLESS):
     case isOutboundProtocol(o, Protocols.Hysteria): {

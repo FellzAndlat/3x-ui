@@ -10,6 +10,9 @@ export default function DeletionImpactList({ impact }: DeletionImpactListProps) 
   const { t } = useTranslation();
 
   const lines: string[] = [];
+  for (const tag of impact.outbounds ?? []) {
+    lines.push(`${t('delete')}: ${tag}`);
+  }
   for (const rule of impact.rules) {
     lines.push(
       rule.fate === 'removed'

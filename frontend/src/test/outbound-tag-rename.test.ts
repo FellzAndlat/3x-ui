@@ -29,6 +29,18 @@ function baseTemplate(): XraySettingsValue {
 }
 
 describe('propagateOutboundTagRename', () => {
+  it('updates Xray proxySettings references without changing their options', () => {
+    const t = baseTemplate();
+    t.outbounds!.push({
+      protocol: 'vless',
+      tag: 'chain',
+      proxySettings: { tag: 'To-External-Proxy', transportLayer: true },
+    } as never);
+    propagateOutboundTagRename(t, 'To-External-Proxy', 'renamed');
+    expect(t.outbounds![2]).toMatchObject({
+      proxySettings: { tag: 'renamed', transportLayer: true },
+    });
+  });
   it('updates routing rule outboundTag when outbound is renamed', () => {
     const t = baseTemplate();
     propagateOutboundTagRename(t, 'To-External-Proxy', 'external-vps');

@@ -120,8 +120,8 @@ function sniffingFromWire(raw: unknown): Sniffing {
 
 function vmessFromWire(raw: Raw): VmessOutboundFormSettings {
   const vnext = asArray(raw.vnext);
-  const v = asObject(vnext[0]);
-  const u = asObject(asArray(v.users)[0]);
+  const v = vnext.length > 0 ? asObject(vnext[0]) : raw;
+  const u = vnext.length > 0 ? asObject(asArray(v.users)[0]) : raw;
   return {
     address: asString(v.address),
     port: asPort(v.port, 443),
@@ -517,6 +517,7 @@ export interface RawOutboundRow {
   settings?: unknown;
   streamSettings?: unknown;
   mux?: unknown;
+  proxySettings?: unknown;
 }
 
 const XMUX_DEFAULTS = XHttpXmuxSchema.parse({});
@@ -613,6 +614,11 @@ export function rawOutboundToFormValues(raw: RawOutboundRow): OutboundFormValues
     targetStrategy: protocol === 'freedom' ? '' : targetStrategy,
     mux,
     streamSettings,
+    ...(raw.proxySettings &&
+    typeof raw.proxySettings === 'object' &&
+    !Array.isArray(raw.proxySettings)
+      ? { proxySettings: { ...asObject(raw.proxySettings) } }
+      : {}),
   };
 }
 
@@ -908,6 +914,7 @@ export function formValuesToWirePayload(values: OutboundFormValues): WireOutboun
     settings,
   };
   if (values.tag) result.tag = values.tag;
+  if (values.proxySettings) result.proxySettings = { ...values.proxySettings };
   if (values.targetStrategy && values.protocol !== 'freedom') {
     result.targetStrategy = values.targetStrategy;
   }

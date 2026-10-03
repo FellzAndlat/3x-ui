@@ -67,21 +67,33 @@ func validateRuntimeOutboundDetours(outbounds []map[string]any) error {
 		}
 	}
 
-	edges := make(map[string]string, len(outbounds))
+	edges := make(map[string][]string, len(outbounds))
 	for _, outbound := range outbounds {
 		tag := strings.TrimSpace(rawString(outbound, "tag"))
 		detour := strings.TrimSpace(rawString(outbound, "detour"))
-		if tag == "" || detour == "" {
+		if tag == "" {
 			continue
 		}
-		if detour == tag {
+		if detour != "" && detour == tag {
 			return fmt.Errorf("sing-box outbound %q cannot detour to itself", tag)
 		}
 		// Endpoint tags can also act as outbound targets. Only add an edge when
 		// both ends are in the outbound list; endpoint references are validated
 		// by sing-box after the full config is assembled.
 		if _, exists := knownTags[detour]; exists {
-			edges[tag] = detour
+			edges[tag] = append(edges[tag], detour)
+		}
+		kind := strings.ToLower(strings.TrimSpace(rawString(outbound, "type")))
+		if kind == "selector" || kind == "urltest" {
+			members, err := nativeOutboundGroupTags(outbound["outbounds"], tag, kind)
+			if err != nil {
+				return err
+			}
+			for _, member := range members {
+				if _, exists := knownTags[member]; exists {
+					edges[tag] = append(edges[tag], member)
+				}
+			}
 		}
 	}
 
@@ -106,7 +118,7 @@ func validateRuntimeOutboundDetours(outbounds []map[string]any) error {
 
 		state[tag] = 1
 		stack = append(stack, tag)
-		if next, exists := edges[tag]; exists {
+		for _, next := range edges[tag] {
 			if err := visit(next); err != nil {
 				return err
 			}

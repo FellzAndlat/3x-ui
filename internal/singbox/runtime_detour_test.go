@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestNormalizeOutboundsForRuntimeRejectsGroupDependencyCycles(t *testing.T) {
+	for _, groupType := range []string{"selector", "urltest"} {
+		t.Run(groupType, func(t *testing.T) {
+			_, err := normalizeOutboundsForRuntime([]map[string]any{
+				{"type": groupType, "tag": "group", "outbounds": []string{"proxy"}},
+				{"type": "socks", "tag": "proxy", "detour": "group"},
+			})
+			if err == nil || !strings.Contains(err.Error(), "cycle") {
+				t.Fatalf("expected mixed group/detour cycle to be rejected, got %v", err)
+			}
+		})
+	}
+}
+
+func TestNormalizeOutboundsForRuntimeAllowsSharedGroupMembers(t *testing.T) {
+	_, err := normalizeOutboundsForRuntime([]map[string]any{
+		{"type": "selector", "tag": "outer", "outbounds": []string{"inner", "proxy"}},
+		{"type": "urltest", "tag": "inner", "outbounds": []string{"proxy", "endpoint"}},
+		{"type": "socks", "tag": "proxy", "detour": "endpoint"},
+	})
+	if err != nil {
+		t.Fatalf("acyclic groups and endpoint references should be accepted, got %v", err)
+	}
+}
+
 func TestNormalizeOutboundsForRuntimeRejectsSelfDetour(t *testing.T) {
 	_, err := normalizeOutboundsForRuntime([]map[string]any{{
 		"type":   "direct",
