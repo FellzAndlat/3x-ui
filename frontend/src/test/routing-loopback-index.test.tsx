@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
 
 import RoutingTab from '@/pages/xray/routing/RoutingTab';
 import type { XraySettingsValue } from '@/hooks/useXraySetting';
@@ -26,15 +27,17 @@ describe('RoutingTab hidden-loopback index mapping', () => {
 
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     renderWithProviders(
-      <QueryClientProvider client={queryClient}>
-        <RoutingTab
-          templateSettings={initial}
-          setTemplateSettings={setTemplateSettings}
-          inboundTags={[]}
-          clientReverseTags={[]}
-          isMobile={false}
-        />
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <RoutingTab
+            templateSettings={initial}
+            setTemplateSettings={setTemplateSettings}
+            inboundTags={[]}
+            clientReverseTags={[]}
+            isMobile={false}
+          />
+        </QueryClientProvider>
+      </MemoryRouter>,
     );
 
     fireEvent.click(screen.getByRole('tab', { name: /Routing Rules/ }));
