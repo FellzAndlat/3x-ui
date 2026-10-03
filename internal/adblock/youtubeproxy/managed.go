@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/SawaMEN/3x-ui/v3/internal/web/network"
 )
 
 type Instance struct {
@@ -56,7 +58,7 @@ func Prepare(dir string, options Options) (int, error) {
 	managed.candidate = instance
 	go func() {
 		defer instance.alive.Store(false)
-		if err := instance.Server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		if err := network.ServeHTTP(instance.Server, listener, "YouTube AdBlock proxy"); err != nil {
 			p.lastError.Store("listener: server stopped")
 		}
 	}()

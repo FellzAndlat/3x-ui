@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"
+	"github.com/SawaMEN/3x-ui/v3/internal/web/network"
 )
 
 type Proxy struct {
@@ -162,7 +163,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	listener := newSingleListener(secure)
 	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, inner *http.Request) { p.forward(w, inner, host) }), ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 5 * time.Minute, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 << 10}
 	defer server.Close()
-	_ = server.Serve(listener)
+	_ = network.ServeHTTP(server, listener, "YouTube AdBlock filtered connection")
 }
 func removeHop(headers http.Header) {
 	for _, field := range strings.Split(headers.Get("Connection"), ",") {
@@ -206,8 +207,8 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, host string) {
 		if errors.As(err, &verify) || errors.As(err, &unknown) || errors.As(err, &hostname) {
 			p.lastError.Store("upstream_tls: certificate validation failed")
 		} else {
-			var network net.Error
-			if errors.As(err, &network) && network.Timeout() {
+			var networkError net.Error
+			if errors.As(err, &networkError) && networkError.Timeout() {
 				p.lastError.Store("upstream_timeout: upstream request timed out")
 			} else {
 				p.lastError.Store("upstream_network: upstream connection failed")
@@ -328,11 +329,7 @@ func Run(ctx context.Context, listen, caDir string) error {
 		case <-done:
 		}
 	}()
-	err = server.Serve(listener)
-	if err == http.ErrServerClosed {
-		return nil
-	}
-	return err
+	return network.ServeHTTP(server, listener, "YouTube AdBlock proxy")
 }
 
 func (p *Proxy) handler(caDir string) http.Handler {

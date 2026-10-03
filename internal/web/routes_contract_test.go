@@ -44,6 +44,7 @@ func isInternalUIAPI(path string) bool {
 	return strings.HasPrefix(path, "/panel/api/server/firewall/") ||
 		strings.HasPrefix(path, "/panel/api/gateway/") ||
 		strings.HasPrefix(path, "/panel/api/telemt/meko/") ||
+		strings.HasPrefix(path, "/panel/api/adblock/") ||
 		path == "/panel/api/telemt/subscription-proxy" ||
 		path == "/panel/api/xray/outbound-subs/:id/probe"
 }
