@@ -118,6 +118,8 @@ func splitLines(s string) []string {
 func ParseLink(link string) (*ParseResult, error) {
 	link = strings.TrimSpace(link)
 	switch {
+	case strings.HasPrefix(link, "snell://"):
+		return parseSnell(link)
 	case strings.HasPrefix(link, "vmess://"):
 		return parseVmess(link)
 	case strings.HasPrefix(link, "vless://"):

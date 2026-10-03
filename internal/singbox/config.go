@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
- "github.com/SawaMEN/3x-ui/v3/internal/snell"
+	"github.com/SawaMEN/3x-ui/v3/internal/snell"
 )
 
 type Config struct {
@@ -627,12 +627,24 @@ func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 		out["tls"] = t
 	}
 	if protocol == "snell" {
- data, err := json.Marshal(settings); if err != nil { return nil, err }
- s, err := snell.Parse(string(data)); if err != nil { return nil, err }
- out["version"], out["psk"] = s.Version, s.PSK
- if s.Version == 6 { if s.Mode != "" { out["mode"] = s.Mode } } else if s.ObfsMode != "" { out["obfs_mode"] = s.ObfsMode }
- }
- if protocol == "anytls" {
+		data, err := json.Marshal(settings)
+		if err != nil {
+			return nil, err
+		}
+		s, err := snell.Parse(string(data))
+		if err != nil {
+			return nil, err
+		}
+		out["version"], out["psk"] = s.Version, s.PSK
+		if s.Version == 6 {
+			if s.Mode != "" {
+				out["mode"] = s.Mode
+			}
+		} else if s.ObfsMode != "" {
+			out["obfs_mode"] = s.ObfsMode
+		}
+	}
+	if protocol == "anytls" {
 		tls := rawObject(settings, "tls")
 		cert := strings.TrimSpace(rawString(tls, "certificatePath"))
 		key := strings.TrimSpace(rawString(tls, "keyPath"))
@@ -886,8 +898,12 @@ func translateUsers(out map[string]any, protocol string, settings map[string]any
 				user["password"] = password
 			}
 		case "snell":
- if password := rawString(client, "password"); password != "" { user["userkey"] = password } else { return fmt.Errorf("Snell client has no user key") }
- case "anytls", "shadowtls":
+			if password := rawString(client, "password"); password != "" {
+				user["userkey"] = password
+			} else {
+				return fmt.Errorf("Snell client has no user key")
+			}
+		case "anytls", "shadowtls":
 			if password := rawString(client, "password"); password != "" {
 				user["password"] = password
 			}

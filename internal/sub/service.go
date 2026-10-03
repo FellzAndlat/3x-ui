@@ -859,7 +859,7 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) 
 	protocols := []string{
 		"vmess", "vless", "trojan", "shadowsocks", "hysteria",
 		"wireguard", "amneziawg", "mtproto", "tuic", "naive", "anytls", "shadowtls", "mieru",
-		"vk-turn-proxy", "trusttunnel", "sudoku",
+		"vk-turn-proxy", "trusttunnel", "sudoku", "snell",
 	}
 	err := db.Model(model.Inbound{}).
 		Where(`id in (
@@ -1096,8 +1096,8 @@ func (s *SubService) GetLink(inbound *model.Inbound, email string) string {
 	case model.NaiveProxy:
 		return s.genNaiveLink(inbound, email)
 	case model.Snell:
- return s.genSnellLink(inbound, email)
- case model.AnyTLS:
+		return s.genSnellLink(inbound, email)
+	case model.AnyTLS:
 		return s.genAnyTlsLink(inbound, email)
 	case model.ShadowTLS:
 		return s.genShadowTlsLink(inbound, email)

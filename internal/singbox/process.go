@@ -1,6 +1,7 @@
 package singbox
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -244,6 +245,15 @@ func (p *Process) Validate(ctx context.Context) error {
 		err = fmt.Errorf("sing-box config does not exist: %w", err)
 		p.setErr(err)
 		return err
+	}
+	// Snell requires 1.14 in both directions. The binary check remains authoritative.
+	if data, err := os.ReadFile(cfg); err == nil && bytes.Contains(data, []byte(`"snell"`)) {
+		if _, err := p.Version(ctx); err != nil {
+			return err
+		}
+		if !p.SupportsNativeAPI() {
+			return fmt.Errorf("Snell requires sing-box 1.14.0 or newer; installed: %s", p.GetVersion())
+		}
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, defaultCommandTimeout)
 	defer cancel()

@@ -836,7 +836,24 @@ export function parseWireguardLink(link: string): Raw | null {
 
 // Dispatcher — first non-null parser wins. Returns null when no parser
 // recognizes the link's protocol scheme.
+function parseSnellLink(link: string): Raw | null {
+  try {
+    const u = new URL(link);
+    const version = Number(u.searchParams.get('version'));
+    const port = Number(u.port);
+    const psk = decodeURIComponent(u.username);
+    if (!u.hostname || !psk || port < 1 || port > 65535 || ![4, 5, 6].includes(version)) return null;
+    const settings: Raw = { server: u.hostname.replace(/^\[|\]$/g, ''), server_port: port, version: version === 5 ? 4 : version, psk };
+    for (const [query, key] of [['userkey', 'userkey'], ['mode', 'mode'], ['obfs', 'obfs_mode'], ['obfs-host', 'obfs_host']]) {
+      const value = u.searchParams.get(query!);
+      if (value) settings[key!] = value;
+    }
+    return { protocol: 'snell', tag: decodeURIComponent(u.hash.slice(1)) || 'snell-out', settings };
+  } catch { return null; }
+}
+
 export function parseOutboundLink(link: string): Raw | null {
+  if (link.trim().startsWith('snell://')) return parseSnellLink(link.trim());
   const trimmed = link.trim();
   if (!trimmed) return null;
   return (

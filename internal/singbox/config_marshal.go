@@ -234,10 +234,24 @@ func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string
 		if version != 4 && version != 6 {
 			return fmt.Errorf("sing-box outbound %q Snell requires version 4 or 6", tag)
 		}
-		if version == 6 && (len(rawString(outbound, "psk")) < 12 || len(rawString(outbound, "psk")) > 255) { return fmt.Errorf("sing-box outbound %q Snell v6 PSK must be 12..255 bytes", tag) }
- if rawString(outbound, "psk") == "" {
+		if version == 6 && (len(rawString(outbound, "psk")) < 12 || len(rawString(outbound, "psk")) > 255) {
+			return fmt.Errorf("sing-box outbound %q Snell v6 PSK must be 12..255 bytes", tag)
+		}
+		if rawString(outbound, "psk") == "" {
 			return fmt.Errorf("sing-box outbound %q Snell requires PSK", tag)
 		}
+		if version == 6 {
+			mode := rawString(outbound, "mode")
+			if mode != "" && mode != "default" && mode != "unshaped" {
+				return fmt.Errorf("Snell mode must be default or unshaped")
+			}
+			if obfs := rawString(outbound, "obfs_mode"); obfs != "" && obfs != "none" {
+				return fmt.Errorf("Snell v6 does not use obfs_mode")
+			}
+		} else if obfs := rawString(outbound, "obfs_mode"); obfs != "" && obfs != "none" && obfs != "http" {
+			return fmt.Errorf("Snell obfs_mode must be none or http")
+		}
+
 	}
 	return nil
 }

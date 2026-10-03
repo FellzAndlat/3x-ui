@@ -7,12 +7,14 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
- "github.com/SawaMEN/3x-ui/v3/internal/snell"
+	"github.com/SawaMEN/3x-ui/v3/internal/snell"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 )
 
 func prepareExternalVPN(ib *model.Inbound, previous string) error {
- if err := snell.Prepare(ib, previous); err != nil { return err }
+	if err := snell.Prepare(ib, previous); err != nil {
+		return err
+	}
 	if ib.Protocol != model.Pingtunnel && ib.Protocol != model.TrustTunnel {
 		return nil
 	}
