@@ -37,14 +37,15 @@ var contractExtraRoutes = map[string]bool{
 	"GET /ws":                  true,
 }
 
-// Host-firewall mutation and panel-only feature toggles are intentionally
+// Host-firewall mutation and panel-only feature toggles/actions are intentionally
 // internal UI surfaces rather than supported public automation APIs. Keep
 // them out of OpenAPI until they have a stable compatibility contract.
 func isInternalUIAPI(path string) bool {
 	return strings.HasPrefix(path, "/panel/api/server/firewall/") ||
 		strings.HasPrefix(path, "/panel/api/gateway/") ||
 		strings.HasPrefix(path, "/panel/api/telemt/meko/") ||
-		path == "/panel/api/telemt/subscription-proxy"
+		path == "/panel/api/telemt/subscription-proxy" ||
+		path == "/panel/api/xray/outbound-subs/:id/probe"
 }
 
 func inContractScope(method, path string) bool {
