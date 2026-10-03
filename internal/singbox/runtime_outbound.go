@@ -40,6 +40,9 @@ func normalizeOutboundsForRuntime(outbounds []map[string]any) ([]map[string]any,
 		case "tun", "redirect", "tproxy":
 			return nil, fmt.Errorf("outbounds[%d].type %q is an inbound type and cannot be used as a sing-box outbound", index, outboundType)
 		}
+		if err := validateRuntimeHysteriaOutbound(outbound, outboundType); err != nil {
+			return nil, fmt.Errorf("outbounds[%d]: %w", index, err)
+		}
 
 		transport, ok := outbound["transport"].(map[string]any)
 		if !ok || transport == nil {
@@ -51,6 +54,41 @@ func normalizeOutboundsForRuntime(outbounds []map[string]any) ([]map[string]any,
 		}
 	}
 	return normalized, nil
+}
+
+func validateRuntimeHysteriaOutbound(outbound map[string]any, outboundType string) error {
+	if outboundType != "hysteria" && outboundType != "hysteria2" {
+		return nil
+	}
+	if stringSliceLength(outbound["server_ports"]) > 0 && rawInt(outbound, "server_port") != 0 {
+		return fmt.Errorf("%s cannot combine server_port with server_ports", outboundType)
+	}
+	if outboundType != "hysteria2" {
+		return nil
+	}
+
+	realm := rawObject(outbound, "realm")
+	if len(realm) == 0 {
+		return nil
+	}
+	ipVersion := rawInt(realm, "ip_version")
+	if ipVersion != 0 && ipVersion != 4 && ipVersion != 6 {
+		return fmt.Errorf("hysteria2 realm.ip_version must be 4 or 6 when set")
+	}
+	if ipVersion == 6 && hysteria2RealmPortMappingConfigured(rawObject(realm, "port_mapping")) {
+		return fmt.Errorf("hysteria2 realm.port_mapping requires IPv4 and cannot be used with ip_version 6")
+	}
+	return nil
+}
+
+func hysteria2RealmPortMappingConfigured(portMapping map[string]any) bool {
+	if len(portMapping) == 0 {
+		return false
+	}
+	if enabled, ok := portMapping["enabled"].(bool); ok && enabled {
+		return true
+	}
+	return strings.TrimSpace(rawString(portMapping, "timeout")) != "" || strings.TrimSpace(rawString(portMapping, "lifetime")) != ""
 }
 
 func normalizeV2RayTransportForRuntime(transport map[string]any, transportType string) error {
