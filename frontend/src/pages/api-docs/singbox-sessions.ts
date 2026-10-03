@@ -83,7 +83,8 @@ export const singBoxSessionSections: readonly Section[] = [
       {
         method: 'POST',
         path: '/panel/api/server/singbox/sessions/disconnect-inbound',
-        summary: 'Disconnect all active sing-box sessions for an inbound on the local panel or a selected remote node.',
+        summary:
+          'Disconnect all active sing-box sessions for an inbound on the local panel or a selected remote node.',
         params: [
           {
             name: 'nodeId',
