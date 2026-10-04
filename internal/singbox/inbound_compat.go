@@ -1,6 +1,8 @@
 package singbox
 
 import (
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"strconv"
@@ -9,6 +11,14 @@ import (
 
 func rejectXrayFields(options map[string]any, label string, keys ...string) error {
 	for _, key := range keys {
+		// Xray's server-side ML-DSA seed is an optional REALITY hardening
+		// extension. sing-box REALITY has no equivalent field, but omitting it
+		// does not change the base REALITY handshake and the source Xray config is
+		// left untouched for switching back. Do not block an inbound solely for
+		// this Xray-only extension; client-side verification remains strict.
+		if key == "mldsa65Seed" && strings.HasPrefix(label, "inbound ") && strings.HasSuffix(label, " REALITY") {
+			continue
+		}
 		if isMeaningfulCompatValue(options[key]) {
 			return fmt.Errorf("%s: Xray option %s has no equivalent sing-box representation", label, key)
 		}
@@ -129,9 +139,45 @@ func fallbackDestination(dest string) (string, int, error) {
 	return host, port, nil
 }
 
+func translateInboundECHServerKeys(tlsOut, tlsIn map[string]any, label string) error {
+	value := strings.TrimSpace(rawString(tlsIn, "echServerKeys"))
+	if value == "" {
+		return nil
+	}
+
+	var pemBytes []byte
+	if block, rest := pem.Decode([]byte(value)); block != nil {
+		if block.Type != "ECH KEYS" || len(strings.TrimSpace(string(rest))) != 0 || len(block.Bytes) == 0 {
+			return fmt.Errorf("%s: invalid Xray echServerKeys PEM", label)
+		}
+		pemBytes = pem.EncodeToMemory(&pem.Block{Type: "ECH KEYS", Bytes: block.Bytes})
+	} else {
+		raw, err := base64.StdEncoding.DecodeString(value)
+		if err != nil || len(raw) == 0 {
+			if err != nil {
+				return fmt.Errorf("%s: invalid Xray echServerKeys: %w", label, err)
+			}
+			return fmt.Errorf("%s: invalid Xray echServerKeys: empty key set", label)
+		}
+		// Xray and sing-box use the same binary ECH key-set wire format. Xray
+		// stores it as base64 in JSON; sing-box expects those bytes wrapped in an
+		// ECH KEYS PEM block and exposed as a line array.
+		pemBytes = pem.EncodeToMemory(&pem.Block{Type: "ECH KEYS", Bytes: raw})
+	}
+	if len(pemBytes) == 0 {
+		return fmt.Errorf("%s: failed to encode Xray echServerKeys for sing-box", label)
+	}
+	lines := strings.Split(strings.TrimSpace(string(pemBytes)), "\n")
+	tlsOut["ech"] = map[string]any{"enabled": true, "key": lines}
+	return nil
+}
+
 func translateInboundTLSCompatibility(tlsOut, tlsIn map[string]any, tag string) error {
 	label := fmt.Sprintf("inbound %q TLS", tag)
-	if err := rejectXrayFields(tlsIn, label, "rejectUnknownSni", "echServerKeys", "echConfigList", "echSockopt", "verifyPeerCertByName", "pinnedPeerCertSha256"); err != nil {
+	if err := rejectXrayFields(tlsIn, label, "rejectUnknownSni", "echConfigList", "echSockopt", "verifyPeerCertByName", "pinnedPeerCertSha256"); err != nil {
+		return err
+	}
+	if err := translateInboundECHServerKeys(tlsOut, tlsIn, label); err != nil {
 		return err
 	}
 	for _, key := range []string{"minVersion", "maxVersion"} {
