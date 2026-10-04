@@ -20,7 +20,8 @@ export function parseShareLink(raw: string): ConfigObject {
     throw new Error('Поддерживаются ссылки VLESS, Trojan, HTTP и SOCKS5.');
   const params = url.searchParams;
   for (const key of ['ech', 'pcs', 'pinSHA256', 'pqv', 'fm']) {
-    if (params.get(key)) throw new Error(`Параметр ${key} не поддерживается этим импортом sing-box.`);
+    if (params.get(key))
+      throw new Error(`Параметр ${key} не поддерживается этим импортом sing-box.`);
   }
   if (
     params.get('vcn') &&

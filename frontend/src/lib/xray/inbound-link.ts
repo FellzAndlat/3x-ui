@@ -835,7 +835,9 @@ export function genHysteriaLink(input: GenHysteriaLinkInput): string {
     params.set('mport', hopPorts);
   }
 
-  const url = new URL(`${scheme}://${encodeURIComponent(clientAuth)}@${formatUrlHost(address)}:${port}`);
+  const url = new URL(
+    `${scheme}://${encodeURIComponent(clientAuth)}@${formatUrlHost(address)}:${port}`,
+  );
   for (const [key, value] of params) url.searchParams.set(key, value);
   url.hash = encodeURIComponent(remark);
   return url.toString();

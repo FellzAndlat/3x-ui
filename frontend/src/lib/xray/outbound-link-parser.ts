@@ -761,7 +761,8 @@ export function parseHysteria2Link(link: string): Raw | null {
   // network branch is the dedicated 'hysteria' transport — the modal's
   // newStreamSlice('hysteria') initializer fills in receive-window
   // defaults; we override the user-set fields here.
-  const auth = decodeURIComponent(url.username) +
+  const auth =
+    decodeURIComponent(url.username) +
     (hasPasswordDelimiter(link) ? `:${decodeURIComponent(url.password)}` : '');
   const address = serverHostname(url.hostname);
   const port = Number(url.port) || 443;
@@ -777,7 +778,9 @@ export function parseHysteria2Link(link: string): Raw | null {
     },
     tlsSettings: {
       serverName: params.get('sni') ?? '',
-      allowInsecure: ['1', 'true'].includes(params.get('allowInsecure') ?? params.get('insecure') ?? ''),
+      allowInsecure: ['1', 'true'].includes(
+        params.get('allowInsecure') ?? params.get('insecure') ?? '',
+      ),
       alpn: alpn ? alpn.split(',') : ['h3'],
       fingerprint: params.get('fp') ?? '',
       echConfigList: params.get('ech') ?? '',
