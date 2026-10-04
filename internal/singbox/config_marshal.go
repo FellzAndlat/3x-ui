@@ -449,11 +449,15 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 		return []byte("null"), nil
 	}
 
-	normalizedOutbounds, err := normalizeOutboundsForRuntime(c.Outbounds)
+	preparedOutbounds, preparedRoute, err := prepareXrayFreedomFinalRules(c.Outbounds, c.Route)
+	if err != nil {
+		return nil, fmt.Errorf("translate Xray freedom finalRules: %w", err)
+	}
+	normalizedOutbounds, err := normalizeOutboundsForRuntime(preparedOutbounds)
 	if err != nil {
 		return nil, fmt.Errorf("normalize sing-box outbounds: %w", err)
 	}
-	normalizedRoute, err := normalizeRouteForRuntime(c.Route)
+	normalizedRoute, err := normalizeRouteForRuntime(preparedRoute)
 	if err != nil {
 		return nil, fmt.Errorf("normalize sing-box route: %w", err)
 	}

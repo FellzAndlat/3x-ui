@@ -584,7 +584,10 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 	}
 	switch protocol {
 	case "freedom":
-		if err := rejectXrayFields(settings, fmt.Sprintf("outbound %q freedom", tag), "redirect", "fragment", "noise", "noises", "finalRules", "proxyProtocol"); err != nil {
+		if err := rejectXrayFields(settings, fmt.Sprintf("outbound %q freedom", tag), "redirect", "fragment", "noise", "noises", "proxyProtocol"); err != nil {
+			return err
+		}
+		if err := translateXrayFreedomFinalRules(out, settings, tag); err != nil {
 			return err
 		}
 		resolver, err := xrayDomainResolver(rawString(settings, "domainStrategy"), tag)
