@@ -7,16 +7,13 @@ import (
 	"io"
 	"net"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
-
-	"github.com/SawaMEN/3x-ui/v3/internal/logger"
 
 	clientquic "github.com/quic-go/quic-go"
 )
 
-func audit3RestartableSOCKS(t *testing.T) (string, *net.UDPConn, *net.UDPAddr) {
+func audit3RestartableSOCKS(t *testing.T) (string, *net.UDPConn, *net.UDPAddr, <-chan struct{}) {
 	t.Helper()
 	u, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -28,6 +25,7 @@ func audit3RestartableSOCKS(t *testing.T) (string, *net.UDPConn, *net.UDPAddr) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ln.Close(); _ = u.Close() })
+	controlClosed := make(chan struct{}, 16)
 	go func() {
 		for {
 			c, err := ln.Accept()
@@ -53,10 +51,11 @@ func audit3RestartableSOCKS(t *testing.T) (string, *net.UDPConn, *net.UDPAddr) {
 					return
 				}
 				_, _ = io.Copy(io.Discard, c)
+				controlClosed <- struct{}{}
 			}(c)
 		}
 	}()
-	return ln.Addr().String(), u, udpAddr
+	return ln.Addr().String(), u, udpAddr, controlClosed
 }
 
 func audit3StartUDPEcho(u *net.UDPConn, arrived chan<- struct{}) {
@@ -142,7 +141,7 @@ func TestAudit3UDPAssociationMustRecoverAfterBridgeReadFailure(t *testing.T) {
 			name = "stream"
 		}
 		t.Run(name, func(t *testing.T) {
-			relayAddr, u, udpAddr := audit3RestartableSOCKS(t)
+			relayAddr, u, udpAddr, controlClosed := audit3RestartableSOCKS(t)
 			audit3StartUDPEcho(u, nil)
 			s, c, id, _ := startLifecycleTestServer(t, relayAddr, "audit3-recovery@x")
 			_, user := authenticatedServerConnection(t, s, id)
@@ -154,22 +153,24 @@ func TestAudit3UDPAssociationMustRecoverAfterBridgeReadFailure(t *testing.T) {
 			s.UpdateRuntimeSettings("recovery-"+name, "bbr", "warn")
 			_ = u.Close()
 			audit3SendPacket(t, c, mode, 42131, 2, "while-down")
-			deadline := time.Now().Add(2 * time.Second)
+			// Wait for the old SOCKS control connection to close: this happens
+			// after the failed relay has been removed from the association registry.
+			// Log entries are global and can belong to an earlier test invocation.
+			// Retry the trigger because the kernel can rate-limit ICMP errors.
+			timeout := time.NewTimer(3 * time.Second)
+			defer timeout.Stop()
+			retry := time.NewTicker(50 * time.Millisecond)
+			defer retry.Stop()
+		waitForClose:
 			for {
-				found := false
-				for _, line := range logger.GetLogs(10000, "DEBUG") {
-					if strings.Contains(line, "recovery-"+name) && strings.Contains(line, "UDP relay receive failed") {
-						found = true
-						break
-					}
-				}
-				if found {
-					break
-				}
-				if time.Now().After(deadline) {
+				select {
+				case <-controlClosed:
+					break waitForClose
+				case <-retry.C:
+					audit3SendPacket(t, c, mode, 42131, 2, "while-down")
+				case <-timeout.C:
 					t.Fatal("closed UDP bridge did not terminate the response reader")
 				}
-				time.Sleep(time.Millisecond)
 			}
 			u2, err := net.ListenUDP("udp4", udpAddr)
 			if err != nil {
@@ -205,7 +206,7 @@ func TestAudit3FirstTransportReturnsPositiveEchoAfterOppositeModePacket(t *testi
 			name = "stream-first"
 		}
 		t.Run(name, func(t *testing.T) {
-			relayAddr, u, _ := audit3RestartableSOCKS(t)
+			relayAddr, u, _, _ := audit3RestartableSOCKS(t)
 			audit3StartUDPEcho(u, nil)
 			_, c, _, _ := startLifecycleTestServer(t, relayAddr, "audit3-first-mode@x")
 			audit3SendPacket(t, c, first, 43221, 1, "first")

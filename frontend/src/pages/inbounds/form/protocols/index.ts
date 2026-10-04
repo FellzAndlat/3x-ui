@@ -14,6 +14,7 @@ export { default as AmneziawgFields } from './amneziawg';
 export { default as TuicFields } from './tuic';
 export { default as VkTurnProxyFields } from './vk-turn-proxy';
 
+export { default as MasqueFields } from './masque';
 export { default as NaiveFields } from './naive';
 export { default as MieruFields } from './mieru';
 export { default as SudokuFields } from './sudoku';

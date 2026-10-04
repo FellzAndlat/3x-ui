@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -27,10 +28,18 @@ func validateInboundRuntimeTarget(inbound *model.Inbound) error {
 		}
 		return common.NewErrorf("%s is not supported by %s on the selected node", inbound.Protocol, core)
 	}
-	if inbound.Protocol != model.Snell && inbound.Protocol != model.NaiveProxy && inbound.Protocol != model.AnyTLS && inbound.Protocol != model.ShadowTLS {
+	if inbound.Protocol != model.MASQUE && inbound.Protocol != model.Snell && inbound.Protocol != model.NaiveProxy && inbound.Protocol != model.AnyTLS && inbound.Protocol != model.ShadowTLS {
 		return nil
 	}
 	if core == CoreTypeSingBox {
+		if inbound.Protocol == model.MASQUE {
+			if _, err := (&SingBoxService{}).CachedVersion(context.Background()); err != nil {
+				return common.NewErrorf("MASQUE requires an installed sing-box 1.15+: %v", err)
+			}
+			if !singBoxProcess.SupportsMASQUE() {
+				return common.NewErrorf("MASQUE requires sing-box 1.15.0-alpha.7 or newer; installed: %s", singBoxProcess.GetVersion())
+			}
+		}
 		return nil
 	}
 	switch inbound.Protocol {
@@ -146,7 +155,7 @@ func validateShadowTLSTransport(inbound *model.Inbound) error {
 
 func isXrayManagedProtocol(protocol model.Protocol) bool {
 	return protocol != model.VKTurnProxy &&
-		protocol != model.Snell && protocol != model.NaiveProxy &&
+		protocol != model.MASQUE && protocol != model.Snell && protocol != model.NaiveProxy &&
 		protocol != model.AnyTLS &&
 		protocol != model.ShadowTLS &&
 		protocol != model.MTProto &&

@@ -16,6 +16,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
+	"github.com/SawaMEN/3x-ui/v3/internal/masque"
 	"github.com/SawaMEN/3x-ui/v3/internal/singbox"
 	"github.com/SawaMEN/3x-ui/v3/internal/snell"
 	"github.com/SawaMEN/3x-ui/v3/internal/tuic"
@@ -679,6 +680,34 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 						proxies = append(proxies, nativeOutbound{out: native})
 						generated++
 					}
+				}
+				if generated == 0 {
+					formatUnsupported = true
+				}
+				continue
+			}
+			if inbound.Protocol == model.MASQUE {
+				settings, err := masque.Parse(inbound.Settings)
+				if err != nil || client.Email == "" || client.Password == "" {
+					formatUnsupported = true
+					continue
+				}
+				generated := 0
+				for _, endpoint := range subReq.shareEndpointsForInbound(inbound) {
+					if endpoint.ForceTls == "none" {
+						continue
+					}
+					serverName := settings.TLS.ServerName
+					if sni, ok := externalProxySNI(endpoint.ep); ok {
+						serverName = sni
+					}
+					if serverName == "" {
+						serverName = endpoint.Address
+					}
+					version := settings.Version[0]
+					native := map[string]any{"type": "masque-client", "tag": fmt.Sprintf("MASQUE · %s-%d", client.Email, len(proxies)+1), "server": endpoint.Address, "server_port": endpoint.Port, "username": client.Email, "password": client.Password, "path": settings.Path, "version": version, "mtu": settings.MTU, "system": false, "tls": map[string]any{"enabled": true, "server_name": serverName}}
+					proxies = append(proxies, nativeOutbound{out: native})
+					generated++
 				}
 				if generated == 0 {
 					formatUnsupported = true

@@ -107,7 +107,10 @@ func buildSeparatedSingBoxSubscription(template map[string]any, proxies []map[st
 			return "", fmt.Errorf("%w: %w", errSubscriptionFormatUnsupported, err)
 		}
 
-		outbounds := []any{proxy}
+		outbounds := []any{}
+		if proxy["type"] != "masque-client" {
+			outbounds = append(outbounds, proxy)
+		}
 		if transport != nil {
 			outbounds = append(outbounds, transport)
 		}
@@ -117,6 +120,12 @@ func buildSeparatedSingBoxSubscription(template map[string]any, proxies []map[st
 			"outbounds": outbounds,
 		}
 
+		if proxy["type"] == "masque-client" {
+			cfg["endpoints"] = []any{proxy}
+			if final, _ := route["final"].(string); final == "" {
+				route["final"] = proxyTag
+			}
+		}
 		cfg["dns"] = translatedDNS
 		cfg["route"] = route
 
@@ -156,6 +165,7 @@ func buildHiddifySingBoxSubscription(proxies []map[string]any) (string, error) {
 		}
 		usedTags[tag] = true
 	}
+	endpoints := make([]any, 0)
 	outbounds := make([]any, 0, len(proxies)*2)
 	for i, original := range proxies {
 		proxy := maps.Clone(original)
@@ -171,9 +181,17 @@ func buildHiddifySingBoxSubscription(proxies []map[string]any) (string, error) {
 			delete(proxy, "_panel_shadowtls_transport")
 			outbounds = append(outbounds, transport)
 		}
-		outbounds = append(outbounds, proxy)
+		if proxy["type"] == "masque-client" {
+			endpoints = append(endpoints, proxy)
+		} else {
+			outbounds = append(outbounds, proxy)
+		}
 	}
-	encoded, err := json.MarshalIndent(map[string]any{"outbounds": outbounds}, "", "  ")
+	cfg := map[string]any{"outbounds": outbounds}
+	if len(endpoints) > 0 {
+		cfg["endpoints"] = endpoints
+	}
+	encoded, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal Hiddify sing-box subscription: %w", err)
 	}

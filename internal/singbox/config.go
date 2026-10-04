@@ -613,6 +613,9 @@ func rawBool(m map[string]any, key string) bool {
 
 func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 	protocol := strings.ToLower(strings.TrimSpace(rawString(raw, "protocol")))
+	if protocol == "masque" {
+		return nil, fmt.Errorf("MASQUE must be emitted as a masque-server endpoint")
+	}
 	if protocol == "tun" || protocol == "tunnel" || protocol == "wireguard" || protocol == "mtproto" || protocol == "amneziawg" || protocol == "tuic" || protocol == "mieru" || protocol == "pingtunnel" || protocol == "trusttunnel" {
 		return nil, fmt.Errorf("sing-box does not support Xray inbound protocol %q", protocol)
 	}

@@ -104,6 +104,14 @@ export function inboundNetworkLabels(record: {
     case 'openflux':
     case 'trusttunnel':
       return ['TCP', 'UDP'];
+    case 'masque': {
+      const versions = readSettings(record.settings).version;
+      const values = Array.isArray(versions) && versions.length ? versions : [3, 2, 1];
+      return [
+        ...(values.some((v) => v === 1 || v === 2) ? ['TCP'] : []),
+        ...(values.includes(3) ? ['UDP'] : []),
+      ];
+    }
     case 'snell':
     case 'anytls':
       return ['TCP'];
@@ -151,11 +159,13 @@ export function readSettings(settings: unknown): {
   method?: string;
   network?: string;
   allowedNetwork?: string;
+  version?: number[];
 } {
   return coerceInboundJsonField(settings) as {
     method?: string;
     network?: string;
     allowedNetwork?: string;
+    version?: number[];
   };
 }
 
@@ -172,6 +182,7 @@ export function isInboundMultiUser(record: { protocol: string; settings: unknown
     case 'fptn':
     case 'openflux':
     case 'trusttunnel':
+    case 'masque':
     case 'snell':
     case 'vk-turn-proxy':
       return true;

@@ -70,6 +70,23 @@ func inboundTransports(protocol model.Protocol, streamSettings, settings string)
 	// Native sidecars expose their transport choice in protocol settings rather
 	// than Xray streamSettings.
 	switch protocol {
+	case model.MASQUE:
+		var st struct {
+			Version []int `json:"version"`
+		}
+		_ = json.Unmarshal([]byte(settings), &st)
+		if len(st.Version) == 0 {
+			return transportTCP | transportUDP
+		}
+		var bits transportBits
+		for _, v := range st.Version {
+			if v == 3 {
+				bits |= transportUDP
+			} else {
+				bits |= transportTCP
+			}
+		}
+		return bits
 	case model.TrustTunnel:
 		return transportTCP | transportUDP
 	case model.Hysteria, model.WireGuard, model.AmneziaWG, model.TUIC:

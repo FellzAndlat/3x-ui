@@ -67,6 +67,7 @@ import {
   HysteriaFields,
   MixedFields,
   MtprotoFields,
+  MasqueFields,
   NaiveFields,
   MieruFields,
   SudokuFields,
@@ -295,15 +296,51 @@ export default function InboundFormModal({
     };
   }, [open]);
 
+  const [masqueAvailable, setMasqueAvailable] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void Promise.all([
+      HttpUtil.post<{ coreType?: string }>('/panel/api/setting/all', undefined, { silent: true }),
+      HttpUtil.get<{ version?: string }>('/panel/api/setting/singbox/status', undefined, {
+        silent: true,
+      }),
+    ])
+      .then(([settings, status]) => {
+        const version = status?.obj?.version ?? '';
+        const match = /^v?(\d+)\.(\d+)\./.exec(version);
+        const alpha = /^v?1\.15\.0-alpha\.(\d+)/.exec(version);
+        const supported =
+          !!match && (Number(match[1]) > 1 || (Number(match[1]) === 1 && Number(match[2]) >= 15));
+        if (!cancelled)
+          setMasqueAvailable(
+            (!alpha || Number(alpha[1]) >= 7) &&
+              settings?.obj?.coreType === 'sing-box' &&
+              supported,
+          );
+      })
+      .catch(() => {
+        if (!cancelled) setMasqueAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   const protocolOptions = useMemo(
     () =>
       PROTOCOL_OPTIONS.filter(
+        (option) =>
+          option.value !== Protocols.MASQUE ||
+          masqueAvailable ||
+          (mode === 'edit' && protocol === Protocols.MASQUE),
+      ).filter(
         (option) =>
           option.value !== Protocols.SUDOKU ||
           sudokuInstalled ||
           (mode === 'edit' && protocol === Protocols.SUDOKU),
       ),
-    [mode, protocol, sudokuInstalled],
+    [mode, protocol, sudokuInstalled, masqueAvailable],
   );
   const isNodeEligible = !!NODE_ELIGIBLE_PROTOCOLS[protocol];
   /*
@@ -342,6 +379,7 @@ export default function InboundFormModal({
     protocol !== Protocols.TRUSTTUNNEL &&
     protocol !== Protocols.FPTN &&
     protocol !== Protocols.OPENFLUX &&
+    protocol !== Protocols.MASQUE &&
     protocol !== Protocols.NAIVE &&
     protocol !== Protocols.MIERU &&
     protocol !== Protocols.SUDOKU &&
@@ -365,6 +403,7 @@ export default function InboundFormModal({
     }
 
     const autoPortProtocols = new Set<string>([
+      Protocols.MASQUE,
       Protocols.NAIVE,
       Protocols.MIERU,
       Protocols.SUDOKU,
@@ -663,6 +702,7 @@ export default function InboundFormModal({
       } else if (
         next === Protocols.WIREGUARD ||
         next === Protocols.TUNNEL ||
+        next === Protocols.MASQUE ||
         next === Protocols.SNELL ||
         next === Protocols.FPTN ||
         next === Protocols.OPENFLUX ||
@@ -952,6 +992,7 @@ export default function InboundFormModal({
       {protocol === Protocols.TUIC && <TuicFields />}
       {protocol === Protocols.PINGTUNNEL && <PingtunnelFields />}
       {protocol === Protocols.TRUSTTUNNEL && <TrustTunnelFields />}
+      {protocol === Protocols.MASQUE && <MasqueFields />}
       {protocol === Protocols.NAIVE && <NaiveFields />}
       {protocol === Protocols.SNELL && <SnellFields />}
       {protocol === Protocols.FPTN && <FptnFields />}
@@ -1370,6 +1411,7 @@ export default function InboundFormModal({
                     Protocols.TUIC,
                     Protocols.PINGTUNNEL,
                     Protocols.TRUSTTUNNEL,
+                    Protocols.MASQUE,
                     Protocols.NAIVE,
                     Protocols.MIERU,
                     Protocols.SUDOKU,

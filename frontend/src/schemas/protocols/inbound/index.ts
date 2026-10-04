@@ -10,6 +10,7 @@ import { HttpInboundSettingsSchema } from './http';
 import { HysteriaInboundSettingsSchema } from './hysteria';
 import { MixedInboundSettingsSchema } from './mixed';
 import { MtprotoInboundSettingsSchema } from './mtproto';
+import { MasqueInboundSettingsSchema } from './masque';
 import { NaiveInboundSettingsSchema } from './naive';
 import { MieruInboundSettingsSchema } from './mieru';
 import { SudokuInboundSettingsSchema } from './sudoku';
@@ -33,6 +34,7 @@ export * from './http';
 export * from './hysteria';
 export * from './mixed';
 export * from './mtproto';
+export * from './masque';
 export * from './naive';
 export * from './mieru';
 export * from './sudoku';
@@ -73,6 +75,7 @@ export const InboundSettingsSchema = z.discriminatedUnion('protocol', [
   z.object({ protocol: z.literal('tuic'), settings: TuicInboundSettingsSchema }),
   z.object({ protocol: z.literal('pingtunnel'), settings: PingtunnelInboundSettingsSchema }),
   z.object({ protocol: z.literal('trusttunnel'), settings: TrustTunnelInboundSettingsSchema }),
+  z.object({ protocol: z.literal('masque'), settings: MasqueInboundSettingsSchema }),
   z.object({ protocol: z.literal('naive'), settings: NaiveInboundSettingsSchema }),
   z.object({ protocol: z.literal('mieru'), settings: MieruInboundSettingsSchema }),
   z.object({ protocol: z.literal('sudoku'), settings: SudokuInboundSettingsSchema }),
