@@ -15,6 +15,7 @@ func TestSingBoxInboundRequiresUsers(t *testing.T) {
 		{name: "vless", protocol: model.VLESS, want: true},
 		{name: "vmess", protocol: model.VMESS, want: true},
 		{name: "trojan", protocol: model.Trojan, want: true},
+		{name: "masque", protocol: model.MASQUE, want: true},
 		{name: "naive", protocol: model.NaiveProxy, want: true},
 		{name: "hysteria", protocol: model.Hysteria, want: true},
 		{name: "shadowtls", protocol: model.ShadowTLS, want: true},
@@ -71,5 +72,22 @@ func TestSingBoxTUICInboundPreservesUsersAndTLS(t *testing.T) {
 	tls := got["tls"].(map[string]any)
 	if tls["certificate_path"] != "/tls/cert.pem" || tls["key_path"] != "/tls/key.pem" {
 		t.Fatalf("unexpected TUIC TLS: %v", tls)
+	}
+}
+
+func TestMASQUECoreAndPortCompatibility(t *testing.T) {
+	if coreSupportsInboundProtocol(CoreTypeXray, model.MASQUE) {
+		t.Fatal("MASQUE accepted on Xray")
+	}
+	if !coreSupportsInboundProtocol(CoreTypeSingBox, model.MASQUE) || isXrayManagedProtocol(model.MASQUE) {
+		t.Fatal("incorrect MASQUE runtime")
+	}
+	for settings, expected := range map[string]transportBits{
+		`{}`: transportTCP | transportUDP, `{"version":[3]}`: transportUDP,
+		`{"version":[1,2]}`: transportTCP, `{"version":[2,3]}`: transportTCP | transportUDP,
+	} {
+		if got := inboundTransports(model.MASQUE, "", settings); got != expected {
+			t.Errorf("%s: got %v, want %v", settings, got, expected)
+		}
 	}
 }

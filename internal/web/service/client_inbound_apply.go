@@ -2,11 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"strings"
 	"time"
-	"encoding/json"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
@@ -450,7 +450,7 @@ func (s *ClientService) AddInboundClient(inboundSvc *InboundService, data *model
 			return false, common.NewError("client email is required")
 		}
 		switch oldInbound.Protocol {
-		case "trojan", "trusttunnel", "naive", "snell", "fptn", "openflux", "anytls", "shadowtls", "mieru":
+		case "trojan", "trusttunnel", "naive", "masque", "snell", "fptn", "openflux", "anytls", "shadowtls", "mieru":
 			if client.Password == "" {
 				return false, common.NewError("client password is required")
 			}
@@ -714,7 +714,7 @@ func (s *ClientService) UpdateInboundClient(inboundSvc *InboundService, data *mo
 
 	newClientId := ""
 	switch oldInbound.Protocol {
-	case "trojan", "trusttunnel", "naive", "snell", "fptn", "openflux", "anytls", "shadowtls", "mieru":
+	case "trojan", "trusttunnel", "naive", "masque", "snell", "fptn", "openflux", "anytls", "shadowtls", "mieru":
 		newClientId = clients[0].Password
 	case "shadowsocks":
 		newClientId = clients[0].Email

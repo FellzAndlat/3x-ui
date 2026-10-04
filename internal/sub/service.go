@@ -43,7 +43,7 @@ var errSubscriptionFormatUnsupported = errors.New("subscription format cannot re
 func containsUnsupportedJSONProtocol(inbounds []*model.Inbound) bool {
 	for _, inbound := range inbounds {
 		switch inbound.Protocol {
-		case model.Snell, model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.AmneziaWG, model.TUIC, model.MTProto, model.VKTurnProxy, model.Mieru, model.Sudoku, model.TrustTunnel, model.FPTN, model.OpenFlux:
+		case model.MASQUE, model.Snell, model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.AmneziaWG, model.TUIC, model.MTProto, model.VKTurnProxy, model.Mieru, model.Sudoku, model.TrustTunnel, model.FPTN, model.OpenFlux:
 			return true
 		}
 	}
@@ -70,7 +70,7 @@ func singBoxUnsupportedProtocol(protocol model.Protocol) bool {
 func containsUnsupportedClashProtocol(inbounds []*model.Inbound) bool {
 	for _, inbound := range inbounds {
 		switch inbound.Protocol {
-		case model.Snell, model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.MTProto, model.VKTurnProxy, model.Mieru, model.TrustTunnel, model.FPTN, model.OpenFlux:
+		case model.MASQUE, model.Snell, model.NaiveProxy, model.AnyTLS, model.ShadowTLS, model.MTProto, model.VKTurnProxy, model.Mieru, model.TrustTunnel, model.FPTN, model.OpenFlux:
 			return true
 		case model.Hysteria, model.WireGuard, model.TUIC, model.AmneziaWG, model.Sudoku:
 			// These protocols have dedicated Clash/Mihomo emitters.

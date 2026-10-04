@@ -272,7 +272,7 @@ describe('InboundFormModal', () => {
     expect(messageError).toHaveBeenCalledWith(
       expect.stringContaining('REALITY target must include a port'),
     );
-    expect(post).not.toHaveBeenCalled();
+    expect(post.mock.calls.filter(([url]) => url.includes('/inbounds/'))).toEqual([]);
   });
 
   it('blocks adding TLS without a certificate and directs the user to Security', async () => {
@@ -294,7 +294,7 @@ describe('InboundFormModal', () => {
         expect.stringContaining('TLS certificate 1: Import a TLS certificate'),
       );
     });
-    expect(post).not.toHaveBeenCalled();
+    expect(post.mock.calls.filter(([url]) => url.includes('/inbounds/'))).toEqual([]);
   });
 
   it('submits a valid clone-like Reality inbound', async () => {

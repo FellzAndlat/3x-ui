@@ -2747,6 +2747,7 @@ export const SCHEMAS: Record<string, unknown> = {
           "amneziawg",
           "tuic",
           "naive",
+          "masque",
           "snell",
           "fptn",
           "openflux",

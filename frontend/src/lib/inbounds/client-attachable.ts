@@ -13,6 +13,7 @@ const CLIENT_ATTACHABLE_PROTOCOLS = new Set([
   'trusttunnel',
   'fptn',
   'openflux',
+  'masque',
   'naive',
   'snell',
   'anytls',

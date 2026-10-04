@@ -1,17 +1,21 @@
 package service
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
+	"github.com/SawaMEN/3x-ui/v3/internal/masque"
 	"github.com/SawaMEN/3x-ui/v3/internal/snell"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
 )
 
 func prepareExternalVPN(ib *model.Inbound, previous string) error {
+	if err := masque.Prepare(ib, previous); err != nil {
+		return err
+	}
 	if err := snell.Prepare(ib, previous); err != nil {
 		return err
 	}

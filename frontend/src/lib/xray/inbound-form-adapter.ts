@@ -321,6 +321,7 @@ function clientSchemaForProtocol(protocol: string): z.ZodType | null {
     case 'tuic':
       return TuicClientSchema;
     case 'snell':
+    case 'masque':
     case 'naive':
     case 'fptn':
     case 'openflux':

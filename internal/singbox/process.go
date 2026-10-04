@@ -147,7 +147,25 @@ func (p *Process) GetVersion() string {
 	return p.version
 }
 
-func (p *Process) SupportsNativeAPI() bool {
+func (p *Process) SupportsNativeAPI() bool { return p.supportsMinor(14) }
+
+// MASQUE was introduced in 1.15.0-alpha.7, not the earlier 1.15 alphas.
+func (p *Process) SupportsMASQUE() bool {
+	if !p.supportsMinor(15) {
+		return false
+	}
+	fields := strings.Fields(strings.TrimPrefix(strings.TrimSpace(p.GetVersion()), "v"))
+	if len(fields) == 0 {
+		return false
+	}
+	if alpha, ok := strings.CutPrefix(fields[0], "1.15.0-alpha."); ok {
+		number, err := strconv.Atoi(strings.Split(alpha, "+")[0])
+		return err == nil && number >= 7
+	}
+	return true
+}
+
+func (p *Process) supportsMinor(minimum int) bool {
 	version := strings.TrimSpace(strings.TrimPrefix(p.GetVersion(), "v"))
 	fields := strings.Fields(version)
 	if len(fields) == 0 {
@@ -162,7 +180,7 @@ func (p *Process) SupportsNativeAPI() bool {
 	if err1 != nil || err2 != nil {
 		return false
 	}
-	return major > 1 || (major == 1 && minor >= 14)
+	return major > 1 || (major == 1 && minor >= minimum)
 }
 
 func (p *Process) GetStartTime() time.Time {
@@ -245,6 +263,14 @@ func (p *Process) Validate(ctx context.Context) error {
 		}
 		if !p.SupportsNativeAPI() {
 			return fmt.Errorf("Snell requires sing-box 1.14.0 or newer; installed: %s", p.GetVersion())
+		}
+	}
+	if data, err := os.ReadFile(cfg); err == nil && (configUsesProtocol(data, "masque-server") || configUsesProtocol(data, "masque-client")) {
+		if _, err := p.Version(ctx); err != nil {
+			return err
+		}
+		if !p.SupportsMASQUE() {
+			return fmt.Errorf("MASQUE requires sing-box 1.15.0-alpha.7 or newer; installed: %s", p.GetVersion())
 		}
 	}
 	cmdCtx, cancel := context.WithTimeout(ctx, defaultCommandTimeout)
@@ -606,6 +632,9 @@ func (p *Process) managedPID() int {
 
 func configUsesProtocol(data []byte, protocol string) bool {
 	var cfg struct {
+		Endpoints []struct {
+			Type string `json:"type"`
+		} `json:"endpoints"`
 		Inbounds []struct {
 			Type string `json:"type"`
 		} `json:"inbounds"`
@@ -615,6 +644,11 @@ func configUsesProtocol(data []byte, protocol string) bool {
 	}
 	if json.Unmarshal(data, &cfg) != nil {
 		return false
+	}
+	for _, endpoint := range cfg.Endpoints {
+		if endpoint.Type == protocol {
+			return true
+		}
 	}
 	for _, inbound := range cfg.Inbounds {
 		if inbound.Type == protocol {

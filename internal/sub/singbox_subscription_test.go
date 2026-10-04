@@ -322,3 +322,36 @@ func TestShadowTLSLinkSkipsPlaintextEndpoint(t *testing.T) {
 		t.Fatalf("ShadowTLS must not advertise a plaintext endpoint: %q", link)
 	}
 }
+
+func TestMASQUESubscriptionUsesEndpoints(t *testing.T) {
+	proxy := map[string]any{"type": "masque-client", "tag": "MASQUE alice", "server": "example.com", "server_port": 443, "username": "alice", "password": "secret", "tls": map[string]any{"enabled": true}}
+	for _, hiddify := range []bool{false, true} {
+		var data string
+		var err error
+		if hiddify {
+			data, err = buildHiddifySingBoxSubscription([]map[string]any{proxy})
+		} else {
+			data, err = buildSeparatedSingBoxSubscription(nil, []map[string]any{proxy}, false)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg map[string]any
+		if err := json.Unmarshal([]byte(data), &cfg); err != nil {
+			t.Fatal(err)
+		}
+		eps, _ := cfg["endpoints"].([]any)
+		if len(eps) != 1 || eps[0].(map[string]any)["type"] != "masque-client" {
+			t.Fatalf("missing endpoint: %s", data)
+		}
+		obs, _ := cfg["outbounds"].([]any)
+		for _, ob := range obs {
+			if ob.(map[string]any)["type"] == "masque-client" {
+				t.Fatal("MASQUE emitted as outbound")
+			}
+		}
+		if !hiddify && cfg["route"].(map[string]any)["final"] != proxy["tag"] {
+			t.Fatal("route does not target endpoint")
+		}
+	}
+}

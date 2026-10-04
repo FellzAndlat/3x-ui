@@ -15,6 +15,10 @@ import type { HttpInboundSettings } from '@/schemas/protocols/inbound/http';
 import type { HysteriaClient, HysteriaInboundSettings } from '@/schemas/protocols/inbound/hysteria';
 import type { MixedInboundSettings } from '@/schemas/protocols/inbound/mixed';
 import type { MtprotoClient, MtprotoInboundSettings } from '@/schemas/protocols/inbound/mtproto';
+import {
+  MasqueInboundSettingsSchema,
+  type MasqueInboundSettings,
+} from '@/schemas/protocols/inbound/masque';
 import type { NaiveInboundSettings } from '@/schemas/protocols/inbound/naive';
 import type { SnellInboundSettings } from '@/schemas/protocols/inbound/snell';
 import type { MieruInboundSettings } from '@/schemas/protocols/inbound/mieru';
@@ -493,6 +497,7 @@ export type AnyInboundSettings =
   | TuicInboundSettings
   | PingtunnelInboundSettings
   | TrustTunnelInboundSettings
+  | MasqueInboundSettings
   | NaiveInboundSettings
   | MieruInboundSettings
   | SudokuInboundSettings;
@@ -557,6 +562,8 @@ export function createDefaultInboundSettings(protocol: string): AnyInboundSettin
       };
     case 'trusttunnel':
       return { hostname: 'trusttunnel.local', certificate: '', privateKey: '', clients: [] };
+    case 'masque':
+      return MasqueInboundSettingsSchema.parse({});
     case 'naive':
       return createDefaultNaiveInboundSettings();
     case 'mieru':

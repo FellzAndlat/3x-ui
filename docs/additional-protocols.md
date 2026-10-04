@@ -2,11 +2,11 @@
 
 The panel stores each protocol's own settings, credentials and subscription format. FPTN and OpenFlux are managed external processes; Snell is served by sing-box.
 
-| Protocol | Incoming connections | Outgoing connections | Subscription |
-| --- | --- | --- | --- |
-| Snell | sing-box 1.14+, v5 or v6, individual user keys | Native sing-box v4 (v5-compatible) or v6 | `snell://` links; native sing-box JSON |
-| FPTN | One isolated Docker server per inbound | Isolated FPTN CLI container and a loopback VLESS bridge for Xray or sing-box | Upstream `fptn:` access token with certificate fingerprint |
-| OpenFlux | L4 exit process, one client per inbound | Loopback SOCKS5 bridge for Xray or sing-box, including UDP | Upstream `openflux://v1/` compressed link |
+| Protocol | Incoming connections                           | Outgoing connections                                                         | Subscription                                               |
+| -------- | ---------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Snell    | sing-box 1.14+, v5 or v6, individual user keys | Native sing-box v4 (v5-compatible) or v6                                     | `snell://` links; native sing-box JSON                     |
+| FPTN     | One isolated Docker server per inbound         | Isolated FPTN CLI container and a loopback VLESS bridge for Xray or sing-box | Upstream `fptn:` access token with certificate fingerprint |
+| OpenFlux | L4 exit process, one client per inbound        | Loopback SOCKS5 bridge for Xray or sing-box, including UDP                   | Upstream `openflux://v1/` compressed link                  |
 
 ## Requirements and setup
 

@@ -88,6 +88,7 @@ export function canEnableSniffing(values: { protocol: string }): boolean {
     values.protocol !== 'fptn' &&
     values.protocol !== 'openflux' &&
     values.protocol !== 'vk-turn-proxy' &&
+    values.protocol !== 'masque' &&
     values.protocol !== 'naive' &&
     values.protocol !== 'mieru' &&
     values.protocol !== 'sudoku' &&
