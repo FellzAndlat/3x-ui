@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import AdBlockTab from '@/pages/adblock/AdBlockTab';
 import { HttpUtil } from '@/utils';
@@ -134,8 +134,14 @@ it('saves policy priority changes', async () => {
   render(<AdBlockTab />);
   await screen.findByText('AdBlock работает');
   fireEvent.click(screen.getByText('Расширенные настройки'));
-  await screen.findByDisplayValue('First');
-  fireEvent.click(screen.getAllByRole('button', { name: 'Ниже' })[0]);
+  const firstName = await screen.findByDisplayValue('First');
+  const firstPolicy = firstName.closest('.ant-card');
+  if (!firstPolicy) throw new Error('First policy card not found');
+  // The expanded policy card is already known. Skip jsdom's expensive
+  // visibility traversal through every button in the expanded form.
+  fireEvent.click(
+    within(firstPolicy as HTMLElement).getByRole('button', { name: 'Ниже', hidden: true }),
+  );
   fireEvent.click(screen.getByRole('button', { name: /Сохранить/ }));
   await waitFor(() => expect(post).toHaveBeenCalled());
   expect(

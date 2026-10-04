@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -302,9 +303,10 @@ func TestGatewayRequestedHeartbeatDoesNotRaceTicker(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		// 10ms, not 1ms: Discord answers every heartbeat and the client now drops a
-		// socket it hears nothing back on, so the ACK needs room to arrive.
-		_ = conn.WriteJSON(GatewayPayload{Op: opHello, D: []byte(`{"heartbeat_interval": 10}`)})
+		// Exercise periodic and requested writes without making ACK delivery depend
+		// on a 10ms scheduling window on a loaded CI runner. Missing-ACK handling
+		// is covered separately by TestGatewayDropsConnectionWhenHeartbeatsGoUnanswered.
+		_ = conn.WriteJSON(GatewayPayload{Op: opHello, D: []byte(`{"heartbeat_interval": 250}`)})
 
 		// Two server goroutines write, so they share one writer: gorilla panics on
 		// concurrent writes, and this test is about the CLIENT's two writers.
@@ -316,6 +318,7 @@ func TestGatewayRequestedHeartbeatDoesNotRaceTicker(t *testing.T) {
 		}
 
 		readErr := make(chan error, 1)
+		var heartbeats atomic.Int64
 		go func() {
 			for {
 				var payload GatewayPayload
@@ -324,23 +327,34 @@ func TestGatewayRequestedHeartbeatDoesNotRaceTicker(t *testing.T) {
 					return
 				}
 				// Discord answers every heartbeat; without this the zombie check
-				// closes the socket a millisecond into the flood below.
+				// closes the socket during the flood below.
 				if payload.Op == opHeartbeat {
 					if err := writeJSON(GatewayPayload{Op: opHeartbeatACK}); err != nil {
 						readErr <- err
 						return
 					}
+					heartbeats.Add(1)
 				}
 			}
 		}()
 		// Op 1 from the server makes the read loop write while the ticker writes too.
+		var requests int64
 		for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
 			if err := writeJSON(GatewayPayload{Op: opHeartbeat}); err != nil {
 				break
 			}
+			requests++
 			// Leave the client room to drain the flood and answer: a saturated
 			// socket delays the ACK this test now depends on.
 			time.Sleep(time.Millisecond)
+		}
+		// Drain requested replies and require an extra heartbeat from the ticker,
+		// so a passing test still exercises both client writers.
+		for deadline := time.Now().Add(time.Second); heartbeats.Load() <= requests && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+		if heartbeats.Load() <= requests {
+			t.Errorf("expected periodic heartbeats in addition to %d requested replies, got %d", requests, heartbeats.Load())
 		}
 		select {
 		case err := <-readErr:
