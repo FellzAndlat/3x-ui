@@ -88,6 +88,11 @@ func (j *XrayTrafficJob) runNonXrayTraffic() {
 			// every five seconds and leaving stale clients shown as online.
 			j.inboundService.RefreshLocalOnlineClients(nil, nil)
 		} else {
+			trafficCtx, trafficCancel := context.WithTimeout(context.Background(), 4*time.Second)
+			if err := singBoxService.PollTraffic(trafficCtx); err != nil {
+				logger.Warning("collect sing-box traffic failed:", err)
+			}
+			trafficCancel()
 			service.EnsureOnlinePresenceTracker()
 			ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 			online, activeInbounds, err := singBoxService.OnlinePresence(ctx)

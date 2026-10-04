@@ -5,8 +5,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestProcessSupportsNativeAPI(t *testing.T) {
@@ -55,9 +57,13 @@ func TestIsolatedProcessNeverAdoptsManagedProcess(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux process discovery regression")
 	}
-	executable, err := os.ReadFile("/bin/sleep")
+	self, err := os.Executable()
 	if err != nil {
-		t.Skip("sleep binary unavailable")
+		t.Fatal(err)
+	}
+	executable, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
 	}
 	dir := t.TempDir()
 	t.Setenv("XUI_BIN_FOLDER", dir)
@@ -65,11 +71,15 @@ func TestIsolatedProcessNeverAdoptsManagedProcess(t *testing.T) {
 	if err := os.WriteFile(binary, executable, 0700); err != nil {
 		t.Fatal(err)
 	}
-	production := exec.Command(binary, "30")
+	production := exec.Command(binary, "run", "-c", filepath.Join(dir, "managed.json"))
+	production.Env = append(os.Environ(), "XUI_SINGBOX_TEST_PROCESS=1")
 	if err := production.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = production.Process.Kill(); _ = production.Wait() }()
+	if _, err := os.Readlink("/proc/" + strconv.Itoa(production.Process.Pid) + "/exe"); os.IsPermission(err) || os.IsNotExist(err) {
+		t.Skipf("child process identity inspection unavailable: %v", err)
+	}
 	if !NewProcess(filepath.Join(dir, "managed.json")).IsRunning() {
 		t.Fatal("managed process was not discovered")
 	}
@@ -82,5 +92,15 @@ func TestIsolatedProcessNeverAdoptsManagedProcess(t *testing.T) {
 	}
 	if err := production.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("test process stopped production: %v", err)
+	}
+}
+
+// The copied test executable accepts the real sing-box command shape without
+// passing run/-c to the Go test flag parser.
+func init() {
+	if os.Getenv("XUI_SINGBOX_TEST_PROCESS") == "1" {
+		for {
+			time.Sleep(time.Hour)
+		}
 	}
 }

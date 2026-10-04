@@ -2,10 +2,12 @@ package singbox
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -69,7 +71,7 @@ func TestClashControllerURL(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := clashControllerURL(tc.input)
+			got, err := clashControllerURLWithLocalCheck(tc.input, func(net.IP) (bool, error) { return false, nil })
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("clashControllerURL(%q) error = %v, want containing %q", tc.input, err, tc.wantErr)
@@ -88,6 +90,9 @@ func TestClashControllerURL(t *testing.T) {
 
 func TestClashControllerURLAllowsAssignedAddress(t *testing.T) {
 	addresses, err := net.InterfaceAddrs()
+	if errors.Is(err, os.ErrPermission) {
+		t.Skipf("network interface inspection unavailable: %v", err)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,5 +247,28 @@ func TestProxyDelayEncodesTag(t *testing.T) {
 	client := &ClashStatsClient{client: server.Client(), baseURL: server.URL}
 	if _, err := client.ProxyDelay(context.Background(), "a/b c", "https://example.com", time.Second); err != nil {
 		t.Fatalf("ProxyDelay returned error: %v", err)
+	}
+}
+
+func TestClashControllerLocalCheck(t *testing.T) {
+	for _, allowed := range []bool{false, true} {
+		got, err := clashControllerURLWithLocalCheck("192.0.2.10:9090", func(ip net.IP) (bool, error) {
+			if !ip.Equal(net.ParseIP("192.0.2.10")) {
+				t.Fatalf("wrong address %v", ip)
+			}
+			return allowed, nil
+		})
+		if allowed {
+			if err != nil || got != "http://192.0.2.10:9090" {
+				t.Fatalf("assigned address: %q %v", got, err)
+			}
+		} else if err == nil || got != "" {
+			t.Fatal("remote address accepted")
+		}
+	}
+	wantErr := errors.New("interface inspection failed")
+	got, err := clashControllerURLWithLocalCheck("192.0.2.10:9090", func(net.IP) (bool, error) { return false, wantErr })
+	if got != "" || !errors.Is(err, wantErr) {
+		t.Fatalf("inspection error not propagated: %q %v", got, err)
 	}
 }

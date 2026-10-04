@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -86,7 +87,29 @@ func NewClashStatsClient() *ClashStatsClient {
 	}
 }
 
+var runtimeConfigReader struct {
+	sync.RWMutex
+	read func() []byte
+}
+
+// SetRuntimeConfigReader supplies the applied config of the panel-managed process.
+func SetRuntimeConfigReader(read func() []byte) {
+	runtimeConfigReader.Lock()
+	defer runtimeConfigReader.Unlock()
+	runtimeConfigReader.read = read
+}
+
 func clashAPIInfoFromConfig() (string, string, error) {
+	runtimeConfigReader.RLock()
+	read := runtimeConfigReader.read
+	runtimeConfigReader.RUnlock()
+	if read != nil {
+		data := read()
+		if len(data) == 0 {
+			return "", "", fmt.Errorf("sing-box has no applied runtime config")
+		}
+		return clashAPIInfo(data)
+	}
 	data, err := os.ReadFile(GetConfigPath())
 	if err != nil {
 		return "", "", fmt.Errorf("read sing-box config: %w", err)
@@ -135,6 +158,10 @@ func clashAPIInfo(data []byte) (string, string, error) {
 // when that address is assigned to this host, so a Clash secret can never be
 // sent to an arbitrary remote endpoint.
 func clashControllerURL(controller string) (string, error) {
+	return clashControllerURLWithLocalCheck(controller, isLocalIP)
+}
+
+func clashControllerURLWithLocalCheck(controller string, localCheck func(net.IP) (bool, error)) (string, error) {
 	controller = strings.TrimSpace(controller)
 	if controller == "" {
 		return "", fmt.Errorf("sing-box Clash API is disabled")
@@ -171,7 +198,7 @@ func clashControllerURL(controller string) (string, error) {
 		case ip.IsLoopback():
 			host = ip.String()
 		default:
-			local, err := isLocalIP(ip)
+			local, err := localCheck(ip)
 			if err != nil {
 				return "", fmt.Errorf("inspect local interfaces for Clash API controller: %w", err)
 			}
@@ -253,7 +280,7 @@ func (c *ClashStatsClient) Connections(ctx context.Context) ([]ClashConnection, 
 	}
 	defer resp.Body.Close()
 
-	body := io.LimitReader(resp.Body, 1<<20)
+	body := io.LimitReader(resp.Body, 64<<20)
 	if resp.StatusCode != http.StatusOK {
 		var apiErr clashAPIError
 		_ = json.NewDecoder(body).Decode(&apiErr)

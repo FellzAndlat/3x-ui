@@ -42,8 +42,8 @@ func TestTranslateXrayOutboundNativeAnyTLS(t *testing.T) {
 	if got := rawString(out, "password"); got != "secret" {
 		t.Fatalf("password = %q, want secret", got)
 	}
-	if got := rawString(out, "domain_resolver"); got != "local" {
-		t.Fatalf("domain_resolver = %q, want local", got)
+	if got := rawString(out, "domain_resolver"); got != "" {
+		t.Fatalf("domain_resolver = %q, must inherit configured route resolver", got)
 	}
 	for _, key := range []string{"protocol", "settings", "streamSettings", "mux"} {
 		if _, exists := out[key]; exists {
@@ -122,7 +122,7 @@ func TestTranslateXrayOutboundExplicitNativeAliases(t *testing.T) {
 		settings map[string]any
 	}{
 		{
-			wrapper: "singbox:tuic",
+			wrapper:  "singbox:tuic",
 			expected: "tuic",
 			settings: map[string]any{
 				"server": "tuic.example.com", "server_port": 443,
@@ -131,7 +131,7 @@ func TestTranslateXrayOutboundExplicitNativeAliases(t *testing.T) {
 			},
 		},
 		{
-			wrapper: "singbox:hysteria2",
+			wrapper:  "singbox:hysteria2",
 			expected: "hysteria2",
 			settings: map[string]any{
 				"server": "hy2.example.com", "server_port": 443, "password": "secret",
@@ -163,8 +163,8 @@ func TestTranslateXrayOutboundExplicitNativeAliases(t *testing.T) {
 
 func TestTranslateXrayOutboundNativeAppliesCommonDialerOptions(t *testing.T) {
 	raw := map[string]any{
-		"protocol":   "ssh",
-		"tag":        "ssh-out",
+		"protocol":    "ssh",
+		"tag":         "ssh-out",
 		"sendThrough": "192.0.2.10",
 		"settings": map[string]any{
 			"server":      "ssh.example.com",

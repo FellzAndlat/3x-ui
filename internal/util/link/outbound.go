@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -68,6 +69,9 @@ func ParseSubscriptionBody(body []byte) ([]Outbound, []string, error) {
 		seen[res.Identity]++
 		outbounds = append(outbounds, res.Outbound)
 		identities = append(identities, identity)
+	}
+	if len(outbounds) == 0 {
+		return nil, nil, fmt.Errorf("subscription contains no supported valid links")
 	}
 	return outbounds, identities, nil
 }
@@ -170,6 +174,14 @@ func parseVmess(link string) (*ParseResult, error) {
 
 	// Map known fields (best effort, matching frontend parser coverage)
 	switch network {
+	case "kcp":
+		kcp := stream["kcpSettings"].(map[string]any)
+		if n, ok := kcpParamInRange(fmt.Sprint(j["mtu"]), kcpMinMTU, kcpMaxMTU); ok {
+			kcp["mtu"] = n
+		}
+		if n, ok := kcpParamInRange(fmt.Sprint(j["tti"]), kcpMinTTI, kcpMaxTTI); ok {
+			kcp["tti"] = n
+		}
 	case "ws":
 		host, _ := j["host"].(string)
 		setWS(stream, host, getString(j, "path", "/"))
@@ -186,11 +198,11 @@ func parseVmess(link string) (*ParseResult, error) {
 		xh := stream["xhttpSettings"].(map[string]any)
 		xh["host"] = getString(j, "host", "")
 		xh["path"] = getString(j, "path", "/")
-		if m := getString(j, "mode", ""); m != "" {
+		if m := firstNonEmpty(getString(j, "mode", ""), getString(j, "type", "")); m != "" {
 			xh["mode"] = m
 		}
 		// xhttp advanced keys are passed through if present in the json
-		for _, k := range []string{"xPaddingBytes", "scMaxEachPostBytes", "scMinPostsIntervalMs"} {
+		for _, k := range []string{"xPaddingBytes", "xPaddingKey", "xPaddingHeader", "xPaddingPlacement", "xPaddingMethod", "sessionIDPlacement", "sessionIDKey", "sessionIDTable", "sessionIDLength", "seqPlacement", "seqKey", "uplinkDataPlacement", "uplinkDataKey", "scMaxEachPostBytes", "scMinPostsIntervalMs", "scStreamUpServerSecs", "uplinkHTTPMethod", "scMaxBufferedPosts", "serverMaxHeaderBytes", "uplinkChunkSize", "xPaddingObfsMode", "noSSEHeader", "noGRPCHeader", "xmux", "downloadSettings", "headers"} {
 			if v, ok := j[k]; ok {
 				xh[k] = v
 			}
@@ -211,6 +223,15 @@ func parseVmess(link string) (*ParseResult, error) {
 		}
 	}
 
+	maskParams := url.Values{}
+	if fm := getString(j, "fm", ""); fm != "" {
+		maskParams.Set("fm", fm)
+	}
+	if network == "kcp" {
+		maskParams.Set("headerType", getString(j, "type", ""))
+		maskParams.Set("seed", getString(j, "seed", ""))
+	}
+	applyFinalMask(stream, maskParams)
 	if security == "tls" {
 		tls := stream["tlsSettings"].(map[string]any)
 		tls["serverName"] = getString(j, "sni", "")
@@ -226,10 +247,10 @@ func parseVmess(link string) (*ParseResult, error) {
 	}
 
 	port := num(j["port"])
-	scy := getString(j, "scy", "auto")
-	if scy == "none" || scy == "zero" {
-		scy = "auto"
+	if port <= 0 || port > 65535 || num(j["aid"]) < 0 {
+		return nil, fmt.Errorf("invalid vmess port or alterId")
 	}
+	scy := getString(j, "scy", "auto")
 	ob := Outbound{
 		"protocol": "vmess",
 		"tag":      getString(j, "ps", ""),
@@ -242,6 +263,7 @@ func parseVmess(link string) (*ParseResult, error) {
 						map[string]any{
 							"id":       getString(j, "id", ""),
 							"security": scy,
+							"alterId":  num(j["aid"]),
 						},
 					},
 				},
@@ -277,7 +299,10 @@ func parseVless(link string) (*ParseResult, error) {
 	}
 	id := u.User.Username()
 	host := u.Hostname()
-	port := defaultPort(u.Port(), 443)
+	port, err := parseLinkPort(u.Port(), 443)
+	if err != nil {
+		return nil, err
+	}
 	params := u.Query()
 	network := params.Get("type")
 	if network == "" {
@@ -319,7 +344,10 @@ func parseTrojan(link string) (*ParseResult, error) {
 	}
 	pw := u.User.Username()
 	host := u.Hostname()
-	port := defaultPort(u.Port(), 443)
+	port, err := parseLinkPort(u.Port(), 443)
+	if err != nil {
+		return nil, err
+	}
 	params := u.Query()
 	network := params.Get("type")
 	if network == "" {
@@ -359,7 +387,7 @@ func parseShadowsocks(link string) (*ParseResult, error) {
 	// emitted by genShadowsocksLink — preserve them like trojan/vless.
 	remark := ""
 	if i := strings.Index(link, "#"); i >= 0 {
-		remark, _ = url.QueryUnescape(link[i+1:])
+		remark, _ = url.PathUnescape(link[i+1:])
 		link = link[:i]
 	}
 	rawQuery := ""
@@ -379,7 +407,7 @@ func parseShadowsocks(link string) (*ParseResult, error) {
 		userInfo, err := base64DecodeFlexible(userB64)
 		if err != nil {
 			// SIP022 (2022-blake3-*) userinfo is percent-encoded, not base64.
-			if dec, uerr := url.QueryUnescape(userB64); uerr == nil {
+			if dec, uerr := url.PathUnescape(userB64); uerr == nil {
 				userInfo = dec
 			} else {
 				userInfo = userB64 // not b64, rare
@@ -401,7 +429,7 @@ func parseShadowsocks(link string) (*ParseResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		at = strings.Index(dec, "@")
+		at = strings.LastIndex(dec, "@")
 		if at < 0 {
 			return nil, fmt.Errorf("bad legacy ss")
 		}
@@ -418,10 +446,16 @@ func parseShadowsocks(link string) (*ParseResult, error) {
 		}
 		method, pass = splitMethodPass(userInfo)
 	}
-	identity := "ss:" + method + ":" + pass + "@" + host + ":" + strconv.Itoa(port)
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	if host == "" || port <= 0 || port > 65535 {
+		return nil, fmt.Errorf("invalid ss host or port")
+	}
 	// The panel and v2rayN express shadowsocks tcp/http obfuscation only as the
 	// SIP002 plugin, so it has to become the header it stands for.
-	applyObfsLocalPlugin(params, rawQuery)
+	if err := applyObfsLocalPlugin(params, rawQuery); err != nil {
+		return nil, err
+	}
+	identity := "ss:" + method + ":" + pass + "@" + net.JoinHostPort(host, strconv.Itoa(port)) + "?" + canonicalQuery(params)
 	network := params.Get("type")
 	if network == "" {
 		network = "tcp"
@@ -457,37 +491,46 @@ func splitMethodPass(userInfo string) (string, string) {
 
 // applyObfsLocalPlugin maps a SIP002 obfs-local=http plugin onto the tcp/http
 // response header it stands for; the other plugin values have no Xray header.
-func applyObfsLocalPlugin(p url.Values, rawQuery string) {
-	if p.Get("headerType") != "" || p.Get("type") == "http" {
-		return
-	}
+func applyObfsLocalPlugin(p url.Values, rawQuery string) error {
 	plugin := p.Get("plugin")
 	if plugin == "" {
 		plugin = rawQueryPlugin(rawQuery)
 	}
+	if plugin == "" {
+		return nil
+	}
 	parts := strings.Split(plugin, ";")
-	if len(parts) == 0 || parts[0] != "obfs-local" {
-		return
+	if parts[0] != "obfs-local" {
+		return fmt.Errorf("unsupported SIP002 plugin %q", parts[0])
 	}
 	obfs, host := "", ""
 	for _, part := range parts[1:] {
-		if k, v, ok := strings.Cut(part, "="); ok {
-			switch k {
-			case "obfs":
-				obfs = v
-			case "obfs-host":
-				host = v
-			}
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			return fmt.Errorf("invalid SIP002 plugin option")
+		}
+		switch key {
+		case "obfs":
+			obfs = value
+		case "obfs-host":
+			host = value
+		default:
+			return fmt.Errorf("unsupported SIP002 plugin option %q", key)
 		}
 	}
 	if obfs != "http" {
-		return
+		return fmt.Errorf("unsupported obfs-local mode %q", obfs)
 	}
+	if network := p.Get("type"); network != "" && network != "tcp" {
+		return fmt.Errorf("conflicting SIP002 plugin transport")
+	}
+	p.Set("plugin", plugin)
 	p.Set("type", "tcp")
 	p.Set("headerType", "http")
 	if host != "" {
 		p.Set("host", host)
 	}
+	return nil
 }
 
 // rawQueryPlugin reads the plugin parameter straight out of the query string for
@@ -514,8 +557,14 @@ func parseHysteria2(link string) (*ParseResult, error) {
 		return nil, fmt.Errorf("not hysteria2")
 	}
 	auth := u.User.Username()
+	if password, present := u.User.Password(); present {
+		auth += ":" + password
+	}
 	host := u.Hostname()
-	port := defaultPort(u.Port(), 443)
+	port, err := parseLinkPort(u.Port(), 443)
+	if err != nil {
+		return nil, err
+	}
 	params := u.Query()
 
 	stream := map[string]any{
@@ -528,6 +577,7 @@ func parseHysteria2(link string) (*ParseResult, error) {
 		},
 		"tlsSettings": map[string]any{
 			"serverName":           params.Get("sni"),
+			"allowInsecure":        firstNonEmpty(params.Get("allowInsecure"), params.Get("insecure")) == "1" || firstNonEmpty(params.Get("allowInsecure"), params.Get("insecure")) == "true",
 			"alpn":                 splitCommaOrDefault(params.Get("alpn"), []string{"h3"}),
 			"fingerprint":          params.Get("fp"),
 			"echConfigList":        params.Get("ech"),
@@ -560,13 +610,16 @@ func parseWireguard(link string) (*ParseResult, error) {
 	if u.Scheme != "wireguard" && u.Scheme != "wg" {
 		return nil, fmt.Errorf("not wireguard")
 	}
-	secret, _ := url.QueryUnescape(u.User.Username())
+	secret := u.User.Username()
 	params := u.Query()
 	host := u.Hostname()
 	portStr := u.Port()
 	endpoint := host
 	if portStr != "" {
-		endpoint = host + ":" + portStr
+		if _, err := parseLinkPort(portStr, 0); err != nil {
+			return nil, err
+		}
+		endpoint = net.JoinHostPort(host, portStr)
 	}
 
 	addrRaw := firstParam(params, "address", "ip")
@@ -748,6 +801,14 @@ func applySecurity(stream map[string]any, p url.Values) {
 	switch sec {
 	case "tls":
 		tls := stream["tlsSettings"].(map[string]any)
+		for _, key := range []string{"allowInsecure", "insecure"} {
+			if values, exists := p[key]; exists && len(values) > 0 {
+				if value, err := strconv.ParseBool(values[0]); err == nil {
+					tls["allowInsecure"] = value
+					break
+				}
+			}
+		}
 		tls["serverName"] = p.Get("sni")
 		tls["fingerprint"] = p.Get("fp")
 		if alpn := p.Get("alpn"); alpn != "" {
@@ -1065,51 +1126,32 @@ func firstParam(p url.Values, keys ...string) string {
 var realityPerRequestParams = map[string]bool{"sid": true, "sni": true, "spx": true}
 
 func canonicalQuery(p url.Values) string {
-	// Sort keys for stable identity
+	filtered := make(url.Values, len(p))
 	reality := p.Get("security") == "reality"
-	keys := make([]string, 0, len(p))
-	for k := range p {
-		if reality && realityPerRequestParams[k] {
+	for key, values := range p {
+		if reality && realityPerRequestParams[key] {
 			continue
 		}
-		keys = append(keys, k)
+		filtered[key] = values
 	}
-	// simple sort
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[j] < keys[i] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		for _, v := range p[k] {
-			parts = append(parts, k+"="+v)
-		}
-	}
-	return strings.Join(parts, "&")
+	// Encode escapes separators inside values, so distinct queries cannot collide.
+	return filtered.Encode()
 }
 
 func decodeHash(h string) string {
-	if h == "" {
-		return ""
-	}
-	if dec, err := url.QueryUnescape(h); err == nil {
-		return dec
-	}
+	// url.Parse has already decoded Fragment; a second decode corrupts '+' and '%'.
 	return h
 }
 
-func defaultPort(p string, def int) int {
+func parseLinkPort(p string, def int) (int, error) {
 	if p == "" {
-		return def
+		return def, nil
 	}
 	n, err := strconv.Atoi(p)
-	if err != nil || n <= 0 {
-		return def
+	if err != nil || n <= 0 || n > 65535 {
+		return 0, fmt.Errorf("invalid share-link port %q", p)
 	}
-	return n
+	return n, nil
 }
 
 func num(v any) int {

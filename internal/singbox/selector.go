@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -24,25 +23,11 @@ type SelectorState struct {
 }
 
 func NewSelectorClient(controller, secret string) (*SelectorClient, error) {
-	host, port, err := net.SplitHostPort(controller)
+	address, err := clashControllerURL(controller)
 	if err != nil {
-		return nil, fmt.Errorf("invalid local Clash API address")
+		return nil, err
 	}
-	if host == "" || host == "0.0.0.0" {
-		host = "127.0.0.1"
-	}
-	if host == "::" {
-		host = "::1"
-	}
-	if host != "localhost" {
-		ip := net.ParseIP(host)
-		if ip == nil || !ip.IsLoopback() {
-			return nil, fmt.Errorf("Clash API controller must be local")
-		}
-	} else {
-		host = "127.0.0.1"
-	}
-	return &SelectorClient{address: "http://" + net.JoinHostPort(host, port), secret: secret, client: &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &SelectorClient{address: address, secret: secret, client: &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 func (c *SelectorClient) request(ctx context.Context, method, tag string, body []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.address+"/proxies/"+url.PathEscape(tag), bytes.NewReader(body))

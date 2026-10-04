@@ -207,7 +207,12 @@ func serverHwid() string {
 		return ""
 	}
 	if strings.TrimSpace(row.Value) == "" {
-		return hwid
+		if err := db.Model(&model.Setting{}).Where("key = ? AND (value = ? OR value IS NULL)", serverHwidKey, row.Value).Update("value", hwid).Error; err != nil {
+			return ""
+		}
+		if err := db.Where("key = ?", serverHwidKey).First(&row).Error; err != nil {
+			return ""
+		}
 	}
 	return strings.TrimSpace(row.Value)
 }

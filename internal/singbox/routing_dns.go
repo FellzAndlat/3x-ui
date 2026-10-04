@@ -27,6 +27,13 @@ func TranslateXrayRoutingWithGeoData(raw map[string]any, store *geodata.Store) (
 	if raw["rules"] != nil && !ok {
 		return nil, fmt.Errorf("routing rules has invalid configuration")
 	}
+	strategy := compatString(raw["domainStrategy"])
+	if strategy == "IPIfNonMatch" {
+		return nil, fmt.Errorf("routing IPIfNonMatch requires two-pass routing; use an explicit native sing-box route")
+	}
+	if strategy != "" && strategy != "AsIs" && strategy != "IPOnDemand" && TranslateXrayDomainStrategy(strategy) == "" {
+		return nil, fmt.Errorf("unsupported Xray routing domainStrategy %q", strategy)
+	}
 	rules := make([]map[string]any, 0, len(rulesRaw))
 	for i, item := range rulesRaw {
 		xr, ok := item.(map[string]any)
@@ -181,6 +188,15 @@ func TranslateXrayRoutingWithGeoData(raw map[string]any, store *geodata.Store) (
 		if protocols := compatStringSlice(xr["protocol"]); len(protocols) > 0 {
 			r["protocol"] = protocols
 		}
+		if strategy == "IPOnDemand" && (r["ip_cidr"] != nil || r["ip_is_private"] != nil) {
+			resolve := map[string]any{"action": "resolve"}
+			for key, value := range r {
+				if key != "ip_cidr" && key != "ip_is_private" {
+					resolve[key] = value
+				}
+			}
+			rules = append(rules, resolve)
+		}
 		// Xray combines domain and IP constraints with AND; sing-box groups
 		// destination matchers with OR unless they are separate logical rules.
 		if len(domains) > 0 && (r["ip_cidr"] != nil || r["ip_is_private"] != nil) {
@@ -199,6 +215,9 @@ func TranslateXrayRoutingWithGeoData(raw map[string]any, store *geodata.Store) (
 			// so carrying the rule over references a nonexistent outbound and makes
 			// sing-box reject the complete configuration.
 			if outbound == "api" && containsCompatString(inboundTags, "api") {
+				if len(inboundTags) != 1 {
+					return nil, fmt.Errorf("routing rule %d mixes Xray API and user inbounds", i)
+				}
 				continue
 			}
 			r["action"] = "route"
@@ -324,7 +343,7 @@ func TranslateXrayDomainStrategy(value string) string {
 // strategies are not directly equivalent, so the first configured selector
 // is used as the deterministic default unless Xray's fallbackTag is itself
 // one of the selected outbounds.
-func TranslateXrayBalancers(raw map[string]any) ([]map[string]any, error) {
+func TranslateXrayBalancers(raw map[string]any, available ...map[string]any) ([]map[string]any, error) {
 	items, ok := raw["balancers"].([]any)
 	if raw["balancers"] != nil && !ok {
 		return nil, fmt.Errorf("routing balancers has invalid configuration")
@@ -346,8 +365,34 @@ func TranslateXrayBalancers(raw map[string]any) ([]map[string]any, error) {
 		if len(selectors) == 0 {
 			return nil, fmt.Errorf("balancer %q has no selectors", tag)
 		}
+		if len(available) > 0 {
+			var expanded []string
+			for _, outbound := range available {
+				target := rawString(outbound, "tag")
+				if target == "" || rawString(outbound, "protocol") == "dns" {
+					continue
+				}
+				for _, prefix := range selectors {
+					if strings.HasPrefix(target, prefix) {
+						expanded = append(expanded, target)
+						break
+					}
+				}
+			}
+			selectors = expanded
+		}
+		if len(selectors) == 0 {
+			return nil, fmt.Errorf("balancer %q selectors match no outbound", tag)
+		}
+		strategy := rawString(rawObject(balancer, "strategy"), "type")
+		if len(selectors) > 1 || strategy != "" && strategy != "random" {
+			return nil, fmt.Errorf("balancer %q strategy %q cannot be preserved by a static sing-box selector; configure a native selector/urltest", tag, strategy)
+		}
 		defaultTag := selectors[0]
 		fallback := compatString(balancer["fallbackTag"])
+		if fallback != "" && !containsCompatString(selectors, fallback) {
+			return nil, fmt.Errorf("balancer %q fallback %q cannot be preserved by a static selector", tag, fallback)
+		}
 		if containsCompatString(selectors, fallback) {
 			defaultTag = fallback
 		}
@@ -510,6 +555,9 @@ func TranslateXrayDNS(raw map[string]any) (map[string]any, error) {
 		if address == "" {
 			return nil, fmt.Errorf("DNS server %d has an empty address", i)
 		}
+		if net.ParseIP(address) != nil && strings.Contains(address, ":") {
+			address = "[" + address + "]"
+		}
 		server := map[string]any{"tag": fmt.Sprintf("dns-%d", i+1)}
 		if strings.EqualFold(address, "localhost") || strings.EqualFold(address, "local") {
 			server["type"] = "local"
@@ -523,6 +571,9 @@ func TranslateXrayDNS(raw map[string]any) (map[string]any, error) {
 					server["server"] = u.Hostname()
 					if u.EscapedPath() != "" {
 						server["path"] = u.EscapedPath()
+						if u.RawQuery != "" {
+							server["path"] = u.EscapedPath() + "?" + u.RawQuery
+						}
 					}
 				} else {
 					return nil, fmt.Errorf("DNS server %d has invalid address %q", i, address)
@@ -568,7 +619,7 @@ func TranslateXrayDNS(raw map[string]any) (map[string]any, error) {
 		}
 		if server["type"] != "local" {
 			u, err := url.Parse(address)
-			if err != nil || u.Scheme == "" {
+			if err != nil || !strings.Contains(address, "://") {
 				u, err = url.Parse("udp://" + address)
 			}
 			if err != nil {
@@ -603,6 +654,16 @@ func TranslateXrayDNS(raw map[string]any) (map[string]any, error) {
 		}
 		servers = append(servers, server)
 	}
+	if len(servers) > 1 {
+		var fallbackRules []map[string]any
+		for _, server := range servers {
+			fallbackRules = append(fallbackRules, map[string]any{"action": "evaluate", "server": server["tag"], "tag": server["tag"]})
+		}
+		for _, server := range servers {
+			fallbackRules = append(fallbackRules, map[string]any{"match_response": server["tag"], "response_rcode": "NOERROR", "action": "respond"})
+		}
+		out["rules"] = fallbackRules
+	}
 	if needsBootstrap {
 		servers = append(servers, map[string]any{"type": "local", "tag": "panel-bootstrap"})
 	}
@@ -629,7 +690,8 @@ func TranslateXrayDNS(raw map[string]any) (map[string]any, error) {
 			predefined[domain] = addresses
 		}
 		servers = append(servers, map[string]any{"type": "hosts", "tag": "panel-hosts", "predefined": predefined})
-		out["rules"] = []map[string]any{{"preferred_by": "panel-hosts", "action": "route", "server": "panel-hosts"}}
+		existing, _ := out["rules"].([]map[string]any)
+		out["rules"] = append([]map[string]any{{"preferred_by": "panel-hosts", "action": "route", "server": "panel-hosts"}}, existing...)
 	}
 	if len(servers) == 0 || len(servers) == 1 && servers[0]["type"] == "hosts" {
 		servers = append(servers, map[string]any{"type": "local", "tag": "panel-default"})
@@ -666,7 +728,26 @@ func isMeaningfulCompatValue(value any) bool {
 	case string:
 		return strings.TrimSpace(v) != ""
 	case []any:
-		return len(v) > 0
+		for _, item := range v {
+			if isMeaningfulCompatValue(item) {
+				return true
+			}
+		}
+		return false
+	case []string:
+		for _, item := range v {
+			if strings.TrimSpace(item) != "" {
+				return true
+			}
+		}
+		return false
+	case map[string]any:
+		for _, item := range v {
+			if isMeaningfulCompatValue(item) {
+				return true
+			}
+		}
+		return false
 	default:
 		return true
 	}
@@ -706,4 +787,31 @@ func compatDNSPort(value string, fallback int) (int, error) {
 		return 0, fmt.Errorf("invalid DNS port %q", value)
 	}
 	return int(port), nil
+}
+
+// ValidateXrayDNSRouting rejects virtual DNS inbound policies that sing-box's
+// DNS clients cannot reproduce. An unused DNS tag is harmless metadata.
+func ValidateXrayDNSRouting(dns, routing map[string]any) error {
+	tags := map[string]bool{}
+	if tag := rawString(dns, "tag"); tag != "" {
+		tags[tag] = true
+	}
+	servers, _ := dns["servers"].([]any)
+	for _, server := range servers {
+		if server, ok := server.(map[string]any); ok {
+			if tag := rawString(server, "tag"); tag != "" {
+				tags[tag] = true
+			}
+		}
+	}
+	rules, _ := routing["rules"].([]any)
+	for i, item := range rules {
+		rule, _ := item.(map[string]any)
+		for _, tag := range compatStringSlice(rule["inboundTag"]) {
+			if tags[tag] {
+				return fmt.Errorf("DNS virtual inbound tag %q used by routing rule %d cannot be translated to sing-box", tag, i+1)
+			}
+		}
+	}
+	return nil
 }

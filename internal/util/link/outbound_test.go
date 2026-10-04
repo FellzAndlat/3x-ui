@@ -354,8 +354,8 @@ func TestParseShadowsocks(t *testing.T) {
 			pass:   "secretpass",
 		},
 		{
-			name:   "modern with plugin query",
-			link:   "ss://" + modernUser + "@1.2.3.4:8388?plugin=v2ray-plugin#node",
+			name:   "modern without plugin query",
+			link:   "ss://" + modernUser + "@1.2.3.4:8388#node",
 			host:   "1.2.3.4",
 			port:   8388,
 			method: "aes-256-gcm",
@@ -523,14 +523,21 @@ func TestParseShadowsocksObfsLocalPlugin(t *testing.T) {
 	const httpObfs = "obfs-local;obfs=http;obfs-host=obfs.example.com"
 	for _, tc := range []struct {
 		name, query, wantHeader, wantHost string
+		unsupported                       bool
 	}{
-		{"http obfs becomes the tcp header", "plugin=" + url.QueryEscape(httpObfs), "http", "obfs.example.com"},
-		{"unencoded separators map the same way", "plugin=" + httpObfs, "http", "obfs.example.com"},
-		{"tls obfs has no xray header", "plugin=" + url.QueryEscape("obfs-local;obfs=tls"), "none", ""},
-		{"an unrelated plugin is left alone", "plugin=v2ray-plugin", "none", ""},
+		{"http obfs becomes the tcp header", "plugin=" + url.QueryEscape(httpObfs), "http", "obfs.example.com", false},
+		{"unencoded separators map the same way", "plugin=" + httpObfs, "http", "obfs.example.com", false},
+		{"tls obfs is not representable", "plugin=" + url.QueryEscape("obfs-local;obfs=tls"), "none", "", true},
+		{"an unsupported plugin is rejected", "plugin=v2ray-plugin", "none", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			res, err := ParseLink("ss://" + user + "@1.2.3.4:8388/?" + tc.query + "#node")
+			if tc.unsupported {
+				if err == nil {
+					t.Fatal("unsupported plugin silently accepted")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("parse ss: %v", err)
 			}

@@ -540,7 +540,32 @@ func normalizeWireGuardAddresses(values []string) ([]string, error) {
 }
 
 func normalizeWireGuardReserved(v any) ([]int, error) {
-	reserved := compatIntSlice(v)
+	if v == nil {
+		return nil, nil
+	}
+	var reserved []int
+	switch values := v.(type) {
+	case []int:
+		reserved = append([]int(nil), values...)
+	case []any:
+		for _, value := range values {
+			var n int
+			switch value := value.(type) {
+			case int:
+				n = value
+			case float64:
+				if value < 0 || value > 255 || value != float64(int(value)) {
+					return nil, fmt.Errorf("reserved must contain integer bytes")
+				}
+				n = int(value)
+			default:
+				return nil, fmt.Errorf("reserved must contain integer bytes")
+			}
+			reserved = append(reserved, n)
+		}
+	default:
+		return nil, fmt.Errorf("reserved must be an array of bytes")
+	}
 	if len(reserved) == 0 {
 		return nil, nil
 	}
@@ -588,7 +613,7 @@ func rawBool(m map[string]any, key string) bool {
 
 func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 	protocol := strings.ToLower(strings.TrimSpace(rawString(raw, "protocol")))
-	if protocol == "tunnel" || protocol == "wireguard" || protocol == "mtproto" || protocol == "amneziawg" || protocol == "tuic" || protocol == "mieru" || protocol == "pingtunnel" || protocol == "trusttunnel" {
+	if protocol == "tun" || protocol == "tunnel" || protocol == "wireguard" || protocol == "mtproto" || protocol == "amneziawg" || protocol == "tuic" || protocol == "mieru" || protocol == "pingtunnel" || protocol == "trusttunnel" {
 		return nil, fmt.Errorf("sing-box does not support Xray inbound protocol %q", protocol)
 	}
 	out := map[string]any{"tag": rawString(raw, "tag")}
@@ -763,6 +788,9 @@ func TranslateXrayInbound(raw map[string]any) (map[string]any, error) {
 			return nil, err
 		}
 	}
+	if err := translateInboundCompatibility(out, raw); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -779,24 +807,20 @@ func TranslateShadowTLSWrappedInbound(raw map[string]any) (map[string]any, map[s
 	}
 	settings := rawObject(raw, "settings")
 	transport := rawObject(settings, "shadowTls")
-	password := strings.TrimSpace(rawString(transport, "password"))
-	if password == "" {
+	password := rawString(transport, "password")
+	if strings.TrimSpace(password) == "" {
 		return nil, nil, fmt.Errorf("inbound %q has no ShadowTLS transport password", rawString(raw, "tag"))
 	}
-	inner, err := TranslateXrayInbound(raw)
+	innerRaw := raw
+	if protocol == model.Mixed {
+		innerRaw = maps.Clone(raw)
+		innerSettings := maps.Clone(settings)
+		delete(innerSettings, "udp") // The inner listener is injected by TCP ShadowTLS.
+		innerRaw["settings"] = innerSettings
+	}
+	inner, err := TranslateXrayInbound(innerRaw)
 	if err != nil {
 		return nil, nil, err
-	}
-	if protocol == model.HTTP || protocol == model.Mixed {
-		accounts, _ := settings["accounts"].([]any)
-		users := make([]map[string]any, 0, len(accounts))
-		for _, entry := range accounts {
-			account, _ := entry.(map[string]any)
-			if user, pass := rawString(account, "user"), rawString(account, "pass"); user != "" && pass != "" {
-				users = append(users, map[string]any{"username": user, "password": pass})
-			}
-		}
-		inner["users"] = users
 	}
 	delete(inner, "listen")
 	delete(inner, "listen_port")
@@ -859,6 +883,14 @@ func TranslateShadowTLSInnerInbound(raw map[string]any) (map[string]any, error) 
 
 func translateUsers(out map[string]any, protocol string, settings map[string]any) error {
 	clients, _ := settings["clients"].([]any)
+	if protocol == "http" || protocol == "socks" || protocol == "mixed" {
+		// Xray proxy accounts and panel-managed clients use different names.
+		accounts, err := rawAccounts(settings)
+		if err != nil {
+			return err
+		}
+		clients = append(clients, accounts...)
+	}
 	users := make([]map[string]any, 0, len(clients))
 	for _, item := range clients {
 		client, ok := item.(map[string]any)
@@ -875,6 +907,9 @@ func translateUsers(out map[string]any, protocol string, settings map[string]any
 		case "vless", "vmess":
 			if id, ok := client["id"].(string); ok && id != "" {
 				user["uuid"] = id
+			}
+			if protocol == "vmess" {
+				user["alterId"] = rawInt(client, "alterId")
 			}
 			if flow, ok := client["flow"].(string); ok && flow != "" && protocol == "vless" {
 				user["flow"] = flow
@@ -976,7 +1011,10 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 	}
 	if len(stream) == 0 {
 		if protocol == "hysteria" || protocol == "hysteria2" {
-			return translateHysteriaStream(out, protocol, stream, inbound)
+			if err := translateHysteriaStream(out, protocol, stream, inbound); err != nil {
+				return err
+			}
+			return translateFinalMask(out, stream, protocol, inbound)
 		}
 		return nil
 	}
@@ -1018,9 +1056,17 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 				break
 			}
 		}
+		if inbound {
+			if err := translateInboundTLSCompatibility(t, tls, rawString(out, "tag")); err != nil {
+				return err
+			}
+		}
 		out["tls"] = t
 	case "reality":
 		reality := rawObject(stream, "realitySettings")
+		if err := rejectXrayFields(reality, fmt.Sprintf("%s %q REALITY", map[bool]string{true: "inbound", false: "outbound"}[inbound], rawString(out, "tag")), "minClientVer", "maxClientVer", "mldsa65Seed", "mldsa65Verify", "xver", "limitFallbackUpload", "limitFallbackDownload"); err != nil {
+			return err
+		}
 		tlsSettings := rawObject(stream, "tlsSettings")
 		t := map[string]any{"enabled": true}
 		r := map[string]any{"enabled": true}
@@ -1042,6 +1088,12 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 			if dest == "" {
 				dest = strings.TrimSpace(rawString(reality, "dest"))
 			}
+			if dest == "" && rawInt(reality, "target") > 0 {
+				dest = net.JoinHostPort("127.0.0.1", strconv.Itoa(rawInt(reality, "target")))
+			}
+			if dest == "" && rawInt(reality, "dest") > 0 {
+				dest = net.JoinHostPort("127.0.0.1", strconv.Itoa(rawInt(reality, "dest")))
+			}
 			if dest == "" {
 				dest = serverName
 			}
@@ -1051,6 +1103,9 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 			host, port, err := parseRealityDestination(dest)
 			if err != nil {
 				return fmt.Errorf("inbound %q has invalid REALITY destination %q: %w", rawString(out, "tag"), dest, err)
+			}
+			if difference := rawInt(reality, "maxTimeDiff"); difference > 0 {
+				r["max_time_difference"] = fmt.Sprintf("%dms", difference)
 			}
 			r["handshake"] = map[string]any{
 				"server":          host,
@@ -1097,6 +1152,9 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 			if fingerprint == "" {
 				fingerprint = "chrome"
 			}
+			if fingerprint == "unsafe" {
+				return fmt.Errorf("outbound %q: REALITY requires a supported uTLS fingerprint", rawString(out, "tag"))
+			}
 			t["utls"] = map[string]any{"enabled": true, "fingerprint": fingerprint}
 		}
 		t["reality"] = r
@@ -1111,11 +1169,23 @@ func translateStream(out map[string]any, protocol string, stream map[string]any,
 	network := strings.ToLower(strings.TrimSpace(rawString(stream, "network")))
 	if protocol == "hysteria2" || protocol == "hysteria" {
 		if network == "hysteria" || network == "" {
-			return translateHysteriaStream(out, protocol, stream, inbound)
+			if err := translateHysteriaStream(out, protocol, stream, inbound); err != nil {
+				return err
+			}
+			return translateFinalMask(out, stream, protocol, inbound)
 		}
+	}
+	if err := translateFinalMask(out, stream, protocol, inbound); err != nil {
+		return err
 	}
 	switch network {
 	case "", "tcp", "raw":
+		for _, key := range []string{"tcpSettings", "rawSettings"} {
+			header := rawObject(rawObject(stream, key), "header")
+			if kind := rawString(header, "type"); kind != "" && kind != "none" {
+				return fmt.Errorf("connection %q: TCP header %q is not wire-compatible with sing-box", rawString(out, "tag"), kind)
+			}
+		}
 		return nil
 	case "ws":
 		ws := rawObject(stream, "wsSettings")
@@ -1261,11 +1331,11 @@ func translateHysteriaStream(out map[string]any, protocol string, stream map[str
 		return fmt.Errorf("%s %q has inconsistent Hysteria version %d", direction, rawString(out, "tag"), version)
 	}
 	if protocol == "hysteria" {
-		up := rawInt(settings, "up_mbps")
+		up := hysteriaBandwidth(settings, "up_mbps", "upMbps", "up")
 		if up <= 0 {
 			up = rawInt(settings, "up")
 		}
-		down := rawInt(settings, "down_mbps")
+		down := hysteriaBandwidth(settings, "down_mbps", "downMbps", "down")
 		if down <= 0 {
 			down = rawInt(settings, "down")
 		}
@@ -1274,16 +1344,19 @@ func translateHysteriaStream(out map[string]any, protocol string, stream map[str
 		}
 		out["up_mbps"] = up
 		out["down_mbps"] = down
+		if obfs := rawString(settings, "obfs"); obfs != "" {
+			out["obfs"] = obfs
+		}
 	}
 	if protocol == "hysteria2" {
-		up := rawInt(settings, "up_mbps")
+		up := hysteriaBandwidth(settings, "up_mbps", "upMbps", "up")
 		if up <= 0 {
 			up = rawInt(settings, "up")
 		}
 		if up > 0 {
 			out["up_mbps"] = up
 		}
-		down := rawInt(settings, "down_mbps")
+		down := hysteriaBandwidth(settings, "down_mbps", "downMbps", "down")
 		if down <= 0 {
 			down = rawInt(settings, "down")
 		}
@@ -1335,7 +1408,23 @@ func translateHysteriaStream(out map[string]any, protocol string, stream map[str
 			}
 		}
 	}
+	if timeout := rawInt(settings, "udpIdleTimeout"); timeout > 0 {
+		if inbound {
+			out["udp_timeout"] = fmt.Sprintf("%ds", timeout)
+		} else {
+			// Hysteria outbound has no UDP association timeout field.
+			// The panel emits 60 as a default even when it was not user configured.
+			if timeout != 60 {
+				return fmt.Errorf("outbound %q: Hysteria udpIdleTimeout cannot be represented", rawString(out, "tag"))
+			}
+		}
+	}
 	if masquerade := rawObject(settings, "masquerade"); inbound && len(masquerade) > 0 && protocol == "hysteria2" {
+		for _, key := range []string{"insecure", "xForwarded", "x_forwarded"} {
+			if isMeaningfulCompatValue(masquerade[key]) {
+				return fmt.Errorf("inbound %q Hysteria2 masquerade %s cannot be represented by sing-box", rawString(out, "tag"), key)
+			}
+		}
 		m := map[string]any{}
 		switch strings.ToLower(strings.TrimSpace(rawString(masquerade, "type"))) {
 		case "proxy":
@@ -1438,4 +1527,13 @@ func firstObject(m map[string]any, key string) map[string]any {
 	}
 	value, _ := values[0].(map[string]any)
 	return value
+}
+
+func hysteriaBandwidth(settings map[string]any, keys ...string) int {
+	for _, key := range keys {
+		if value := rawInt(settings, key); value > 0 {
+			return value
+		}
+	}
+	return 0
 }

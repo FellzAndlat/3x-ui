@@ -24,16 +24,23 @@ func TestOutboundSubscriptionCreatePropagatesAllocationDatabaseFailures(t *testi
 	db := database.GetDB()
 	const callback = "test:fail_outbound_subscription_query"
 	errInjected := errors.New("injected outbound subscription query failure")
-	if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+	failAllocation := func(tx *gorm.DB) {
 		if tx.Statement != nil && tx.Statement.Table == "outbound_subscriptions" {
 			tx.AddError(errInjected)
 		}
-	}); err != nil {
+	}
+	if err := db.Callback().Query().Before("gorm:query").Register(callback, failAllocation); err != nil {
 		t.Fatalf("register query callback: %v", err)
+	}
+	if err := db.Callback().Row().Before("gorm:row").Register(callback, failAllocation); err != nil {
+		t.Fatalf("register row callback: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := db.Callback().Query().Remove(callback); err != nil {
 			t.Errorf("remove query callback: %v", err)
+		}
+		if err := db.Callback().Row().Remove(callback); err != nil {
+			t.Errorf("remove row callback: %v", err)
 		}
 	})
 
@@ -43,7 +50,7 @@ func TestOutboundSubscriptionCreatePropagatesAllocationDatabaseFailures(t *testi
 		operation string
 	}{
 		{name: "default prefix query", tagPrefix: "", operation: "prefix allocation"},
-		{name: "priority count query", tagPrefix: "custom-", operation: "priority allocation"},
+		{name: "maximum priority query", tagPrefix: "custom-", operation: "priority allocation"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			created, err := (&OutboundSubscriptionService{}).Create("test", "https://1.1.1.1/sub", tc.tagPrefix, "", true, 600, false, false, false)

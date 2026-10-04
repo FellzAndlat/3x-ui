@@ -17,6 +17,8 @@ import (
 func buildSingBoxBatchTestConfig(source *xray.Config) (*singbox.Config, error) {
 	cfg := singbox.NewConfig()
 	cfg.Log = map[string]any{"level": "warn"}
+	// A probe must never bind the production Clash controller.
+	cfg.Experimental = map[string]any{"clash_api": map[string]any{"external_controller": ""}}
 	cfg.Outbounds = nil
 	var outbounds []map[string]any
 	if err := json.Unmarshal(source.OutboundConfigs, &outbounds); err != nil {

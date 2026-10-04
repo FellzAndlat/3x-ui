@@ -41,7 +41,7 @@ func (s *SubClashService) clashProxyFromExternal(rawLink, name string) map[strin
 		proxy["server"] = fmt.Sprint(vn["address"])
 		proxy["port"] = clashInt(vn["port"])
 		proxy["uuid"] = fmt.Sprint(user["id"])
-		proxy["alterId"] = 0
+		proxy["alterId"] = clashInt(user["alterId"])
 		cipher, _ := user["security"].(string)
 		if cipher == "" {
 			cipher = "auto"
@@ -52,6 +52,9 @@ func (s *SubClashService) clashProxyFromExternal(rawLink, name string) map[strin
 		proxy["server"] = fmt.Sprint(settings["address"])
 		proxy["port"] = clashInt(settings["port"])
 		proxy["uuid"] = fmt.Sprint(settings["id"])
+		if encryption, _ := settings["encryption"].(string); encryption != "" && encryption != "none" {
+			proxy["encryption"] = encryption
+		}
 		if flow, _ := settings["flow"].(string); flow != "" {
 			proxy["flow"] = flow
 		}
@@ -125,16 +128,58 @@ func clashHysteriaFromExternal(settings, stream map[string]any, name string) map
 		"password": auth,
 		"udp":      true,
 	}
-	if tls, _ := stream["tlsSettings"].(map[string]any); tls != nil {
-		if sni, _ := tls["serverName"].(string); sni != "" {
-			proxy["sni"] = sni
+	if !(&SubClashService{}).applySecurity(proxy, "tls", stream) {
+		return nil
+	}
+	delete(proxy, "tls") // Hysteria2 always uses QUIC TLS.
+	finalmask, _ := stream["finalmask"].(map[string]any)
+	masks, _ := finalmask["udp"].([]any)
+	for _, item := range masks {
+		mask, _ := item.(map[string]any)
+		settings, _ := mask["settings"].(map[string]any)
+		switch mask["type"] {
+		case "salamander":
+			password, _ := settings["password"].(string)
+			if password == "" {
+				return nil
+			}
+			proxy["obfs"], proxy["obfs-password"] = "salamander", password
+			if size, _ := settings["packetSize"].(string); size != "" {
+				if parseHysteriaPacketSize(size) == "" {
+					return nil
+				}
+				min, max := splitHysteriaPacketSize(size)
+				proxy["obfs"] = "gecko"
+				proxy["obfs-min-packet-size"], _ = strconv.Atoi(min)
+				proxy["obfs-max-packet-size"], _ = strconv.Atoi(max)
+			}
+		case "udphop":
+			if settings["mode"] != "intervalremote" {
+				return nil
+			}
+			if interval, _ := settings["interval"].(string); interval != "" {
+				parts := strings.Split(interval, "-")
+				if len(parts) > 2 {
+					return nil
+				}
+				min, err := strconv.Atoi(parts[0])
+				if err != nil || min <= 0 {
+					return nil
+				}
+				if len(parts) == 2 {
+					max, err := strconv.Atoi(parts[1])
+					if err != nil || max < min {
+						return nil
+					}
+				}
+				proxy["hop-interval"] = interval
+			}
+		default:
+			return nil
 		}
-		if alpn := clashStringList(tls["alpn"]); len(alpn) > 0 {
-			proxy["alpn"] = alpn
-		}
-		if fp, _ := tls["fingerprint"].(string); fp != "" {
-			proxy["client-fingerprint"] = fp
-		}
+	}
+	if ports := hysteriaHopPorts(stream); ports != "" {
+		proxy["ports"] = ports
 	}
 	return proxy
 }
@@ -175,6 +220,18 @@ func clashWireguardFromExternal(settings map[string]any, name string) map[string
 		} else {
 			proxy["ip"] = ip
 		}
+	}
+	if mtu := clashInt(settings["mtu"]); mtu > 0 {
+		proxy["mtu"] = mtu
+	}
+	if keepalive := clashInt(peer["keepAlive"]); keepalive > 0 {
+		proxy["persistent-keepalive"] = keepalive
+	}
+	if reserved, exists := settings["reserved"]; exists {
+		proxy["reserved"] = reserved
+	}
+	if allowed := clashStringList(peer["allowedIPs"]); len(allowed) > 0 {
+		proxy["allowed-ips"] = allowed
 	}
 	return proxy
 }

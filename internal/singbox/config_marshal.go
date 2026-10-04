@@ -259,6 +259,11 @@ func validateSingBoxRequiredFields(outbound map[string]any, protocol, tag string
 func validateSingBoxOutbound(outbound map[string]any) error {
 	protocol := strings.ToLower(strings.TrimSpace(rawString(outbound, "type")))
 	tag := rawString(outbound, "tag")
+	if protocol == "hysteria" || protocol == "hysteria2" || protocol == "tuic" {
+		if utls := rawObject(rawObject(outbound, "tls"), "utls"); rawBool(utls, "enabled") {
+			return fmt.Errorf("sing-box QUIC outbound %q cannot use TCP uTLS", tag)
+		}
+	}
 	if err := validateSingBoxOutboundType(protocol, tag); err != nil {
 		return err
 	}
@@ -306,6 +311,11 @@ func validateSingBoxOutbound(outbound map[string]any) error {
 
 func stringSliceLength(value any) int {
 	switch values := value.(type) {
+	case string:
+		if strings.TrimSpace(values) != "" {
+			return 1
+		}
+		return 0
 	case []string:
 		return len(values)
 	case []any:
@@ -320,7 +330,10 @@ func validateWireGuardReserved(peer map[string]any, tag string, index int) error
 	if !exists {
 		return nil
 	}
-	reserved := compatIntSlice(value)
+	reserved, err := normalizeWireGuardReserved(value)
+	if err != nil {
+		return fmt.Errorf("sing-box WireGuard endpoint %q peer %d: %w", tag, index+1, err)
+	}
 	if len(reserved) != 3 {
 		return fmt.Errorf("sing-box WireGuard endpoint %q peer %d reserved must contain exactly 3 bytes", tag, index+1)
 	}
@@ -454,12 +467,12 @@ func (c *Config) MarshalJSON() ([]byte, error) {
 	clone.Endpoints = make([]map[string]any, 0, len(c.Endpoints))
 	clone.Route = normalizedRoute
 	clone.Experimental = experimental
-	if hasDNSServerTag(c.DNS, "local") {
+	if final := rawString(c.DNS, "final"); final != "" && hasDNSServerTag(c.DNS, final) {
 		if clone.Route == nil {
 			clone.Route = map[string]any{}
 		}
 		if _, exists := clone.Route["default_domain_resolver"]; !exists {
-			clone.Route["default_domain_resolver"] = "local"
+			clone.Route["default_domain_resolver"] = final
 		}
 	}
 	seen := make(map[string]string, len(normalizedOutbounds)+len(c.Endpoints))

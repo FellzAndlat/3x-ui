@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
@@ -130,9 +129,9 @@ func applyAutomaticXray(subs []*model.OutboundSubscription) (map[int]string, err
 	return applied, nil
 }
 func localAutomaticSelectorClient() (*singbox.SelectorClient, error) {
-	data, err := os.ReadFile(singbox.GetConfigPath())
-	if err != nil {
-		return nil, err
+	data := singBoxProcess.AppliedConfig()
+	if len(data) == 0 {
+		return nil, fmt.Errorf("sing-box has no applied runtime config")
 	}
 	var cfg struct {
 		Experimental struct {
@@ -142,7 +141,7 @@ func localAutomaticSelectorClient() (*singbox.SelectorClient, error) {
 			} `json:"clash_api"`
 		} `json:"experimental"`
 	}
-	if err = json.Unmarshal(data, &cfg); err != nil {
+	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
 	return singbox.NewSelectorClient(cfg.Experimental.ClashAPI.Controller, cfg.Experimental.ClashAPI.Secret)

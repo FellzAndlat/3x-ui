@@ -171,6 +171,9 @@ func (s *SubJsonService) GetJson(subId string, host string, alwaysReturnArray bo
 				hasEnabledClient = true
 			}
 			seenEmails[client.Email] = struct{}{}
+			if !client.Enable {
+				continue
+			}
 			configs := s.getConfig(subReq, inbound, client, host)
 			if len(configs) == 0 {
 				return "", "", errSubscriptionFormatUnsupported
@@ -330,6 +333,16 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 			hasEnabledClient = hasEnabledClient || client.Enable
 		}
 	}
+	// Disabled clients contribute metadata but must not make an unsupported
+	// protocol veto the formats available to the remaining active clients.
+	inbounds = slices.DeleteFunc(inbounds, func(inbound *model.Inbound) bool {
+		active := false
+		for _, client := range clientsFor(inbound) {
+			seenEmails[client.Email] = struct{}{}
+			active = active || client.Enable
+		}
+		return !active
+	})
 	if len(inbounds) == 0 && len(externalLinks) == 0 {
 		emails := make([]string, 0, len(seenEmails))
 		for email := range seenEmails {
@@ -509,6 +522,9 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 			if client.Enable {
 				hasEnabledClient = true
 			}
+			if !client.Enable {
+				continue
+			}
 			if model.ShadowTLSTransport(inbound.Settings) != nil {
 				generated := 0
 				if inbound.Protocol == model.AnyTLS {
@@ -524,7 +540,8 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 						}
 					}
 				} else {
-					for _, raw := range s.getConfig(subReq, inbound, client, host) {
+					var endpointCopies []map[string]any
+					for index, raw := range s.getConfig(subReq, inbound, client, host, &endpointCopies) {
 						var profile map[string]any
 						if json.Unmarshal(raw, &profile) != nil {
 							continue
@@ -541,7 +558,7 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 						// global FinalMask or TLS defaults in the JSON template.
 						xray["streamSettings"] = map[string]any{"network": "tcp", "security": "none"}
 						native, err := singbox.TranslateXrayOutbound(xray)
-						if err != nil || !s.wrapNativeShadowTLS(inbound, native, nil) {
+						if err != nil || !s.wrapNativeShadowTLS(inbound, native, endpointCopies[index]) {
 							continue
 						}
 						generated++
@@ -1168,7 +1185,7 @@ func (s *SubJsonService) buildBalancerConfig(balancer *model.SubBalancer, entrie
 	return config
 }
 
-func (s *SubJsonService) getConfig(subReq *SubService, inbound *model.Inbound, client model.Client, host string) []json_util.RawMessage {
+func (s *SubJsonService) getConfig(subReq *SubService, inbound *model.Inbound, client model.Client, host string, endpointCopies ...*[]map[string]any) []json_util.RawMessage {
 	var newJsonArray []json_util.RawMessage
 	stream := s.streamData(inbound.StreamSettings, subKey(client))
 
@@ -1302,6 +1319,9 @@ func (s *SubJsonService) getConfig(subReq *SubService, inbound *model.Inbound, c
 
 		newConfig, _ := json.MarshalIndent(newConfigJson, "", "  ")
 		newJsonArray = append(newJsonArray, newConfig)
+		if len(endpointCopies) > 0 && endpointCopies[0] != nil {
+			*endpointCopies[0] = append(*endpointCopies[0], maps.Clone(extPrxy))
+		}
 	}
 
 	return newJsonArray
@@ -1426,7 +1446,9 @@ func (s *SubJsonService) realityData(rData map[string]any, clientKey string) map
 		rltyData["shortId"] = ""
 	}
 	serverNames, ok := rData["serverNames"].([]any)
-	if ok && len(serverNames) > 0 {
+	if name, _ := rltyClientSettings["serverName"].(string); name != "" {
+		rltyData["serverName"] = name
+	} else if ok && len(serverNames) > 0 {
 		rltyData["serverName"], _ = serverNames[random.Num(len(serverNames))].(string)
 	} else {
 		rltyData["serverName"] = ""
@@ -1604,7 +1626,13 @@ func (s *SubJsonService) wrapNativeShadowTLS(inbound *model.Inbound, inner map[s
 		if override, ok := externalProxySNI(endpoint); ok && strings.TrimSpace(override) != "" {
 			wildcard, _ := transport["wildcardSni"].(string)
 			named, _ := transport["handshakeForServerName"].(map[string]any)
-			_, hasNamedSNI := named[strings.ToLower(strings.TrimSpace(override))]
+			hasNamedSNI := false
+			for name := range named {
+				if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(override)) {
+					hasNamedSNI = true
+					break
+				}
+			}
 			if wildcard == "all" || wildcard == "authed" || net.ParseIP(sni) != nil || hasNamedSNI {
 				sni = strings.TrimSpace(override)
 			}
@@ -1816,6 +1844,17 @@ func (s *SubJsonService) genNativeTUIC(inbound *model.Inbound, stream map[string
 		settings["congestion_control"] = inst.CongestionControl
 		settings["udp_relay_mode"] = inst.UDPRelayMode
 		settings["zero_rtt_handshake"] = inst.ZeroRTTHandshake
+		stream = maps.Clone(stream)
+		tls, _ := stream["tlsSettings"].(map[string]any)
+		tls = maps.Clone(tls)
+		if tls == nil {
+			tls = map[string]any{}
+		}
+		if len(inst.ALPN) > 0 {
+			tls["alpn"] = inst.ALPN
+		}
+		stream["tlsSettings"] = tls
+		stream["security"] = "tls"
 	}
 	raw := map[string]any{
 		"protocol":       "tuic",
@@ -1865,13 +1904,15 @@ func (s *SubJsonService) genHy(inbound *model.Inbound, newStream map[string]any,
 	}
 	for _, key := range []string{
 		"up_mbps", "down_mbps", "hop_interval", "hop_interval_max",
+		"upMbps", "downMbps", "up", "down", "hopInterval", "hopIntervalMax",
+		"bbrProfile", "disableChromeParrot", "ignoreClientBandwidth",
 		"bbr_profile", "disable_chrome_parrot", "ignore_client_bandwidth",
 	} {
 		if value, ok := hyStream[key]; ok {
 			outHyStream[key] = value
 		}
 	}
-	if obfs, ok := hyStream["obfs"].(map[string]any); ok && len(obfs) > 0 {
+	if obfs, ok := hyStream["obfs"]; ok {
 		outHyStream["obfs"] = obfs
 	}
 	newStream["hysteriaSettings"] = outHyStream

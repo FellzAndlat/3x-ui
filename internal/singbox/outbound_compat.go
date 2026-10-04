@@ -52,10 +52,10 @@ func translateHTTPOutboundOptions(out map[string]any, settings map[string]any) {
 }
 
 func translateFlatProxyCredentials(out map[string]any, settings map[string]any) {
-	if username := compatStringOption(settings, "user", "username"); username != "" {
+	if username := credentialOption(settings, "user", "username"); username != "" {
 		out["username"] = username
 	}
-	if password := compatStringOption(settings, "pass", "password"); password != "" {
+	if password := credentialOption(settings, "pass", "password"); password != "" {
 		out["password"] = password
 	}
 }
@@ -253,6 +253,11 @@ func translateOutboundTLSCompatibility(out map[string]any, stream map[string]any
 	}
 
 	fingerprint := strings.ToLower(strings.TrimSpace(rawString(tlsIn, "fingerprint")))
+	// Xray TCP fingerprints do not apply to QUIC; uTLS cannot provide its TLS config.
+	quic := rawString(out, "type") == "hysteria2" || rawString(out, "type") == "tuic" || rawString(out, "type") == "hysteria"
+	if quic {
+		fingerprint = "unsafe"
+	}
 	switch fingerprint {
 	case "":
 		// Xray defaults to the Chrome fingerprint when no explicit value is set.
@@ -381,7 +386,11 @@ func translateV2RayPacketEncoding(out map[string]any, settings map[string]any, p
 		return nil
 	case "none":
 		if !specialVisionUDP443 {
-			delete(out, "packet_encoding")
+			if protocol == "vless" {
+				out["packet_encoding"] = ""
+			} else {
+				delete(out, "packet_encoding")
+			}
 		}
 		return nil
 	case "xudp":
@@ -481,6 +490,9 @@ func translateOutboundSockopt(out map[string]any, stream map[string]any, tag str
 	if len(sockopt) == 0 {
 		return nil
 	}
+	if err := rejectXrayFields(sockopt, fmt.Sprintf("outbound %q sockopt", tag), "customSockopt", "happyEyeballs", "tcpCongestion", "tcpcongestion", "tcpMaxSeg", "tcpUserTimeout", "tcpWindowClamp", "V6Only", "tproxy", "addressPortStrategy"); err != nil {
+		return err
+	}
 	if bindInterface := strings.TrimSpace(rawString(sockopt, "interface")); bindInterface != "" {
 		out["bind_interface"] = bindInterface
 	}
@@ -518,57 +530,6 @@ func translateOutboundSockopt(out map[string]any, stream map[string]any, tag str
 	return nil
 }
 
-func ensureOutboundDomainResolver(out map[string]any) {
-	if _, exists := out["domain_resolver"]; exists {
-		return
-	}
-	if strings.TrimSpace(rawString(out, "detour")) != "" {
-		return
-	}
-	server := strings.TrimSpace(rawString(out, "server"))
-	if server == "" {
-		return
-	}
-	if ip := net.ParseIP(strings.Trim(server, "[]")); ip != nil {
-		return
-	}
-	out["domain_resolver"] = "local"
-}
-
-func wireGuardPeerUsesDomain(peer map[string]any) bool {
-	address := strings.TrimSpace(rawString(peer, "address"))
-	if address == "" {
-		return false
-	}
-	return net.ParseIP(strings.Trim(address, "[]")) == nil
-}
-
-func ensureWireGuardEndpointDomainResolver(endpoint map[string]any) {
-	if _, exists := endpoint["domain_resolver"]; exists {
-		return
-	}
-	if strings.TrimSpace(rawString(endpoint, "detour")) != "" {
-		return
-	}
-	switch peers := endpoint["peers"].(type) {
-	case []map[string]any:
-		for _, peer := range peers {
-			if wireGuardPeerUsesDomain(peer) {
-				endpoint["domain_resolver"] = "local"
-				return
-			}
-		}
-	case []any:
-		for _, item := range peers {
-			peer, ok := item.(map[string]any)
-			if ok && wireGuardPeerUsesDomain(peer) {
-				endpoint["domain_resolver"] = "local"
-				return
-			}
-		}
-	}
-}
-
 func applyXrayWireGuardEndpointCompatibility(endpoint map[string]any, raw map[string]any) error {
 	tag := rawString(raw, "tag")
 	if err := validateXrayOutboundOnlyOptions(raw, "wireguard", tag); err != nil {
@@ -580,7 +541,6 @@ func applyXrayWireGuardEndpointCompatibility(endpoint map[string]any, raw map[st
 	if err := translateOutboundSockopt(endpoint, rawObject(raw, "streamSettings"), tag); err != nil {
 		return err
 	}
-	ensureWireGuardEndpointDomainResolver(endpoint)
 	return nil
 }
 
@@ -623,6 +583,17 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 		return err
 	}
 	switch protocol {
+	case "freedom":
+		if err := rejectXrayFields(settings, fmt.Sprintf("outbound %q freedom", tag), "redirect", "fragment", "noise", "noises", "finalRules", "proxyProtocol"); err != nil {
+			return err
+		}
+		resolver, err := xrayDomainResolver(rawString(settings, "domainStrategy"), tag)
+		if err != nil {
+			return err
+		}
+		if resolver != nil {
+			out["domain_resolver"] = resolver
+		}
 	case "socks":
 		translateFlatProxyCredentials(out, settings)
 	case "http":
@@ -655,6 +626,24 @@ func applyXrayOutboundCompatibility(out map[string]any, raw map[string]any, stre
 	if err := translateOutboundSockopt(out, stream, tag); err != nil {
 		return err
 	}
-	ensureOutboundDomainResolver(out)
+	proxy := rawObject(raw, "proxySettings")
+	if detour := rawString(proxy, "tag"); detour != "" {
+		if xrayBool(proxy, "transportLayer") {
+			return fmt.Errorf("outbound %q: proxySettings.transportLayer cannot be represented", tag)
+		}
+		if current := rawString(out, "detour"); current != "" && current != detour {
+			return fmt.Errorf("outbound %q has conflicting proxySettings and dialerProxy", tag)
+		}
+		out["detour"] = detour
+	}
 	return nil
+}
+
+func credentialOption(settings map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, present := settings[key].(string); present {
+			return value
+		}
+	}
+	return ""
 }

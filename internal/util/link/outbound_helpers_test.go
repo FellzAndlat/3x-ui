@@ -8,23 +8,21 @@ import (
 	"testing"
 )
 
-func TestDefaultPort(t *testing.T) {
-	cases := []struct {
-		in   string
-		def  int
-		want int
+func TestParseLinkPort(t *testing.T) {
+	for _, tc := range []struct {
+		in        string
+		def, want int
+		invalid   bool
 	}{
-		{"", 443, 443},
-		{"8080", 443, 8080},
-		{"0", 443, 443},   // non-positive falls back
-		{"-1", 443, 443},  // negative falls back
-		{"abc", 443, 443}, // unparseable falls back
-		{"65535", 443, 65535},
-	}
-	for _, c := range cases {
-		if got := defaultPort(c.in, c.def); got != c.want {
-			t.Errorf("defaultPort(%q,%d) = %d, want %d", c.in, c.def, got, c.want)
-		}
+		{"", 443, 443, false}, {"8080", 443, 8080, false}, {"65535", 443, 65535, false},
+		{"0", 443, 0, true}, {"-1", 443, 0, true}, {"abc", 443, 0, true}, {"65536", 443, 0, true},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := parseLinkPort(tc.in, tc.def)
+			if (err != nil) != tc.invalid || !tc.invalid && got != tc.want {
+				t.Fatalf("parseLinkPort(%q, %d) = %d, %v", tc.in, tc.def, got, err)
+			}
+		})
 	}
 }
 
@@ -83,8 +81,8 @@ func TestDecodeHash(t *testing.T) {
 	if got := decodeHash(""); got != "" {
 		t.Errorf("decodeHash(empty) = %q, want empty", got)
 	}
-	if got := decodeHash("a%20b"); got != "a b" {
-		t.Errorf("decodeHash(a%%20b) = %q, want 'a b'", got)
+	if got := decodeHash("a%20b"); got != "a%20b" {
+		t.Errorf("decodeHash(a%%20b) = %q, want already-decoded fragment unchanged", got)
 	}
 	if got := decodeHash("plain"); got != "plain" {
 		t.Errorf("decodeHash(plain) = %q, want plain", got)

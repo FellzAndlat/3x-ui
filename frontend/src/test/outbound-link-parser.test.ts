@@ -432,12 +432,11 @@ describe('parseShadowsocksLink', () => {
     });
   });
 
-  it('leaves a plugin without an xray header alone', () => {
+  it('rejects a plugin whose wire format cannot be represented', () => {
     const userinfo = Base64.encode('aes-256-gcm:secretpass', true);
     const plugin = encodeURIComponent('obfs-local;obfs=tls');
     const link = `ss://${userinfo}@example.com:8388?plugin=${plugin}#user`;
-    const stream = parseShadowsocksLink(link)?.streamSettings as Record<string, unknown>;
-    expect((stream.tcpSettings as Record<string, unknown>).header).toMatchObject({ type: 'none' });
+    expect(parseShadowsocksLink(link)).toBeNull();
   });
 
   it('decodes URL-safe base64 userinfo (as the emitter writes it)', () => {

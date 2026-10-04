@@ -487,9 +487,9 @@ func (c *ConnectionAPIClient) normalizeTrafficSnapshot(response *connectionEvent
 // cumulative byte counters for the same connection IDs. We only use those
 // counters when the native Naive delta is zero, so normal native accounting is
 // never double-counted.
-func (c *ConnectionAPIClient) applyNaiveClashFallback(ctx context.Context, response *connectionEvents) {
+func (c *ConnectionAPIClient) applyNaiveClashFallback(ctx context.Context, response *connectionEvents) bool {
 	if response == nil || len(response.Events) == 0 {
-		return
+		return false
 	}
 	needFallback := false
 	for _, event := range response.Events {
@@ -499,12 +499,12 @@ func (c *ConnectionAPIClient) applyNaiveClashFallback(ctx context.Context, respo
 		}
 	}
 	if !needFallback {
-		return
+		return false
 	}
 
 	connections, err := NewClashStatsClient().Connections(ctx)
 	if err != nil {
-		return
+		return false
 	}
 	byID := make(map[string]ClashConnection, len(connections))
 	for _, connection := range connections {
@@ -540,8 +540,9 @@ func (c *ConnectionAPIClient) applyNaiveClashFallback(ctx context.Context, respo
 			down = 0
 		}
 		previous, exists := c.naiveFallbackSnapshots[id]
-		fallbackUp := snapshotTrafficDelta(up, previous.uplink, exists, false)
-		fallbackDown := snapshotTrafficDelta(down, previous.downlink, exists, false)
+		countInitial := c.naiveFallbackAt > 0 && event.Connection.CreatedAt >= c.naiveFallbackAt
+		fallbackUp := snapshotTrafficDelta(up, previous.uplink, exists, countInitial)
+		fallbackDown := snapshotTrafficDelta(down, previous.downlink, exists, countInitial)
 		if event.UplinkDelta == 0 {
 			event.UplinkDelta = fallbackUp
 		}
@@ -561,6 +562,7 @@ func (c *ConnectionAPIClient) applyNaiveClashFallback(ctx context.Context, respo
 		snapshot.missingSnapshots++
 		c.naiveFallbackSnapshots[id] = snapshot
 	}
+	return true
 }
 
 // SnapshotTrafficEvents is a low-allocation variant used by the traffic poll.
@@ -576,7 +578,9 @@ func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connec
 	// the server builds this snapshot but before the next poll, CreatedAt remains
 	// on the correct side of the boundary and its initial bytes are counted once.
 	snapshotAt := time.Now().UnixMilli()
-	stream, err := c.conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, "/daemon.StartedService/SubscribeConnections", grpc.ForceCodec(connectionAPIProtoCodec{trafficOnly: true}))
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := c.conn.NewStream(streamCtx, &grpc.StreamDesc{ServerStreams: true}, "/daemon.StartedService/SubscribeConnections", grpc.ForceCodec(connectionAPIProtoCodec{trafficOnly: true}))
 	if err != nil {
 		c.Close()
 		return connectionEvents{}, err
@@ -595,7 +599,11 @@ func (c *ConnectionAPIClient) SnapshotTrafficEvents(ctx context.Context) (connec
 		return connectionEvents{}, err
 	}
 	c.normalizeTrafficSnapshot(&response, snapshotAt)
-	c.applyNaiveClashFallback(ctx, &response)
+	if c.applyNaiveClashFallback(ctx, &response) {
+		c.trafficMu.Lock()
+		c.naiveFallbackAt = snapshotAt
+		c.trafficMu.Unlock()
+	}
 	return response, nil
 }
 
@@ -605,6 +613,7 @@ type ConnectionAPIClient struct {
 	trafficSnapshots       map[string]connectionTrafficSnapshot
 	naiveFallbackSnapshots map[string]connectionTrafficSnapshot
 	trafficSnapshotAt      int64
+	naiveFallbackAt        int64
 }
 
 func NewConnectionAPIClient() *ConnectionAPIClient { return &ConnectionAPIClient{} }
@@ -622,7 +631,7 @@ func (c *ConnectionAPIClient) connFor(ctx context.Context) error {
 	dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	//nolint:staticcheck // DialContext/WithBlock preserve bounded synchronous dial semantics.
-	conn, err := grpc.DialContext(dialCtx, singBoxAPIAddress, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	conn, err := grpc.DialContext(dialCtx, singBoxAPIAddress, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(64<<20)))
 	if err != nil {
 		return err
 	}
@@ -651,7 +660,9 @@ func (c *ConnectionAPIClient) SnapshotEvents(ctx context.Context) (connectionEve
 	if err := c.connFor(ctx); err != nil {
 		return connectionEvents{}, err
 	}
-	stream, err := c.conn.NewStream(ctx, &grpc.StreamDesc{ServerStreams: true}, "/daemon.StartedService/SubscribeConnections", grpc.ForceCodec(connectionAPIProtoCodec{}))
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := c.conn.NewStream(streamCtx, &grpc.StreamDesc{ServerStreams: true}, "/daemon.StartedService/SubscribeConnections", grpc.ForceCodec(connectionAPIProtoCodec{}))
 	if err != nil {
 		c.Close()
 		return connectionEvents{}, err
@@ -704,4 +715,15 @@ func (c *ConnectionAPIClient) Snapshot(ctx context.Context) ([]*singBoxConnectio
 		}
 	}
 	return connections, nil
+}
+
+// ResetTrafficBaseline distinguishes a newly started core from a panel that
+// reconnects to an existing core whose totals may already be in the database.
+func (c *ConnectionAPIClient) ResetTrafficBaseline(startedAt int64) {
+	c.trafficMu.Lock()
+	defer c.trafficMu.Unlock()
+	c.trafficSnapshots = nil
+	c.naiveFallbackSnapshots = nil
+	c.trafficSnapshotAt = startedAt
+	c.naiveFallbackAt = startedAt
 }

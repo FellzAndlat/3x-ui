@@ -15,6 +15,7 @@ import (
 
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawg"
 	"github.com/SawaMEN/3x-ui/v3/internal/amneziawgnet"
+	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/externalvpn"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
@@ -36,6 +37,8 @@ var (
 	singBoxPendingInbound []*xray.Traffic
 	singBoxPendingClients []*xray.ClientTraffic
 	singBoxInstallMu      sync.Mutex
+	singBoxApplyMu        sync.Mutex
+	singBoxTemplateMu     sync.Mutex
 )
 
 // SetSingBoxDependencies wires the panel services used by the sing-box
@@ -53,7 +56,7 @@ type SingBoxService struct{}
 
 func singBoxInboundRequiresUsers(protocol model.Protocol) bool {
 	switch protocol {
-	case model.VLESS, model.VMESS, model.Trojan, model.Snell, model.NaiveProxy, model.Hysteria, model.ShadowTLS, model.AnyTLS, model.TUIC:
+	case model.VLESS, model.VMESS, model.Shadowsocks, model.Trojan, model.Snell, model.NaiveProxy, model.Hysteria, model.ShadowTLS, model.AnyTLS, model.TUIC:
 		return true
 	default:
 		return false
@@ -109,15 +112,19 @@ func singBoxTUICInbound(ib *model.Inbound, clients []any) (map[string]any, error
 	if inst.Port < 1 || inst.Port > 65535 {
 		return nil, fmt.Errorf("TUIC inbound %q has an invalid port", ib.Tag)
 	}
+	tls := map[string]any{"enabled": true, "alpn": inst.ALPN}
+	if strings.Contains(inst.Certificate, "-----BEGIN CERTIFICATE-----") {
+		tls["certificate"] = strings.Split(inst.Certificate, "\n")
+		tls["key"] = strings.Split(inst.PrivateKey, "\n")
+	} else {
+		tls["certificate_path"], tls["key_path"] = inst.Certificate, inst.PrivateKey
+	}
 	return map[string]any{
 		"type": "tuic", "tag": ib.Tag, "listen": listen, "listen_port": inst.Port,
 		"users": users, "congestion_control": inst.CongestionControl,
 		"auth_timeout":       fmt.Sprintf("%ds", inst.AuthenticationTimeout),
 		"zero_rtt_handshake": inst.ZeroRTTHandshake,
-		"tls": map[string]any{
-			"enabled": true, "certificate_path": inst.Certificate,
-			"key_path": inst.PrivateKey, "alpn": inst.ALPN,
-		},
+		"tls":                tls,
 	}, nil
 }
 
@@ -142,9 +149,16 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 
 	managedOutboundTags := map[string]bool{}
 	dnsOutboundTags := make(map[string]struct{})
-	if template, err := singBoxSettingService.GetXrayConfigTemplate(); err == nil {
+	template, templateErr := singBoxSettingService.GetXrayConfigTemplate()
+	if templateErr != nil {
+		return nil, templateErr
+	}
+	{
 		var xrayCfg map[string]any
-		if json.Unmarshal([]byte(template), &xrayCfg) == nil {
+		if err := json.Unmarshal([]byte(template), &xrayCfg); err != nil {
+			return nil, fmt.Errorf("parse Xray template: %w", err)
+		}
+		{
 			prepend, tail, err := (&OutboundSubscriptionService{}).activeOutboundsSplit()
 			if err != nil {
 				return nil, err
@@ -152,6 +166,10 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 			manual, _ := xrayCfg["outbounds"].([]any)
 			xrayCfg["outbounds"] = append(append(prepend, manual...), tail...)
 			if rawDNS, ok := xrayCfg["dns"].(map[string]any); ok && len(rawDNS) > 0 {
+				rawRouting, _ := xrayCfg["routing"].(map[string]any)
+				if err := singbox.ValidateXrayDNSRouting(rawDNS, rawRouting); err != nil {
+					return nil, fmt.Errorf("sing-box DNS routing: %w", err)
+				}
 				dns, err := singbox.TranslateXrayDNS(rawDNS)
 				if err != nil {
 					return nil, fmt.Errorf("sing-box DNS template: %w", err)
@@ -185,17 +203,23 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 			// sing-box 1.14 requires a resolver for domain-based outbound
 			// server addresses. Apply this after translated routing so the
 			// compatibility route cannot accidentally discard it.
-			cfg.Route["default_domain_resolver"] = "local"
+			cfg.Route["default_domain_resolver"] = cfg.DNS["final"]
 			if rawRouting, ok := xrayCfg["routing"].(map[string]any); ok {
 				if strategy := singbox.TranslateXrayDomainStrategy(fmt.Sprint(rawRouting["domainStrategy"])); strategy != "" {
 					cfg.Route["default_domain_resolver"] = map[string]any{
-						"server":   "local",
+						"server":   cfg.DNS["final"],
 						"strategy": strategy,
 					}
 				}
 			}
 			if rawBalancers, ok := xrayCfg["routing"].(map[string]any); ok {
-				balancers, err := singbox.TranslateXrayBalancers(rawBalancers)
+				var available []map[string]any
+				for _, value := range xrayCfg["outbounds"].([]any) {
+					if outbound, ok := value.(map[string]any); ok {
+						available = append(available, outbound)
+					}
+				}
+				balancers, err := singbox.TranslateXrayBalancers(rawBalancers, available...)
 				if err != nil {
 					return nil, err
 				}
@@ -204,7 +228,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 			if rawOutbounds, ok := xrayCfg["outbounds"].([]any); ok {
 				if len(rawOutbounds) > 0 {
 					if first, ok := rawOutbounds[0].(map[string]any); ok {
-						if tag, ok := first["tag"].(string); ok && strings.HasPrefix(tag, "sub-auto-") {
+						if tag, ok := first["tag"].(string); ok && tag != "" {
 							cfg.Route["final"] = tag
 						}
 					}
@@ -231,6 +255,12 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 						continue
 					}
 					if protocol, _ := ob["protocol"].(string); strings.EqualFold(strings.TrimSpace(protocol), "dns") {
+						settings, _ := ob["settings"].(map[string]any)
+						for _, key := range []string{"address", "port", "rewriteAddress", "rewritePort", "nonIPQuery"} {
+							if value, present := settings[key]; present && fmt.Sprint(value) != "" && fmt.Sprint(value) != "0" && fmt.Sprint(value) != "skip" {
+								return nil, fmt.Errorf("DNS outbound %v option %s cannot be preserved by hijack-dns", ob["tag"], key)
+							}
+						}
 						if tag, _ := ob["tag"].(string); strings.TrimSpace(tag) != "" {
 							dnsOutboundTags[tag] = struct{}{}
 						}
@@ -305,11 +335,16 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 	}
 
 	var unsupported []string
+	var sniffRules []any
 	for _, inbound := range inbounds {
 		if inbound == nil || !inbound.Enable || inbound.NodeID != nil || isLocalSidecarInbound(inbound.Protocol) {
 			continue
 		}
-		rawBytes, err := json.Marshal(inbound)
+		runtimeInbound, err := singBoxInboundService.buildInboundForNodePush(database.GetDB(), inbound)
+		if err != nil {
+			return nil, err
+		}
+		rawBytes, err := json.Marshal(runtimeInbound)
 		if err != nil {
 			return nil, err
 		}
@@ -320,7 +355,7 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 		stream, _ := raw["streamSettings"].(map[string]any)
 		network, _ := stream["network"].(string)
 		if strings.EqualFold(strings.TrimSpace(network), "xhttp") {
-			logger.Warningf("Skipping sing-box inbound %q: XHTTP transport is only supported by Xray", inbound.Tag)
+			unsupported = append(unsupported, fmt.Sprintf("%s: XHTTP transport is only supported by Xray", inbound.Tag))
 			continue
 		}
 		// Xray treats an empty inbound listen address as all interfaces. The
@@ -412,7 +447,8 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 			}
 			clients = append(clients, entry)
 		}
-		if singBoxInboundRequiresUsers(inbound.Protocol) && len(clients) == 0 {
+		managedProxy := (inbound.Protocol == model.HTTP || inbound.Protocol == model.Mixed) && len(dbClients) > 0
+		if (singBoxInboundRequiresUsers(inbound.Protocol) || managedProxy) && len(clients) == 0 {
 			logger.Warningf("Skipping sing-box inbound %q (%s): no active users", inbound.Tag, inbound.Protocol)
 			continue
 		}
@@ -430,7 +466,19 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 		if settings == nil {
 			settings = map[string]any{}
 		}
+		if managedProxy {
+			// A stale accounts copy must not re-enable disabled managed users.
+			delete(settings, "accounts")
+		}
 		settings["clients"] = clients
+		sniffRule, sniffErr := singbox.TranslateXraySniffingRule(raw)
+		if sniffErr != nil {
+			unsupported = append(unsupported, sniffErr.Error())
+			continue
+		}
+		if sniffRule != nil {
+			sniffRules = append(sniffRules, sniffRule)
+		}
 
 		// NaiveProxy is a native TLS protocol in sing-box. Keep the ordinary
 		// inbound form simple by reusing the panel's HTTPS certificate/key when
@@ -508,6 +556,10 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 				unsupported = append(unsupported, fmt.Sprintf("%s: %v", inbound.Tag, err))
 				continue
 			}
+			// Route and account bytes under the panel identity, on the injected listener.
+			inner["tag"] = inbound.Tag
+			translated["tag"] = "__shadowtls_transport_" + inbound.Tag
+			translated["detour"] = inbound.Tag
 			cfg.Inbounds = append(cfg.Inbounds, inner)
 		}
 		cfg.Inbounds = append(cfg.Inbounds, translated)
@@ -522,6 +574,12 @@ func (s *SingBoxService) GetConfig() (*singbox.Config, error) {
 		if err := injectSingBoxMtprotoEgress(cfg, inbound); err != nil {
 			return nil, err
 		}
+	}
+	if len(sniffRules) > 0 {
+		if cfg.Route == nil {
+			cfg.Route = map[string]any{}
+		}
+		cfg.Route["rules"] = append(sniffRules, singBoxRouteRules(cfg.Route)...)
 	}
 	ensureAutomaticClashAPI(cfg)
 	applySingBoxInfrastructureEgress(cfg)
@@ -678,10 +736,67 @@ func (s *SingBoxService) applyNativeTemplate(cfg *singbox.Config) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(mergedData, cfg)
+	if err := json.Unmarshal(mergedData, cfg); err != nil {
+		return err
+	}
+	var referencesLocal func(any) bool
+	referencesLocal = func(value any) bool {
+		switch value := value.(type) {
+		case map[string]any:
+			for key, item := range value {
+				if key == "domain_resolver" || key == "default_domain_resolver" {
+					if name, ok := item.(string); ok && name == "local" {
+						return true
+					}
+					if resolver, ok := item.(map[string]any); ok && resolver["server"] == "local" {
+						return true
+					}
+					continue
+				}
+				if referencesLocal(item) {
+					return true
+				}
+			}
+		case []any:
+			for _, item := range value {
+				if referencesLocal(item) {
+					return true
+				}
+			}
+		case []map[string]any:
+			for _, item := range value {
+				if referencesLocal(item) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if referencesLocal(cfg.Inbounds) || referencesLocal(cfg.Route) || referencesLocal(cfg.Outbounds) || referencesLocal(cfg.Endpoints) {
+		if cfg.DNS == nil {
+			cfg.DNS = map[string]any{}
+		}
+		data, _ := json.Marshal(cfg.DNS["servers"])
+		var servers []map[string]any
+		if err := json.Unmarshal(data, &servers); err != nil && string(data) != "null" {
+			return fmt.Errorf("invalid native DNS servers: %w", err)
+		}
+		hasLocal := false
+		for _, server := range servers {
+			if server["tag"] == "local" {
+				hasLocal = true
+			}
+		}
+		if !hasLocal {
+			cfg.DNS["servers"] = append(servers, map[string]any{"type": "local", "tag": "local"})
+		}
+	}
+	return nil
 }
 
 func (s *SingBoxService) SaveTemplate(ctx context.Context, raw string) error {
+	singBoxTemplateMu.Lock()
+	defer singBoxTemplateMu.Unlock()
 	normalized, err := normalizeSingBoxTemplate(raw)
 	if err != nil {
 		return err
@@ -717,6 +832,8 @@ func (s *SingBoxService) SaveTemplate(ctx context.Context, raw string) error {
 }
 
 func (s *SingBoxService) ResetTemplate(ctx context.Context) error {
+	singBoxTemplateMu.Lock()
+	defer singBoxTemplateMu.Unlock()
 	old, err := singBoxSettingService.GetSingBoxConfigTemplate()
 	if err != nil {
 		return err
@@ -748,19 +865,9 @@ func (s *SingBoxService) ResetTemplate(ctx context.Context) error {
 }
 
 func (s *SingBoxService) WriteConfig() error {
-	cfg, err := s.GetConfig()
-	if err != nil {
-		return err
-	}
-	data, err := cfg.Marshal()
-	if err != nil {
-		return err
-	}
-	path := singbox.GetConfigPath()
-	if err := os.MkdirAll(singBoxConfigDir(), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, data, 0o600)
+	singBoxApplyMu.Lock()
+	defer singBoxApplyMu.Unlock()
+	return s.writeConfigCandidate(context.Background())
 }
 
 func singBoxConfigDir() string {
@@ -774,12 +881,19 @@ func singBoxConfigDir() string {
 }
 
 func (s *SingBoxService) Restart(ctx context.Context) error {
-	markSingBoxStarted()
+	singBoxApplyMu.Lock()
+	defer singBoxApplyMu.Unlock()
+	return s.restartLocked(ctx)
+}
+
+func (s *SingBoxService) restartLocked(ctx context.Context) error {
+	// Capture the old applied config before publishing a candidate.
+	_ = s.IsRunning()
 	if _, err := singBoxProcess.Version(ctx); err != nil {
 		singBoxProcess.SetError(err)
 		return err
 	}
-	if err := s.WriteConfig(); err != nil {
+	if err := s.writeConfigCandidate(ctx); err != nil {
 		singBoxProcess.SetError(err)
 		return err
 	}
@@ -787,17 +901,30 @@ func (s *SingBoxService) Restart(ctx context.Context) error {
 	if err := singBoxProcess.Restart(ctx); err != nil {
 		return err
 	}
+	singBoxTrafficMu.Lock()
+	singBoxTrafficAPI.Close()
+	singBoxTrafficAPI.ResetTrafficBaseline(singBoxProcess.GetStartTime().UnixMilli())
+	singBoxTrafficMu.Unlock()
+	markSingBoxStarted()
 	commitManagedYouTube(CoreTypeSingBox)
 	return nil
 }
 
 func (s *SingBoxService) Start(ctx context.Context) error {
-	markSingBoxStarted()
+	singBoxApplyMu.Lock()
+	defer singBoxApplyMu.Unlock()
+	return s.startLocked(ctx)
+}
+
+func (s *SingBoxService) startLocked(ctx context.Context) error {
+	if s.IsRunning() {
+		return nil
+	}
 	if _, err := singBoxProcess.Version(ctx); err != nil {
 		singBoxProcess.SetError(err)
 		return err
 	}
-	if err := s.WriteConfig(); err != nil {
+	if err := s.writeConfigCandidate(ctx); err != nil {
 		singBoxProcess.SetError(err)
 		return err
 	}
@@ -805,13 +932,27 @@ func (s *SingBoxService) Start(ctx context.Context) error {
 	if err := singBoxProcess.Start(ctx); err != nil {
 		return err
 	}
+	singBoxTrafficMu.Lock()
+	singBoxTrafficAPI.Close()
+	singBoxTrafficAPI.ResetTrafficBaseline(singBoxProcess.GetStartTime().UnixMilli())
+	singBoxTrafficMu.Unlock()
+	markSingBoxStarted()
 	commitManagedYouTube(CoreTypeSingBox)
 	return nil
 }
 
 func (s *SingBoxService) Stop(ctx context.Context) error {
+	singBoxApplyMu.Lock()
+	defer singBoxApplyMu.Unlock()
+	return s.stopLocked(ctx)
+}
+
+func (s *SingBoxService) stopLocked(ctx context.Context) error {
+	if err := singBoxProcess.Stop(); err != nil {
+		return err
+	}
 	markSingBoxStopped()
-	return singBoxProcess.Stop()
+	return nil
 }
 
 func (s *SingBoxService) IsRunning() bool {
@@ -842,7 +983,13 @@ func (s *SingBoxService) ConnectionCount(ctx context.Context) (int, error) {
 	defer api.Close()
 	connections, err := api.Snapshot(ctx)
 	if err == nil {
-		return len(connections), nil
+		active := 0
+		for _, connection := range connections {
+			if connection != nil && connection.ClosedAt == 0 {
+				active++
+			}
+		}
+		return active, nil
 	}
 	clashConnections, err := singbox.NewClashStatsClient().Connections(ctx)
 	if err != nil {
@@ -864,7 +1011,7 @@ func (s *SingBoxService) OnlinePresence(ctx context.Context) (map[string]map[str
 	online := make(map[string]map[string]struct{})
 	activeSet := make(map[string]struct{})
 	for _, connection := range connections {
-		if connection == nil {
+		if connection == nil || connection.ClosedAt > 0 {
 			continue
 		}
 		if connection.Inbound != "" {
@@ -914,8 +1061,9 @@ func (s *SingBoxService) DisconnectClientIPs(ctx context.Context, email string, 
 			wanted[ip] = struct{}{}
 		}
 	}
+	var disconnectErrors []string
 	for _, connection := range connections {
-		if connection == nil || connection.User != email || connection.Source == "" {
+		if connection == nil || connection.ClosedAt > 0 || connection.User != email || connection.Source == "" {
 			continue
 		}
 		ip := connection.Source
@@ -926,8 +1074,11 @@ func (s *SingBoxService) DisconnectClientIPs(ctx context.Context, email string, 
 			continue
 		}
 		if err := api.CloseConnection(ctx, connection.ID); err != nil {
-			return err
+			disconnectErrors = append(disconnectErrors, err.Error())
 		}
+	}
+	if len(disconnectErrors) > 0 {
+		return fmt.Errorf("disconnect sing-box sessions: %s", strings.Join(disconnectErrors, "; "))
 	}
 	return nil
 }
@@ -944,7 +1095,7 @@ func (s *SingBoxService) PollTraffic(ctx context.Context) error {
 	singBoxTrafficMu.Lock()
 	defer singBoxTrafficMu.Unlock()
 	if len(singBoxPendingInbound) > 0 || len(singBoxPendingClients) > 0 {
-		if _, _, err := singBoxInboundService.AddTraffic(singBoxPendingInbound, singBoxPendingClients); err != nil {
+		if err := s.commitTraffic(singBoxPendingInbound, singBoxPendingClients); err != nil {
 			return err
 		}
 		singBoxPendingInbound = nil
@@ -1000,8 +1151,8 @@ func (s *SingBoxService) PollTraffic(ctx context.Context) error {
 	for _, traffic := range clientDeltas {
 		clientTraffic = append(clientTraffic, traffic)
 	}
-	if len(inboundTraffic) > 0 || len(clientTraffic) > 0 {
-		if _, _, err = singBoxInboundService.AddTraffic(inboundTraffic, clientTraffic); err != nil {
+	{
+		if err = s.commitTraffic(inboundTraffic, clientTraffic); err != nil {
 			singBoxPendingInbound = inboundTraffic
 			singBoxPendingClients = clientTraffic
 			return err
@@ -1055,42 +1206,63 @@ func (s *SingBoxService) GetLogs(count string, filter string) []LogEntry {
 func (s *SingBoxService) installVersion(ctx context.Context, installer func(context.Context) (string, error)) (string, error) {
 	singBoxInstallMu.Lock()
 	defer singBoxInstallMu.Unlock()
+	singBoxApplyMu.Lock()
+	defer singBoxApplyMu.Unlock()
 
+	restore, cleanup, err := singbox.SnapshotInstallation()
+	if err != nil {
+		return "", fmt.Errorf("backup sing-box installation: %w", err)
+	}
+	keepBackup := false
+	defer func() {
+		if !keepBackup {
+			cleanup()
+		}
+	}()
 	wasRunning := s.IsRunning()
 	if wasRunning {
-		if err := s.Stop(ctx); err != nil {
+		if err := s.stopLocked(ctx); err != nil {
 			return "", fmt.Errorf("stop sing-box before update: %w", err)
 		}
 	}
-
+	rollback := func(cause error) (string, error) {
+		// The update request may have been cancelled; recovery must still work.
+		recoveryCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := singBoxProcess.Stop(); err != nil {
+			keepBackup = true
+			return "", fmt.Errorf("%w; stop failed update: %w", cause, err)
+		}
+		if err := restore(); err != nil {
+			keepBackup = true
+			return "", fmt.Errorf("%w; restore previous installation: %w", cause, err)
+		}
+		if wasRunning {
+			if _, err := singBoxProcess.Version(recoveryCtx); err != nil {
+				return "", fmt.Errorf("%w; read restored version: %w", cause, err)
+			}
+			// Run the restored applied config, not a freshly generated candidate.
+			if err := singBoxProcess.Start(recoveryCtx); err != nil {
+				return "", fmt.Errorf("%w; restart restored installation: %w", cause, err)
+			}
+			markSingBoxStarted()
+		}
+		singBoxProcess.SetError(cause)
+		return "", cause
+	}
 	installed, err := installer(ctx)
 	if err != nil {
-		if wasRunning {
-			if restartErr := s.Start(ctx); restartErr != nil {
-				return "", fmt.Errorf("install sing-box: %w; restore previous process failed: %w", err, restartErr)
-			}
-		}
-		return "", err
+		return rollback(fmt.Errorf("install sing-box: %w", err))
 	}
-
-	// Refresh the process-level version cache so the dashboard immediately
-	// reports the newly installed binary even when the core was not running.
 	currentVersion, err := s.Version(ctx)
 	if err != nil {
-		if wasRunning {
-			if restartErr := s.Start(ctx); restartErr != nil {
-				return "", fmt.Errorf("verify installed sing-box %q: %w; restart failed: %w", installed, err, restartErr)
-			}
-		}
-		return "", fmt.Errorf("verify installed sing-box %q: %w", installed, err)
+		return rollback(fmt.Errorf("verify installed sing-box %q: %w", installed, err))
 	}
-
 	if wasRunning {
-		if err := s.Start(ctx); err != nil {
-			return "", fmt.Errorf("start updated sing-box %s: %w", currentVersion, err)
+		if err := s.startLocked(ctx); err != nil {
+			return rollback(fmt.Errorf("start updated sing-box %s: %w", currentVersion, err))
 		}
 	}
-
 	return currentVersion, nil
 }
 
@@ -1122,3 +1294,13 @@ func (s *SingBoxService) BinaryPath() string {
 func (s *SingBoxService) ProcessConfigPath() string {
 	return singbox.GetConfigPath()
 }
+
+func (s *SingBoxService) commitTraffic(inbounds []*xray.Traffic, clients []*xray.ClientTraffic) error {
+	needRestart, disabled, err := singBoxInboundService.AddTraffic(inbounds, clients)
+	if needRestart || disabled {
+		s.SetToNeedRestart()
+	}
+	return err
+}
+
+func init() { singbox.SetRuntimeConfigReader(singBoxProcess.AppliedConfig) }

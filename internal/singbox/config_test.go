@@ -125,8 +125,8 @@ func TestTranslateXrayWireGuardToEndpoint(t *testing.T) {
 	if system, _ := got["system"].(bool); system {
 		t.Fatalf("translated WireGuard outbound must remain in userspace mode: %#v", got)
 	}
-	if got["domain_resolver"] != "local" {
-		t.Fatalf("domain peer must use the local resolver: %#v", got)
+	if got["domain_resolver"] != nil {
+		t.Fatalf("domain peer must inherit the configured route resolver: %#v", got)
 	}
 	addresses, ok := got["address"].([]string)
 	if !ok || len(addresses) != 2 || addresses[0] != "10.0.0.2/32" {
@@ -295,7 +295,7 @@ func TestTranslateXrayRoutingSupportsBalancerTag(t *testing.T) {
 		"balancers": []any{
 			map[string]any{
 				"tag":      "proxy-pool",
-				"selector": []any{"proxy-a", "proxy-b"},
+				"selector": []any{"proxy-a"},
 			},
 		},
 	}
@@ -313,6 +313,13 @@ func TestTranslateXrayRoutingSupportsBalancerTag(t *testing.T) {
 	}
 	if len(balancers) != 1 || balancers[0]["type"] != "selector" || balancers[0]["tag"] != "proxy-pool" {
 		t.Fatalf("unexpected balancer outbound: %#v", balancers)
+	}
+}
+
+func TestTranslateXrayBalancersRejectsDynamicPool(t *testing.T) {
+	raw := map[string]any{"balancers": []any{map[string]any{"tag": "pool", "selector": []any{"proxy-a", "proxy-b"}}}}
+	if _, err := TranslateXrayBalancers(raw); err == nil {
+		t.Fatal("dynamic pool was silently changed to a static selector")
 	}
 }
 

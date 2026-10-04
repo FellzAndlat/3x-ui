@@ -20,7 +20,7 @@ func TestSingBoxInboundRequiresUsers(t *testing.T) {
 		{name: "shadowtls", protocol: model.ShadowTLS, want: true},
 		{name: "anytls", protocol: model.AnyTLS, want: true},
 		{name: "tuic", protocol: model.TUIC, want: true},
-		{name: "shadowsocks", protocol: model.Shadowsocks, want: false},
+		{name: "shadowsocks", protocol: model.Shadowsocks, want: true},
 	}
 
 	for _, tt := range tests {

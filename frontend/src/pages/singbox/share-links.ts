@@ -19,6 +19,14 @@ export function parseShareLink(raw: string): ConfigObject {
   if (!['vless', 'trojan', 'http', 'https', 'socks', 'socks5'].includes(protocol))
     throw new Error('Поддерживаются ссылки VLESS, Trojan, HTTP и SOCKS5.');
   const params = url.searchParams;
+  for (const key of ['ech', 'pcs', 'pinSHA256', 'pqv', 'fm']) {
+    if (params.get(key)) throw new Error(`Параметр ${key} не поддерживается этим импортом sing-box.`);
+  }
+  if (
+    params.get('vcn') &&
+    params.get('vcn') !== (params.get('sni') || url.hostname.replace(/^\[|\]$/g, ''))
+  )
+    throw new Error('Отдельное имя проверки сертификата не поддерживается этим импортом.');
   const server = url.hostname.replace(/^\[|\]$/g, '');
   if (!server) throw new Error('В ссылке не указан сервер.');
   const server_port = Number(
@@ -45,7 +53,13 @@ export function parseShareLink(raw: string): ConfigObject {
   if (['http', 'https', 'socks', 'socks5'].includes(protocol)) {
     if (username) next.username = username;
     if (password) next.password = password;
-    if (protocol === 'https') next.tls = { enabled: true, server_name: server };
+    if (protocol === 'https') {
+      const tls: ConfigObject = { enabled: true, server_name: params.get('sni') || server };
+      if (params.get('alpn')) tls.alpn = params.get('alpn')!.split(',').filter(Boolean);
+      if (['1', 'true'].includes(params.get('allowInsecure') || params.get('insecure') || ''))
+        tls.insecure = true;
+      next.tls = tls;
+    }
     return next;
   }
   if (!username)
@@ -57,16 +71,24 @@ export function parseShareLink(raw: string): ConfigObject {
       );
     next.uuid = username;
     if (params.get('flow')) next.flow = params.get('flow');
-  } else next.password = password ? `${username}:${password}` : username;
+  } else {
+    const authority = raw.trim().split('://', 2)[1]?.split(/[/?#]/, 1)[0] ?? '';
+    next.password = authority.slice(0, authority.lastIndexOf('@')).includes(':')
+      ? `${username}:${password}`
+      : username;
+  }
   const security = params.get('security') || (protocol === 'trojan' ? 'tls' : 'none');
   if (!['none', 'tls', 'reality'].includes(security))
     throw new Error(`Неподдерживаемый режим безопасности: ${security}.`);
   if (security !== 'none') {
     const tls: ConfigObject = { enabled: true, server_name: params.get('sni') || server };
     if (params.get('alpn')) tls.alpn = params.get('alpn')!.split(',').filter(Boolean);
-    if (['1', 'true'].includes(params.get('insecure') || params.get('allowInsecure') || ''))
+    if (['1', 'true'].includes(params.get('allowInsecure') || params.get('insecure') || ''))
       tls.insecure = true;
-    if (params.get('fp')) tls.utls = { enabled: true, fingerprint: params.get('fp') };
+    const fingerprint = params.get('fp') || (security === 'reality' ? 'chrome' : '');
+    if (fingerprint && fingerprint !== 'unsafe') tls.utls = { enabled: true, fingerprint };
+    if (security === 'reality' && fingerprint === 'unsafe')
+      throw new Error('Reality требует uTLS fingerprint.');
     if (security === 'reality') {
       if (!params.get('pbk')) throw new Error('В ссылке Reality отсутствует публичный ключ.');
       tls.reality = {
@@ -80,12 +102,14 @@ export function parseShareLink(raw: string): ConfigObject {
     throw new Error('Для параметров Reality требуется security=reality.');
   }
   const network = params.get('type') || 'tcp';
-  if (!['tcp', 'ws', 'http', 'grpc', 'httpupgrade', 'quic'].includes(network))
+  if (!['tcp', 'ws', 'http', 'grpc', 'httpupgrade'].includes(network))
     throw new Error(
       `Транспорт ${network} не поддерживается этим импортом sing-box. Используйте совместимую ссылку или Xray.`,
     );
   if (network === 'tcp' && params.get('headerType') && params.get('headerType') !== 'none')
     throw new Error('TCP-маскировка не поддерживается этим импортом. Настройте транспорт вручную.');
+  if (network === 'grpc' && (params.get('mode') === 'multi' || params.get('authority')))
+    throw new Error('gRPC multiMode и authority не поддерживаются этим импортом sing-box.');
   if (network !== 'tcp') {
     const transport: ConfigObject = { type: network };
     const host = params.get('host');

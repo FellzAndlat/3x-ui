@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
@@ -21,6 +22,7 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/util/link"
 	"github.com/SawaMEN/3x-ui/v3/internal/util/netsafe"
 	"github.com/SawaMEN/3x-ui/v3/internal/xray"
+	"gorm.io/gorm"
 )
 
 // filterOutboundsRejectedByCore drops outbounds the vendored xray-core config
@@ -83,6 +85,38 @@ func readBoundedOutboundSubscriptionBody(r io.Reader) ([]byte, error) {
 }
 
 // OutboundSubscriptionService manages remote outbound subscriptions.
+var subscriptionOrderMu sync.Mutex
+var subscriptionLocks = struct {
+	sync.Mutex
+	entries map[int]*subscriptionLock
+}{entries: make(map[int]*subscriptionLock)}
+
+type subscriptionLock struct {
+	sync.Mutex
+	users int
+}
+
+func lockSubscription(id int) func() {
+	subscriptionLocks.Lock()
+	entry := subscriptionLocks.entries[id]
+	if entry == nil {
+		entry = &subscriptionLock{}
+		subscriptionLocks.entries[id] = entry
+	}
+	entry.users++
+	subscriptionLocks.Unlock()
+	entry.Lock()
+	return func() {
+		entry.Unlock()
+		subscriptionLocks.Lock()
+		entry.users--
+		if entry.users == 0 {
+			delete(subscriptionLocks.entries, id)
+		}
+		subscriptionLocks.Unlock()
+	}
+}
+
 type OutboundSubscriptionService struct {
 	settingService SettingService
 }
@@ -176,6 +210,8 @@ func (s *OutboundSubscriptionService) nextDefaultSubPrefix(excludeId int) (strin
 }
 
 func (s *OutboundSubscriptionService) Create(remark, rawURL, tagPrefix, userAgent string, enabled bool, updateInterval int, allowPrivate, prepend, allowInsecure bool, balance ...*BalanceOptions) (*model.OutboundSubscription, error) {
+	subscriptionOrderMu.Lock()
+	defer subscriptionOrderMu.Unlock()
 	cleanURL, err := SanitizePublicHTTPURL(rawURL, allowPrivate)
 	if err != nil {
 		return nil, common.NewError("invalid subscription URL:", err)
@@ -194,8 +230,8 @@ func (s *OutboundSubscriptionService) Create(remark, rawURL, tagPrefix, userAgen
 		}
 	}
 	// New subscriptions go to the end of the priority order.
-	var count int64
-	if err := database.GetDB().Model(&model.OutboundSubscription{}).Count(&count).Error; err != nil {
+	var lastPriority int
+	if err := database.GetDB().Model(&model.OutboundSubscription{}).Select("COALESCE(MAX(priority), -1)").Scan(&lastPriority).Error; err != nil {
 		return nil, err
 	}
 	sub := &model.OutboundSubscription{
@@ -206,7 +242,7 @@ func (s *OutboundSubscriptionService) Create(remark, rawURL, tagPrefix, userAgen
 		AllowInsecure:  allowInsecure,
 		UserAgent:      strings.TrimSpace(userAgent),
 		Prepend:        prepend,
-		Priority:       int(count),
+		Priority:       lastPriority + 1,
 		TagPrefix:      prefix,
 		UpdateInterval: updateInterval,
 	}
@@ -228,6 +264,8 @@ func (s *OutboundSubscriptionService) Create(remark, rawURL, tagPrefix, userAgen
 
 // Update updates editable fields.
 func (s *OutboundSubscriptionService) Update(id int, remark, rawURL, tagPrefix, userAgent string, enabled bool, updateInterval int, allowPrivate, prepend, allowInsecure bool, balance ...*BalanceOptions) error {
+	unlock := lockSubscription(id)
+	defer unlock()
 	sub, err := s.Get(id)
 	if err != nil {
 		return err
@@ -249,6 +287,7 @@ func (s *OutboundSubscriptionService) Update(id int, remark, rawURL, tagPrefix, 
 			return err
 		}
 	}
+	resetSelection := len(balance) > 0 && balance[0] != nil && (sub.AutoBalance != balance[0].Enabled || sub.BalanceMode != balance[0].Mode || sub.ProbeURL != balance[0].URL)
 	sub.Remark = strings.TrimSpace(remark)
 	sub.Url = cleanURL
 	sub.Enabled = enabled
@@ -264,11 +303,23 @@ func (s *OutboundSubscriptionService) Update(id int, remark, rawURL, tagPrefix, 
 		}
 		balance[0].apply(sub)
 	}
-	return database.GetDB().Save(sub).Error
+	fields := []string{"remark", "url", "enabled", "allow_private", "allow_insecure", "user_agent", "prepend", "tag_prefix", "update_interval"}
+	if len(balance) > 0 && balance[0] != nil {
+		fields = append(fields, "auto_balance", "balance_mode", "probe_url", "probe_interval", "tolerance", "switch_interval", "health_interval", "last_health", "last_probe", "probe_error", "probe_results")
+		// Include runtime resets only when the balance policy actually changed.
+		if resetSelection {
+			fields = append(fields, "selected_tag", "last_switch", "switch_reason", "applied_tag", "apply_error")
+		}
+	}
+	return database.GetDB().Model(&model.OutboundSubscription{}).Where("id = ?", id).Select(fields).Updates(sub).Error
 }
 
 // Delete removes a subscription.
 func (s *OutboundSubscriptionService) Delete(id int) error {
+	unlock := lockSubscription(id)
+	defer unlock()
+	subscriptionOrderMu.Lock()
+	defer subscriptionOrderMu.Unlock()
 	return database.GetDB().Delete(&model.OutboundSubscription{}, id).Error
 }
 
@@ -302,7 +353,7 @@ func (s *OutboundSubscriptionService) Refresh(id int) ([]any, error) {
 
 // RefreshAllEnabled fetches every enabled subscription whose due time has passed
 // (lastUpdated + updateInterval <= now). It returns the number of subscriptions
-// that were actually refreshed.
+// whose stored outbound configuration changed.
 func (s *OutboundSubscriptionService) RefreshAllEnabled() (int, error) {
 	db := database.GetDB()
 	var subs []*model.OutboundSubscription
@@ -314,10 +365,10 @@ func (s *OutboundSubscriptionService) RefreshAllEnabled() (int, error) {
 	for _, sub := range subs {
 		due := sub.LastUpdated + int64(sub.UpdateInterval)
 		if sub.LastUpdated == 0 || due <= now {
-			if _, err := s.fetchAndStore(sub); err != nil {
+			if _, changed, err := s.fetchAndStoreWithChange(sub); err != nil {
 				logger.Warningf("outbound sub %d (%s) refresh failed: %v", sub.Id, sub.Remark, err)
 				// continue with others
-			} else {
+			} else if changed {
 				refreshed++
 			}
 		}
@@ -357,6 +408,22 @@ func (s *OutboundSubscriptionService) subscriptionFetchClient(timeout time.Durat
 
 // fetchAndStore does the actual network + parse + stability + persist work.
 func (s *OutboundSubscriptionService) fetchAndStore(sub *model.OutboundSubscription) ([]any, error) {
+	out, _, err := s.fetchAndStoreWithChange(sub)
+	return out, err
+}
+func (s *OutboundSubscriptionService) fetchAndStoreWithChange(sub *model.OutboundSubscription) ([]any, bool, error) {
+	unlock := lockSubscription(sub.Id)
+	defer unlock()
+	fresh, err := s.Get(sub.Id)
+	if err != nil {
+		return nil, false, err
+	}
+	*sub = *fresh
+	previous := sub.LastFetchedOutbounds
+	out, err := s.fetchAndStoreLocked(sub)
+	return out, err == nil && previous != sub.LastFetchedOutbounds, err
+}
+func (s *OutboundSubscriptionService) fetchAndStoreLocked(sub *model.OutboundSubscription) ([]any, error) {
 	// Re-sanitize on every fetch (handles legacy rows + defense in depth against
 	// any direct DB tampering). Private targets are blocked unless this
 	// subscription was explicitly created with AllowPrivate.
@@ -626,37 +693,40 @@ func (s *OutboundSubscriptionService) activeOutboundsSplit() (prepend []any, app
 // Move shifts a subscription one step up or down in the priority order and
 // re-normalizes all priorities to a 0..n-1 sequence.
 func (s *OutboundSubscriptionService) Move(id int, up bool) error {
-	db := database.GetDB()
-	var subs []*model.OutboundSubscription
-	if err := db.Order("priority asc, id asc").Find(&subs).Error; err != nil {
-		return err
-	}
-	idx := -1
-	for i, sub := range subs {
-		if sub.Id == id {
-			idx = i
-			break
+	subscriptionOrderMu.Lock()
+	defer subscriptionOrderMu.Unlock()
+	return database.GetDB().Transaction(func(db *gorm.DB) error {
+		var subs []*model.OutboundSubscription
+		if err := db.Order("priority asc, id asc").Find(&subs).Error; err != nil {
+			return err
 		}
-	}
-	if idx == -1 {
-		return common.NewError("subscription not found")
-	}
-	swap := idx + 1
-	if up {
-		swap = idx - 1
-	}
-	if swap < 0 || swap >= len(subs) {
-		return nil // already at the edge
-	}
-	subs[idx], subs[swap] = subs[swap], subs[idx]
-	for i, sub := range subs {
-		if sub.Priority != i {
-			if err := db.Model(sub).Update("priority", i).Error; err != nil {
-				return err
+		idx := -1
+		for i, sub := range subs {
+			if sub.Id == id {
+				idx = i
+				break
 			}
 		}
-	}
-	return nil
+		if idx == -1 {
+			return common.NewError("subscription not found")
+		}
+		swap := idx + 1
+		if up {
+			swap = idx - 1
+		}
+		if swap < 0 || swap >= len(subs) {
+			return nil // already at the edge
+		}
+		subs[idx], subs[swap] = subs[swap], subs[idx]
+		for i, sub := range subs {
+			if sub.Priority != i {
+				if err := db.Model(sub).Update("priority", i).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // AllActiveOutboundTags returns only the tags of active subscription outbounds.

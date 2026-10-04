@@ -198,7 +198,7 @@ export function outboundErrors(value: ConfigObject, otherTags: string[]): string
       !/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(value.uuid))
   )
     errors.push('Укажите корректный UUID.');
-  if (['trojan', 'shadowsocks', 'hysteria2', 'tuic'].includes(type) && !value.password)
+  if (['trojan', 'shadowsocks', 'hysteria2'].includes(type) && !value.password)
     errors.push('Укажите пароль.');
   if (type === 'shadowsocks' && !value.method) errors.push('Выберите метод шифрования.');
   if (['hysteria2', 'tuic', 'shadowtls'].includes(type) && object(value.tls).enabled !== true)

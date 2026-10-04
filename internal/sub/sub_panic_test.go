@@ -103,7 +103,7 @@ func TestGetClashEmitsPinnedCertSha256(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetClash: %v", err)
 	}
-	if !strings.Contains(out, "pin-sha256") {
+	if !strings.Contains(out, "fingerprint: "+pin) || strings.Contains(out, "pin-sha256") {
 		t.Fatalf("Clash proxy dropped the pinned cert sha256:\n%s", out)
 	}
 }

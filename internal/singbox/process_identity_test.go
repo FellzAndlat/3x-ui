@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -56,6 +57,10 @@ func TestProcessMatchesBinaryRejectsWrongPIDOwner(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
+	}
+	procPath := "/proc/" + strconv.Itoa(os.Getpid())
+	if _, err := os.Readlink(procPath + "/exe"); os.IsPermission(err) || os.IsNotExist(err) {
+		t.Skipf("procfs cannot inspect the current PID in this environment: %v", err)
 	}
 	if !processMatchesBinary(os.Getpid(), exe) {
 		t.Fatalf("current PID should match test executable %q", exe)

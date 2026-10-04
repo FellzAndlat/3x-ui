@@ -155,11 +155,11 @@ func decodeStat(data []byte) (v2rayStat, error) {
 			if wire != 0 {
 				return stat, fmt.Errorf("invalid Stat.value wire type %d", wire)
 			}
-			value, used := binary.Varint(data)
+			value, used := binary.Uvarint(data)
 			if used <= 0 {
 				return stat, fmt.Errorf("invalid Stat.value")
 			}
-			stat.Value = value
+			stat.Value = int64(value)
 			data = data[used:]
 		default:
 			used, err := skipWire(data, wire)
@@ -224,6 +224,7 @@ func (c *V2RayStatsClient) connFor(ctx context.Context) (*grpc.ClientConn, error
 		v2rayStatsAddress,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(), //nolint:staticcheck // preserve bounded synchronous dial semantics
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(64<<20)),
 	)
 	if err != nil {
 		return nil, err

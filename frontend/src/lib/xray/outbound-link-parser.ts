@@ -456,23 +456,28 @@ function sanitizeFinalMaskQuicParams(parsed: Record<string, unknown>): void {
 
 // The panel exports tcp/http obfuscation as the SIP002 obfs-local plugin only,
 // so the header it stands for has to be rebuilt before the transport is applied.
-function applyObfsLocalPluginParams(params: URLSearchParams): void {
-  if (params.get('headerType') || params.get('type') === 'http') return;
-  const parts = (params.get('plugin') ?? '').split(';');
-  if (parts[0] !== 'obfs-local') return;
+// Never import an unknown SIP002 plugin as a plain Shadowsocks connection.
+function applyObfsLocalPluginParams(params: URLSearchParams): boolean {
+  const plugin = params.get('plugin');
+  if (!plugin) return true;
+  const parts = plugin.split(';');
+  if (parts[0] !== 'obfs-local') return false;
   let obfs = '';
   let host = '';
   for (const part of parts.slice(1)) {
     const eq = part.indexOf('=');
-    if (eq < 0) continue;
+    if (eq < 0) return false;
     const key = part.slice(0, eq);
     if (key === 'obfs') obfs = part.slice(eq + 1);
     else if (key === 'obfs-host') host = part.slice(eq + 1);
+    else return false;
   }
-  if (obfs !== 'http') return;
+  if (obfs !== 'http') return false;
+  if (params.get('type') && params.get('type') !== 'tcp') return false;
   params.set('type', 'tcp');
   params.set('headerType', 'http');
   if (host) params.set('host', host);
+  return true;
 }
 
 function applySecurityParams(stream: Raw, params: URLSearchParams): void {
@@ -480,6 +485,8 @@ function applySecurityParams(stream: Raw, params: URLSearchParams): void {
     const tls = stream.tlsSettings as Raw;
     tls.serverName = params.get('sni') ?? '';
     tls.fingerprint = params.get('fp') ?? '';
+    const insecure = firstParam(params, 'allowInsecure', 'insecure');
+    if (insecure !== null) tls.allowInsecure = ['1', 'true'].includes(insecure);
     const alpn = params.get('alpn');
     if (alpn) tls.alpn = alpn.split(',');
     tls.echConfigList = params.get('ech') ?? '';
@@ -523,6 +530,12 @@ export function parseVmessLink(link: string): Raw | null {
           headers: json.host ? { Host: (json.host as string).split(',').filter(Boolean) } : {},
         },
       };
+    } else if (network === 'kcp') {
+      const kcp = stream.kcpSettings as Raw;
+      const mtu = kcpParamInRange(String(json.mtu ?? ''), KCP_MIN_MTU, KCP_MAX_MTU);
+      const tti = kcpParamInRange(String(json.tti ?? ''), KCP_MIN_TTI, KCP_MAX_TTI);
+      if (mtu !== null) kcp.mtu = mtu;
+      if (tti !== null) kcp.tti = tti;
     } else if (network === 'ws') {
       (stream.wsSettings as Raw).host = json.host ?? '';
       (stream.wsSettings as Raw).path = json.path ?? '/';
@@ -537,9 +550,16 @@ export function parseVmessLink(link: string): Raw | null {
       const xhttp = stream.xhttpSettings as Raw;
       xhttp.host = json.host ?? '';
       xhttp.path = json.path ?? '/';
-      if (json.mode) xhttp.mode = json.mode;
+      if (json.mode || json.type) xhttp.mode = json.mode || json.type;
       applyXhttpStringFromJson(xhttp, json);
     }
+    const maskParams = new URLSearchParams();
+    if (typeof json.fm === 'string') maskParams.set('fm', json.fm);
+    if (network === 'kcp') {
+      maskParams.set('headerType', typeof json.type === 'string' ? json.type : '');
+      maskParams.set('seed', typeof json.seed === 'string' ? json.seed : '');
+    }
+    applyFinalMaskParam(stream, maskParams);
     if (security === 'tls') {
       const tls = stream.tlsSettings as Raw;
       tls.serverName = json.sni ?? '';
@@ -552,9 +572,11 @@ export function parseVmessLink(link: string): Raw | null {
       if (typeof json.pcs === 'string') tls.pinnedPeerCertSha256 = json.pcs;
     }
 
-    const port = Number(json.port) || 443;
+    const port = json.port === undefined || json.port === '' ? 443 : Number(json.port);
+    const alterId = Number(json.aid ?? 0);
+    if (!validPort(port) || !Number.isInteger(alterId) || alterId < 0) return null;
     const rawScy = (json.scy as string) || 'auto';
-    const userSecurity = rawScy === 'none' || rawScy === 'zero' ? 'auto' : rawScy;
+    const userSecurity = rawScy;
     return {
       protocol: 'vmess',
       tag: typeof json.ps === 'string' ? json.ps : '',
@@ -563,7 +585,7 @@ export function parseVmessLink(link: string): Raw | null {
           {
             address: json.add ?? '',
             port,
-            users: [{ id: json.id ?? '', security: userSecurity }],
+            users: [{ id: json.id ?? '', security: userSecurity, alterId }],
           },
         ],
       },
@@ -574,10 +596,22 @@ export function parseVmessLink(link: string): Raw | null {
   }
 }
 
+function validPort(port: number): boolean {
+  return Number.isInteger(port) && port > 0 && port <= 65535;
+}
+
+function serverHostname(host: string): string {
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+}
+
 function parseUrlLink(link: string, expectedProto: string): URL | null {
   try {
     const url = new URL(link);
     if (url.protocol.replace(/:$/, '') !== expectedProto) return null;
+    if (!url.hostname || (url.port && !validPort(Number(url.port)))) return null;
+    // WHATWG URL preserves escaped userinfo; validate before decoding once.
+    decodeURIComponent(url.username);
+    decodeURIComponent(url.password);
     return url;
   } catch {
     return null;
@@ -587,8 +621,8 @@ function parseUrlLink(link: string, expectedProto: string): URL | null {
 export function parseVlessLink(link: string): Raw | null {
   const url = parseUrlLink(link, 'vless');
   if (!url) return null;
-  const id = url.username;
-  const address = url.hostname;
+  const id = decodeURIComponent(url.username);
+  const address = serverHostname(url.hostname);
   const port = Number(url.port) || 443;
   const params = url.searchParams;
   const network = params.get('type') ?? 'tcp';
@@ -614,8 +648,8 @@ export function parseVlessLink(link: string): Raw | null {
 export function parseTrojanLink(link: string): Raw | null {
   const url = parseUrlLink(link, 'trojan');
   if (!url) return null;
-  const password = url.username;
-  const address = url.hostname;
+  const password = decodeURIComponent(url.username);
+  const address = serverHostname(url.hostname);
   const port = Number(url.port) || 443;
   const params = url.searchParams;
   const network = params.get('type') ?? 'tcp';
@@ -680,7 +714,7 @@ export function parseShadowsocksLink(link: string): Raw | null {
     const colon = hostPort.lastIndexOf(':');
     if (colon < 0) return null;
     host = hostPort.slice(0, colon);
-    port = Number(hostPort.slice(colon + 1)) || 443;
+    port = Number(hostPort.slice(colon + 1));
   } else {
     let decoded: string;
     try {
@@ -688,20 +722,22 @@ export function parseShadowsocksLink(link: string): Raw | null {
     } catch {
       return null;
     }
-    const at = decoded.indexOf('@');
+    const at = decoded.lastIndexOf('@');
     if (at < 0) return null;
     userInfo = decoded.slice(0, at);
     const hostPort = decoded.slice(at + 1);
     const colon = hostPort.lastIndexOf(':');
     if (colon < 0) return null;
     host = hostPort.slice(0, colon);
-    port = Number(hostPort.slice(colon + 1)) || 443;
+    port = Number(hostPort.slice(colon + 1));
   }
+  host = serverHostname(host);
+  if (!host || !validPort(port)) return null;
   const sep = userInfo.indexOf(':');
   const method = sep < 0 ? '2022-blake3-aes-128-gcm' : userInfo.slice(0, sep);
   const password = sep < 0 ? userInfo : userInfo.slice(sep + 1);
   const params = new URLSearchParams(rawQuery);
-  applyObfsLocalPluginParams(params);
+  if (!applyObfsLocalPluginParams(params)) return null;
   const network = params.get('type') ?? 'tcp';
   const security = (params.get('security') ?? 'none') as string;
   const stream = buildStream(network, security);
@@ -725,8 +761,9 @@ export function parseHysteria2Link(link: string): Raw | null {
   // network branch is the dedicated 'hysteria' transport — the modal's
   // newStreamSlice('hysteria') initializer fills in receive-window
   // defaults; we override the user-set fields here.
-  const auth = url.username;
-  const address = url.hostname;
+  const auth = decodeURIComponent(url.username) +
+    (hasPasswordDelimiter(link) ? `:${decodeURIComponent(url.password)}` : '');
+  const address = serverHostname(url.hostname);
   const port = Number(url.port) || 443;
   const params = url.searchParams;
   const alpn = params.get('alpn');
@@ -740,6 +777,7 @@ export function parseHysteria2Link(link: string): Raw | null {
     },
     tlsSettings: {
       serverName: params.get('sni') ?? '',
+      allowInsecure: ['1', 'true'].includes(params.get('allowInsecure') ?? params.get('insecure') ?? ''),
       alpn: alpn ? alpn.split(',') : ['h3'],
       fingerprint: params.get('fp') ?? '',
       echConfigList: params.get('ech') ?? '',
@@ -877,4 +915,9 @@ export function parseOutboundLink(link: string): Raw | null {
     parseHysteria2Link(trimmed) ??
     parseWireguardLink(trimmed)
   );
+}
+
+function hasPasswordDelimiter(link: string): boolean {
+  const authority = link.trim().split('://', 2)[1]?.split(/[/?#]/, 1)[0] ?? '';
+  return authority.slice(0, authority.lastIndexOf('@')).includes(':');
 }

@@ -1,6 +1,8 @@
 package sub
 
 import (
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -91,6 +93,9 @@ func (s *SubClashService) getClash(subId string, host string, legacy bool) (stri
 				hasEnabledClient = true
 			}
 			seenEmails[client.Email] = struct{}{}
+			if !client.Enable {
+				continue
+			}
 			generated := s.getProxies(subReq, inbound, client, host)
 			if len(generated) == 0 {
 				return "", "", errSubscriptionFormatUnsupported
@@ -604,6 +609,11 @@ func (s *SubClashService) buildHysteriaProxy(subReq *SubService, inbound *model.
 			if fp, ok := inner["fingerprint"].(string); ok && fp != "" {
 				proxy["client-fingerprint"] = fp
 			}
+		}
+	}
+	if tlsSettings, ok := rawStream["tlsSettings"].(map[string]any); ok {
+		if !applyClashTLSVerification(proxy, s.tlsData(tlsSettings)) {
+			return nil
 		}
 	}
 	// External proxy TLS fields override the base Hysteria client just as
@@ -1126,6 +1136,12 @@ func (s *SubClashService) applyTransport(proxy map[string]any, network string, s
 		grpc, _ := stream["grpcSettings"].(map[string]any)
 		grpcOpts := map[string]any{}
 		if grpc != nil {
+			if multi, _ := grpc["multiMode"].(bool); multi {
+				return false
+			}
+			if authority, _ := grpc["authority"].(string); strings.TrimSpace(authority) != "" {
+				return false
+			}
 			if serviceName, ok := grpc["serviceName"].(string); ok && serviceName != "" {
 				grpcOpts["grpc-service-name"] = serviceName
 			}
@@ -1181,11 +1197,11 @@ func (s *SubClashService) applySecurity(proxy map[string]any, security string, s
 			if serverName, ok := tlsSettings["serverName"].(string); ok && serverName != "" {
 				proxy["servername"] = serverName
 				switch proxy["type"] {
-				case "trojan":
+				case "trojan", "hysteria", "hysteria2", "tuic", "anytls":
 					proxy["sni"] = serverName
 				}
 			}
-			if fingerprint, ok := tlsSettings["fingerprint"].(string); ok && fingerprint != "" {
+			if fingerprint, ok := tlsSettings["fingerprint"].(string); ok && fingerprint != "" && proxy["type"] != "hysteria2" && proxy["type"] != "hysteria" && proxy["type"] != "tuic" {
 				proxy["client-fingerprint"] = fingerprint
 			}
 			if alpn, ok := externalProxyALPNList(tlsSettings["alpn"]); ok {
@@ -1199,13 +1215,8 @@ func (s *SubClashService) applySecurity(proxy map[string]any, security string, s
 					proxy["alpn"] = out
 				}
 			}
-			if inner, ok := tlsSettings["settings"].(map[string]any); ok {
-				if insecure, ok := inner["allowInsecure"].(bool); ok && insecure {
-					proxy["skip-cert-verify"] = true
-				}
-			}
-			if pins, ok := tlsSettings["pin-sha256"].([]any); ok && len(pins) > 0 {
-				proxy["pin-sha256"] = pins
+			if !applyClashTLSVerification(proxy, tlsSettings) {
+				return false
 			}
 		}
 		return true
@@ -1259,17 +1270,53 @@ func (s *SubClashService) streamData(stream string) map[string]any {
 }
 
 func (s *SubClashService) tlsData(tData map[string]any) map[string]any {
-	tlsData := make(map[string]any, 1)
-	tlsClientSettings, _ := tData["settings"].(map[string]any)
-	tlsData["serverName"] = tData["serverName"]
-	tlsData["alpn"] = tData["alpn"]
-	if fingerprint, ok := tlsClientSettings["fingerprint"].(string); ok {
-		tlsData["fingerprint"] = fingerprint
-	}
-	if pins, ok := tlsClientSettings["pinnedPeerCertSha256"].([]any); ok && len(pins) > 0 {
-		tlsData["pin-sha256"] = pins
+	tlsData := maps.Clone(tData)
+	inner, _ := tData["settings"].(map[string]any)
+	for _, key := range []string{"fingerprint", "allowInsecure", "verifyPeerCertByName", "pinnedPeerCertSha256"} {
+		if value, ok := inner[key]; ok {
+			tlsData[key] = value
+		}
 	}
 	return tlsData
+}
+
+// Mihomo's fingerprint pins the full certificate. Multiple Xray pins cannot
+// be represented by its single fingerprint; reject instead of removing checks.
+func applyClashTLSVerification(proxy, tls map[string]any) bool {
+	inner, _ := tls["settings"].(map[string]any)
+	insecure, exists := tls["allowInsecure"].(bool)
+	if !exists {
+		insecure, exists = inner["allowInsecure"].(bool)
+	}
+	if exists {
+		proxy["skip-cert-verify"] = insecure
+	}
+	names := clashStringList(tls["verifyPeerCertByName"])
+	if len(names) > 1 {
+		return false
+	}
+	if len(names) == 1 {
+		proxy["name-cert-verify"] = names[0]
+	}
+	pins := clashStringList(tls["pinnedPeerCertSha256"])
+	if len(pins) == 0 {
+		pins = clashStringList(tls["pin-sha256"])
+	}
+	if len(pins) > 1 {
+		return false
+	}
+	if len(pins) == 1 {
+		pin := strings.ReplaceAll(strings.TrimSpace(pins[0]), ":", "")
+		decoded, err := hex.DecodeString(pin)
+		if err != nil || len(decoded) != 32 {
+			decoded, err = base64.StdEncoding.DecodeString(strings.TrimSpace(pins[0]))
+		}
+		if err != nil || len(decoded) != 32 {
+			return false
+		}
+		proxy["fingerprint"] = hex.EncodeToString(decoded)
+	}
+	return true
 }
 
 func (s *SubClashService) realityData(rData map[string]any) map[string]any {
@@ -1281,7 +1328,9 @@ func (s *SubClashService) realityData(rData map[string]any) map[string]any {
 	if fingerprint, ok := realityClientSettings["fingerprint"].(string); ok {
 		rDataOut["fingerprint"] = fingerprint
 	}
-	if serverNames, ok := rData["serverNames"].([]any); ok && len(serverNames) > 0 {
+	if name, _ := realityClientSettings["serverName"].(string); name != "" {
+		rDataOut["serverName"] = name
+	} else if serverNames, ok := rData["serverNames"].([]any); ok && len(serverNames) > 0 {
 		rDataOut["serverName"] = fmt.Sprint(serverNames[0])
 	}
 	if shortIDs, ok := rData["shortIds"].([]any); ok && len(shortIDs) > 0 {

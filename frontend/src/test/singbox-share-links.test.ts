@@ -71,7 +71,7 @@ describe('sing-box share link import', () => {
 });
 
 describe('outbound validation', () => {
-  it('checks TUIC UUID, password, port and TLS before adding a connection', () => {
+  it('checks TUIC UUID, port and TLS while allowing an empty password', () => {
     expect(
       outboundErrors(
         {
@@ -83,7 +83,7 @@ describe('outbound validation', () => {
         },
         [],
       ),
-    ).toHaveLength(4);
+    ).toHaveLength(3);
     expect(
       outboundErrors(
         {
@@ -92,7 +92,7 @@ describe('outbound validation', () => {
           server: 'proxy.test',
           server_port: 443,
           uuid,
-          password: 'pass',
+          password: '',
           tls: { enabled: true },
         },
         [],

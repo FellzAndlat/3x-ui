@@ -3,7 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"net"
 	"strconv"
 	"strings"
 
@@ -89,8 +89,28 @@ func injectSingBoxEgressBridge(cfg *singbox.Config, bridgeTag, outboundTag strin
 			usedPorts[port] = struct{}{}
 		}
 	}
+	for _, service := range cfg.Services {
+		if port := singBoxInboundPort(service); port > 0 {
+			usedPorts[port] = struct{}{}
+		}
+	}
+	usedPorts[10090] = struct{}{}
+	usedPorts[10091] = struct{}{}
+	if clash, ok := cfg.Experimental["clash_api"].(map[string]any); ok {
+		if controller, ok := clash["external_controller"].(string); ok {
+			if _, portText, err := net.SplitHostPort(controller); err == nil {
+				if port, err := strconv.Atoi(portText); err == nil {
+					usedPorts[port] = struct{}{}
+				}
+			}
+		}
+	}
 	port := basePort
 	for {
+		if port <= 0 || port > 65535 {
+			logger.Warning(label, " egress: no valid TCP port is available")
+			return false
+		}
 		if _, used := usedPorts[port]; !used {
 			break
 		}
@@ -161,9 +181,8 @@ func singBoxEgressProxyURL(tag string) string {
 	if !singBoxProcess.IsRunning() || strings.TrimSpace(tag) == "" {
 		return ""
 	}
-	data, err := os.ReadFile(singbox.GetConfigPath())
-	if err != nil {
-		logger.Warning("read running sing-box config for egress bridge failed:", err)
+	data := singBoxProcess.AppliedConfig()
+	if len(data) == 0 {
 		return ""
 	}
 	var cfg singbox.Config
