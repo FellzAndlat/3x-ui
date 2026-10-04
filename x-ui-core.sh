@@ -3636,6 +3636,97 @@ table ip xui_gateway_nat {
 EOF
 }
 
+
+gateway_firewall_persist() {
+    local rules="/etc/x-ui/gateway.nft"
+    local tmp="${rules}.tmp"
+
+    mkdir -p /etc/x-ui
+
+    echo "Saving Gateway nftables configuration..."
+
+    # Сохраняем основную Gateway таблицу.
+    if ! nft list table inet xui_gateway > "${tmp}"; then
+        rm -f "${tmp}"
+        LOGE "Failed to save xui_gateway nftables table."
+        return 1
+    fi
+
+    # Если используется WAN/NAT — сохраняем NAT таблицу.
+    if nft list table ip xui_gateway_nat >/dev/null 2>&1; then
+        if ! nft list table ip xui_gateway_nat >> "${tmp}"; then
+            rm -f "${tmp}"
+            LOGE "Failed to save xui_gateway_nat nftables table."
+            return 1
+        fi
+    fi
+
+    chmod 600 "${tmp}"
+    mv -f "${tmp}" "${rules}"
+
+    # Скрипт восстановления при загрузке.
+    cat > /usr/local/sbin/xui-gateway-firewall-restore <<'RESTORE'
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE="/etc/x-ui/gateway.env"
+RULES="/etc/x-ui/gateway.nft"
+
+# Gateway Mode не включён.
+if [[ ! -f "${STATE}" ]]; then
+    exit 0
+fi
+
+# Нет сохранённых правил.
+if [[ ! -s "${RULES}" ]]; then
+    exit 0
+fi
+
+# Включаем IPv4 forwarding.
+ /usr/sbin/sysctl -w net.ipv4.ip_forward=1
+
+# Удаляем только таблицы Gateway Mode.
+ /usr/sbin/nft delete table inet xui_gateway 2>/dev/null || true
+ /usr/sbin/nft delete table ip xui_gateway_nat 2>/dev/null || true
+
+# Восстанавливаем Gateway nftables.
+ /usr/sbin/nft -f "${RULES}"
+RESTORE
+
+    chmod 700 /usr/local/sbin/xui-gateway-firewall-restore
+
+    # systemd unit.
+    cat > /etc/systemd/system/xui-gateway-firewall.service <<'UNIT'
+[Unit]
+Description=3X-UI Gateway Mode Firewall Restore
+Wants=network-online.target
+After=network-online.target nftables.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/xui-gateway-firewall-restore
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+    systemctl daemon-reload
+    systemctl enable xui-gateway-firewall.service
+}
+
+
+gateway_firewall_disable() {
+    systemctl disable --now xui-gateway-firewall.service 2>/dev/null || true
+
+    rm -f /etc/systemd/system/xui-gateway-firewall.service
+    rm -f /usr/local/sbin/xui-gateway-firewall-restore
+    rm -f /etc/x-ui/gateway.nft
+    rm -f /etc/x-ui/gateway.nft.tmp
+
+    systemctl daemon-reload
+}
+
 gateway_nft_disable() {
     nft delete table inet xui_gateway 2>/dev/null || true
     nft delete table ip xui_gateway_nat 2>/dev/null || true
@@ -3728,9 +3819,22 @@ EOF
         gateway_nat_enable "${lan_network}" "${wan_if}"
     fi
 
+    # Сохраняем nftables и устанавливаем systemd restore.
+    if ! gateway_firewall_persist; then
+        LOGE "Failed to persist Gateway firewall configuration."
+
+        gateway_nft_disable
+        gateway_routing_disable
+        gateway_restore_sysctl
+        rm -f "${XUI_GATEWAY_STATE}"
+
+        return 1
+    fi
+
     if ! "${xui_folder}/x-ui" gateway enable; then
         LOGE "Failed to configure Xray Gateway Mode."
 
+        gateway_firewall_disable
         gateway_nft_disable
         gateway_routing_disable
         gateway_restore_sysctl
@@ -3762,6 +3866,7 @@ gateway_disable() {
 
     restart_xray 0
 
+    gateway_firewall_disable
     gateway_nft_disable
     gateway_routing_disable
     gateway_restore_sysctl
