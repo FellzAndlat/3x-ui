@@ -1,6 +1,8 @@
 package service
 
 import (
+	"fmt"
+	"net"
 	"slices"
 	"sort"
 	"strconv"
@@ -225,6 +227,9 @@ func (s *HostService) GetHostGroup(groupId string) (*entity.HostGroup, error) {
 }
 
 func (s *HostService) AddHostGroup(req *entity.HostGroup) ([]*model.Host, error) {
+	if err := validateHostGroup(req); err != nil {
+		return nil, err
+	}
 	groupId := req.GroupId
 	if groupId == "" {
 		groupId = random.NumLower(16)
@@ -232,6 +237,13 @@ func (s *HostService) AddHostGroup(req *entity.HostGroup) ([]*model.Host, error)
 	created := buildHostRows(groupId, req)
 
 	err := database.GetDB().Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&model.Host{}).Where("group_id = ?", groupId).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 0 {
+			return common.NewError("host group already exists")
+		}
 		if err := validateInboundsExist(tx, req.InboundIds); err != nil {
 			return err
 		}
@@ -247,6 +259,9 @@ func (s *HostService) AddHostGroup(req *entity.HostGroup) ([]*model.Host, error)
 }
 
 func (s *HostService) UpdateHostGroup(groupId string, req *entity.HostGroup) ([]*model.Host, error) {
+	if err := validateHostGroup(req); err != nil {
+		return nil, err
+	}
 	created := buildHostRows(groupId, req)
 
 	err := database.GetDB().Transaction(func(tx *gorm.DB) error {
@@ -356,4 +371,39 @@ func parseHostAndPort(hostStr string, defaultPort int) (string, int) {
 		addr = addr[1 : len(addr)-1]
 	}
 	return addr, defaultPort
+}
+
+func validateHostGroup(req *entity.HostGroup) error {
+	if req == nil || len(req.InboundIds) == 0 {
+		return common.NewError("at least one inbound is required")
+	}
+	if req.Port < 0 || req.Port > 65535 {
+		return common.NewError("invalid host port")
+	}
+	for _, raw := range req.Hosts {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue // An override-only host inherits the inbound's address.
+		}
+		addr := value
+		if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+			addr = value[1 : len(value)-1]
+		} else if net.ParseIP(value) == nil && strings.Contains(value, ":") {
+			var port string
+			var err error
+			addr, port, err = net.SplitHostPort(value)
+			if err != nil {
+				return fmt.Errorf("invalid host endpoint %q: %w", raw, err)
+			}
+			p, err := strconv.Atoi(port)
+			if err != nil || p < 0 || p > 65535 {
+				return fmt.Errorf("invalid host port in %q", raw)
+			}
+		}
+		if addr == "" || (strings.HasPrefix(value, "[") && net.ParseIP(addr) == nil) || strings.ContainsAny(addr, " \t\r\n/?#@[]") ||
+			(strings.Contains(addr, ":") && net.ParseIP(addr) == nil) {
+			return fmt.Errorf("invalid host address %q", raw)
+		}
+	}
+	return nil
 }

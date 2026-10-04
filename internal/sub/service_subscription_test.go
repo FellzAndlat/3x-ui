@@ -141,6 +141,7 @@ func TestGetSingBoxJsonDoesNotCollapseMultipleWireGuardInbounds(t *testing.T) {
 	if err := db.Create(inboundB).Error; err != nil {
 		t.Fatalf("seed inbound B: %v", err)
 	}
+	seedHost(t, &model.Host{InboundId: inboundA.Id, Address: "wg-host.example", Port: 51822})
 	client := &model.ClientRecord{Email: "wg@example.com", SubID: subID, UUID: "11111111-2222-4333-8444-555555555555", PrivateKey: clientPriv, AllowedIPs: "10.0.0.2/32", Enable: true}
 	if err := db.Create(client).Error; err != nil {
 		t.Fatalf("seed client: %v", err)
@@ -158,6 +159,9 @@ func TestGetSingBoxJsonDoesNotCollapseMultipleWireGuardInbounds(t *testing.T) {
 	}
 	if got := strings.Count(out, `"type": "wireguard"`); got < 2 {
 		t.Fatalf("sing-box subscription collapsed WireGuard inbounds: found %d wireguard outbounds\n%s", got, out)
+	}
+	if !strings.Contains(out, `"address": "wg-host.example"`) || !strings.Contains(out, `"port": 51822`) {
+		t.Fatalf("native WireGuard ignored host override: %s", out)
 	}
 }
 

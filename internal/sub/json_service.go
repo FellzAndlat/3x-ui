@@ -152,7 +152,15 @@ func (s *SubJsonService) GetJson(subId string, host string, alwaysReturnArray bo
 			continue
 		}
 		subReq.projectThroughFallbackMaster(inbound)
-		if hostEps := subReq.hostEndpoints(inbound, "json"); len(hostEps) > 0 {
+		hostEps := subReq.hostEndpoints(inbound, "json")
+		if hostEps != nil && len(hostEps) == 0 {
+			for _, client := range clients {
+				seenEmails[client.Email] = struct{}{}
+				hasEnabledClient = hasEnabledClient || client.Enable
+			}
+			continue
+		}
+		if len(hostEps) > 0 {
 			injectExternalProxy(inbound, hostEps)
 			delete(subReq.streamSettingsByInbound, inbound.Id)
 		}
@@ -314,11 +322,28 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 		matchedClients[inbound] = clients
 		return clients
 	}
+	var excluded []*model.Inbound
+	inbounds, excluded = subReq.partitionHostFormat(inbounds, "json")
+	for _, inbound := range excluded {
+		for _, client := range clientsFor(inbound) {
+			seenEmails[client.Email] = struct{}{}
+			hasEnabledClient = hasEnabledClient || client.Enable
+		}
+	}
+	if len(inbounds) == 0 && len(externalLinks) == 0 {
+		emails := make([]string, 0, len(seenEmails))
+		for email := range seenEmails {
+			emails = append(emails, email)
+		}
+		traffic, _ := subReq.AggregateTrafficByEmails(emails)
+		traffic.Enable = hasEnabledClient
+		return "", subReq.subscriptionUserinfo(traffic), nil
+	}
 
 	// Detached users are represented by inactive metadata entries so their
 	// subscriptions remain addressable. Those entries are not proxy links and
 	// must not turn a WireGuard-only subscription into a mixed profile.
-	wireguardOnly := true
+	wireguardOnly := len(inbounds) > 0
 	for _, entry := range externalLinks {
 		if entry.Active {
 			wireguardOnly = false
@@ -339,6 +364,10 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 		}
 		subReq.projectThroughFallbackMaster(inbound)
 		var settings map[string]any
+		if endpoints := subReq.hostEndpoints(inbound, "json"); len(endpoints) > 0 {
+			injectExternalProxy(inbound, endpoints)
+			delete(subReq.streamSettingsByInbound, inbound.Id)
+		}
 		_ = json.Unmarshal([]byte(inbound.Settings), &settings)
 		secretKey, _ := settings["secretKey"].(string)
 		if secretKey == "" {
@@ -463,8 +492,17 @@ func (s *SubJsonService) getSingBoxJson(subId string, host string, alwaysReturnA
 			continue
 		}
 		subReq.projectThroughFallbackMaster(inbound)
-		if hostEps := subReq.hostEndpoints(inbound, "json"); len(hostEps) > 0 {
+		hostEps := subReq.hostEndpoints(inbound, "json")
+		if hostEps != nil && len(hostEps) == 0 {
+			for _, client := range clients {
+				seenEmails[client.Email] = struct{}{}
+				hasEnabledClient = hasEnabledClient || client.Enable
+			}
+			continue
+		}
+		if len(hostEps) > 0 {
 			injectExternalProxy(inbound, hostEps)
+			delete(subReq.streamSettingsByInbound, inbound.Id)
 		}
 		for _, client := range clients {
 			seenEmails[client.Email] = struct{}{}
@@ -1721,11 +1759,12 @@ func (s *SubJsonService) genNativeNaive(subReq *SubService, inbound *model.Inbou
 		} else if rawPort, ok := endpoint["port"].(int); ok && rawPort > 0 {
 			serverPort = rawPort
 		}
-		if sni, ok := endpoint["sni"].(string); ok && strings.TrimSpace(sni) != "" {
+		if sni, ok := externalProxySNI(endpoint); ok {
 			serverName = strings.TrimSpace(sni)
 		}
 	}
-	if serverName == "" {
+	blankSNI, _ := endpoint["keepSniBlank"].(bool)
+	if serverName == "" && !blankSNI {
 		if server != "" && !strings.Contains(server, ":") && net.ParseIP(server) == nil {
 			serverName = server
 		} else {

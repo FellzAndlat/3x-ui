@@ -506,13 +506,12 @@ export default function HostFormModal({
                         )}
                       />
                     </FormField>
-                    <FormField
-                      name="mihomoX25519"
+                    <Form.Item
                       label={t('pages.hosts.fields.mihomoX25519')}
-                      valueProp="checked"
+                      extra={t('pages.hosts.hints.mihomoX25519')}
                     >
-                      <Switch />
-                    </FormField>
+                      <Switch checked disabled />
+                    </Form.Item>
                     <FormField
                       name="shuffleHost"
                       label={t('pages.hosts.fields.shuffleHost')}

@@ -2,6 +2,7 @@ package panel
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -115,6 +116,9 @@ func (s *UserService) BumpLoginEpoch() error {
 }
 
 func (s *UserService) UpdateUser(id int, username string, password string) error {
+	if id <= 0 || strings.TrimSpace(username) == "" || password == "" {
+		return errors.New("user id, username and password are required")
+	}
 	db := database.GetDB()
 	hashedPassword, err := crypto.HashPasswordAsBcrypt(password)
 	if err != nil {
@@ -126,19 +130,35 @@ func (s *UserService) UpdateUser(id int, username string, password string) error
 		return err
 	}
 
-	if twoFactorEnable {
-		_ = s.settingService.SetTwoFactorEnable(false)
-		_ = s.settingService.SetTwoFactorToken("")
-	}
-
-	return db.Model(model.User{}).
-		Where("id = ?", id).
-		Updates(map[string]any{
-			"username":    username,
-			"password":    hashedPassword,
+	return db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.User{}).Where("id = ?", id).Updates(map[string]any{
+			"username": username, "password": hashedPassword,
 			"login_epoch": gorm.Expr("login_epoch + 1"),
-		}).
-		Error
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errors.New("user not found")
+		}
+		if !twoFactorEnable {
+			return nil
+		}
+		for _, item := range []struct{ key, value string }{{"twoFactorEnable", "false"}, {"twoFactorToken", ""}} {
+			var setting model.Setting
+			err := tx.Where("key = ?", item.key).First(&setting).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := tx.Create(&model.Setting{Key: item.key, Value: item.value}).Error; err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			} else if err := tx.Model(&setting).Update("value", item.value).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *UserService) UpdateFirstUser(username string, password string) error {

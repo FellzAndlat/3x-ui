@@ -1,6 +1,7 @@
 package email
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -28,11 +29,12 @@ func TestSendPlainReturnsOnStalledServer(t *testing.T) {
 		<-stall
 	}()
 
-	s := &EmailService{}
 	done := make(chan error, 1)
 	go func() {
-		done <- s.sendPlain(ln.Addr().String(), nil, "from@example.com",
-			[]string{"to@example.com"}, []byte("body"), "example.com")
+		ctx, cancel := context.WithTimeout(context.Background(), smtpDeadline)
+		defer cancel()
+		_, err := sendSMTP(ctx, smtpSettings{addr: ln.Addr().String(), host: "example.com", encryption: "none", from: "from@example.com", recipients: []string{"to@example.com"}}, []byte("body"))
+		done <- err
 	}()
 
 	select {

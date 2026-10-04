@@ -3,7 +3,12 @@ package ldaputil
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
+	"net/url"
 	"slices"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-ldap/ldap/v3"
 )
@@ -24,26 +29,49 @@ type Config struct {
 }
 
 func tlsConfig(cfg Config) *tls.Config {
-	return &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify}
+	return &tls.Config{ServerName: strings.Trim(cfg.Host, "[]"), InsecureSkipVerify: cfg.InsecureSkipVerify}
 }
 
-// FetchVlessFlags returns map[email]enabled
-func FetchVlessFlags(cfg Config) (map[string]bool, error) {
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+const ldapConnectTimeout = 5 * time.Second
 
+var ldapRequestTimeout = 10 * time.Second
+
+func serverURL(cfg Config) (string, error) {
+	if cfg.Host == "" || cfg.Port < 1 || cfg.Port > 65535 {
+		return "", fmt.Errorf("invalid LDAP host or port")
+	}
 	scheme := "ldap"
 	if cfg.UseTLS {
 		scheme = "ldaps"
 	}
+	u := url.URL{Scheme: scheme, Host: net.JoinHostPort(strings.Trim(cfg.Host, "[]"), strconv.Itoa(cfg.Port))}
+	return u.String(), nil
+}
 
-	ldapURL := fmt.Sprintf("%s://%s", scheme, addr)
-
-	var opts []ldap.DialOpt
+func dialServer(cfg Config) (*ldap.Conn, error) {
+	endpoint, err := serverURL(cfg)
+	if err != nil {
+		return nil, err
+	}
+	opts := []ldap.DialOpt{ldap.DialWithDialer(&net.Dialer{Timeout: ldapConnectTimeout})}
 	if cfg.UseTLS {
 		opts = append(opts, ldap.DialWithTLSConfig(tlsConfig(cfg)))
 	}
+	conn, err := ldap.DialURL(endpoint, opts...)
+	if err != nil {
+		return nil, err
+	}
+	conn.SetTimeout(ldapRequestTimeout)
+	return conn, nil
+}
 
-	conn, err := ldap.DialURL(ldapURL, opts...)
+func searchTimeLimit() int {
+	return max(1, int((ldapRequestTimeout+time.Second-1)/time.Second))
+}
+
+// FetchVlessFlags returns map[email]enabled
+func FetchVlessFlags(cfg Config) (map[string]bool, error) {
+	conn, err := dialServer(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +96,7 @@ func FetchVlessFlags(cfg Config) (map[string]bool, error) {
 
 	req := ldap.NewSearchRequest(
 		cfg.BaseDN,
-		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, searchTimeLimit(), false,
 		cfg.UserFilter,
 		[]string{cfg.UserAttr, cfg.FlagField},
 		nil,
@@ -97,21 +125,7 @@ func FetchVlessFlags(cfg Config) (map[string]bool, error) {
 
 // AuthenticateUser searches user by cfg.UserAttr and attempts to bind with provided password.
 func AuthenticateUser(cfg Config, username, password string) (bool, error) {
-	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
-
-	scheme := "ldap"
-	if cfg.UseTLS {
-		scheme = "ldaps"
-	}
-
-	ldapURL := fmt.Sprintf("%s://%s", scheme, addr)
-
-	var opts []ldap.DialOpt
-	if cfg.UseTLS {
-		opts = append(opts, ldap.DialWithTLSConfig(tlsConfig(cfg)))
-	}
-
-	conn, err := ldap.DialURL(ldapURL, opts...)
+	conn, err := dialServer(cfg)
 	if err != nil {
 		return false, err
 	}
@@ -135,7 +149,7 @@ func AuthenticateUser(cfg Config, username, password string) (bool, error) {
 	filter := fmt.Sprintf("(&%s(%s=%s))", cfg.UserFilter, cfg.UserAttr, ldap.EscapeFilter(username))
 	req := ldap.NewSearchRequest(
 		cfg.BaseDN,
-		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 1, 0, false,
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 1, searchTimeLimit(), false,
 		filter,
 		[]string{"dn"},
 		nil,

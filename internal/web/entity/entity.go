@@ -344,6 +344,14 @@ func (s *AllSetting) CheckValid() error {
 			return common.NewError("SMTP from address is not valid:", s.SmtpFrom)
 		}
 	}
+	if s.SmtpTo != "" {
+		if _, err := mail.ParseAddressList(s.SmtpTo); err != nil {
+			return common.NewError("SMTP recipients are not valid:", s.SmtpTo)
+		}
+	}
+	if s.SmtpEncryptionType != "" && s.SmtpEncryptionType != "none" && s.SmtpEncryptionType != "starttls" && s.SmtpEncryptionType != "tls" {
+		return common.NewError("SMTP encryption type must be none, starttls or tls")
+	}
 
 	return nil
 }

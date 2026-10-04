@@ -358,15 +358,18 @@ func (a *ClientController) setExternalLinks(c *gin.Context) {
 
 func (a *ClientController) resetAllTraffics(c *gin.Context) {
 	needRestart, err := a.clientService.ResetAllTraffics()
+	if needRestart {
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
+		notifyClientsChanged()
+	}
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.resetAllClientTrafficSuccess"), nil)
-	if needRestart {
-		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
+	if !needRestart {
+		notifyClientsChanged()
 	}
-	notifyClientsChanged()
 }
 
 type bulkAdjustRequest struct {
@@ -587,15 +590,18 @@ func (a *ClientController) delOrphans(c *gin.Context) {
 func (a *ClientController) resetTrafficByEmail(c *gin.Context) {
 	email := c.Param("email")
 	needRestart, err := a.clientService.ResetTrafficByEmail(&a.inboundService, email)
+	if needRestart {
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
+	}
+	// The local reset may have committed even if a node failed afterwards.
+	if needRestart || err == nil {
+		notifyClientsChanged()
+	}
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
 	jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.resetInboundClientTrafficSuccess"), nil)
-	if needRestart {
-		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
-	}
-	notifyClientsChanged()
 }
 
 type trafficUpdateRequest struct {
@@ -765,11 +771,13 @@ func (a *ClientController) bulkResetTraffic(c *gin.Context) {
 		return
 	}
 	affected, err := a.clientService.BulkResetTraffic(&a.inboundService, req.Emails)
+	if affected > 0 {
+		markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
+		notifyClientsChanged()
+	}
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
 	jsonObj(c, gin.H{"affected": affected}, nil)
-	markSelectedCoreNeedRestart(&a.settingService, &a.xrayService, &a.singBoxService)
-	notifyClientsChanged()
 }

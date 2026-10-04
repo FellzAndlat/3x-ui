@@ -55,10 +55,11 @@ func (s *SubClashService) getClash(subId string, host string, legacy bool) (stri
 	// Refuse partial Clash output for protocols this renderer cannot represent.
 	// Returning the format-unsupported sentinel makes auto-detection keep the
 	// complete raw subscription instead of silently dropping an inbound.
-	if containsUnsupportedClashProtocol(inbounds) || containsShadowTLSTransport(inbounds) {
+	formatInbounds, _ := subReq.partitionHostFormat(inbounds, "clash")
+	if containsUnsupportedClashProtocol(formatInbounds) || containsShadowTLSTransport(formatInbounds) {
 		return "", "", errSubscriptionFormatUnsupported
 	}
-	if legacy && containsSubscriptionProtocol(inbounds, model.Sudoku) {
+	if legacy && containsSubscriptionProtocol(formatInbounds, model.Sudoku) {
 		return "", "", errNoLegacyClashProxies
 	}
 
@@ -73,8 +74,17 @@ func (s *SubClashService) getClash(subId string, host string, legacy bool) (stri
 			continue
 		}
 		subReq.projectThroughFallbackMaster(inbound)
-		if hostEps := subReq.hostEndpoints(inbound, "clash"); len(hostEps) > 0 {
+		hostEps := subReq.hostEndpoints(inbound, "clash")
+		if hostEps != nil && len(hostEps) == 0 {
+			for _, client := range clients {
+				seenEmails[client.Email] = struct{}{}
+				hasEnabledClient = hasEnabledClient || client.Enable
+			}
+			continue
+		}
+		if len(hostEps) > 0 {
 			injectExternalProxy(inbound, hostEps)
+			delete(subReq.streamSettingsByInbound, inbound.Id)
 		}
 		for _, client := range clients {
 			if client.Enable {

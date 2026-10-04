@@ -43,7 +43,7 @@ func (p *LinkProvider) LinksForClient(host string, inbound *model.Inbound, email
 		return nil
 	}
 	svc.projectThroughFallbackMaster(inbound)
-	if endpoints := svc.hostEndpoints(inbound, "raw"); len(endpoints) > 0 {
+	if endpoints := svc.hostEndpoints(inbound, "raw"); endpoints != nil {
 		if client, ok := svc.clientForLink(inbound, email); ok {
 			return splitLinkLines(svc.linkFromHosts(inbound, client, endpoints))
 		}

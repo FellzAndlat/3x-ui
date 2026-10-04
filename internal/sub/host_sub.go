@@ -8,14 +8,16 @@ import (
 	"github.com/SawaMEN/3x-ui/v3/internal/database"
 	"github.com/SawaMEN/3x-ui/v3/internal/database/model"
 	"github.com/SawaMEN/3x-ui/v3/internal/logger"
+	"github.com/SawaMEN/3x-ui/v3/internal/util/random"
 )
 
 // hostEndpoints loads an inbound's enabled hosts for the given subscription
 // format ("raw"|"json"|"clash") and returns them as externalProxy-shaped maps so
 // the existing per-format renderers can fan out one link/proxy per host. Returns
-// nil when the inbound has no applicable host — the caller then uses the legacy
+// nil when the inbound has no enabled hosts — the caller then uses the legacy
 // inbound/externalProxy path, preserving byte-identical output for zero-host
-// inbounds.
+// inbounds. A non-nil empty slice means every enabled host excludes this format;
+// the caller must omit this inbound rather than expose its default endpoint.
 func (s *SubService) hostEndpoints(inbound *model.Inbound, format string) []map[string]any {
 	hosts, primed := s.hostsByInbound[inbound.Id]
 	if !primed {
@@ -32,13 +34,47 @@ func (s *SubService) hostEndpoints(inbound *model.Inbound, format string) []map[
 	}
 	defaultDest := s.resolveInboundAddress(inbound)
 	eps := make([]map[string]any, 0, len(hosts))
-	for _, h := range hosts {
+	for _, h := range shuffledHosts(hosts) {
 		if slices.Contains(h.ExcludeFromSubTypes, format) {
 			continue
 		}
 		eps = append(eps, hostToExternalProxyMap(h, defaultDest, inbound.Port))
 	}
 	return eps
+}
+
+// Shuffle only the opted-in group's positions, without mutating the request
+// cache or changing the order of unrelated groups.
+func shuffledHosts(hosts []*model.Host) []*model.Host {
+	out := slices.Clone(hosts)
+	positions := make(map[string][]int)
+	for i, h := range out {
+		if h.ShuffleHost {
+			positions[h.GroupId] = append(positions[h.GroupId], i)
+		}
+	}
+	for _, ids := range positions {
+		for i := len(ids) - 1; i > 0; i-- {
+			j := random.Num(i + 1)
+			out[ids[i]], out[ids[j]] = out[ids[j]], out[ids[i]]
+		}
+	}
+	return out
+}
+
+// Excluded hosts must also be left out of protocol-support preflight checks.
+// Otherwise an intentionally omitted protocol makes auto-detection fall back
+// to another format before the renderer gets a chance to apply the exclusion.
+func (s *SubService) partitionHostFormat(inbounds []*model.Inbound, format string) (included, excluded []*model.Inbound) {
+	for _, inbound := range inbounds {
+		endpoints := s.hostEndpoints(inbound, format)
+		if endpoints != nil && len(endpoints) == 0 {
+			excluded = append(excluded, inbound)
+		} else {
+			included = append(included, inbound)
+		}
+	}
+	return
 }
 
 func (s *SubService) primeHosts(inbounds []*model.Inbound) error {
@@ -88,7 +124,9 @@ func hostToExternalProxyMap(h *model.Host, defaultDest string, defaultPort int) 
 	if h.OverrideSniFromAddress {
 		sni = dest
 	}
-	if !h.KeepSniBlank && sni != "" {
+	if h.KeepSniBlank {
+		ep["keepSniBlank"] = true
+	} else if sni != "" {
 		ep["sni"] = sni
 	}
 	if h.Fingerprint != "" {

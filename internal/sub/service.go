@@ -590,12 +590,12 @@ func (s *SubService) getSubs(subId string) ([]string, []string, int64, xray.Clie
 				hasEnabledClient = true
 			}
 			var link string
-			if len(hostEps) > 0 {
+			if hostEps != nil {
 				link = s.linkFromHosts(inbound, client, hostEps)
 			} else {
 				link = s.GetLink(inbound, client.Email)
 			}
-			if inbound.Protocol == model.NaiveProxy && len(hostEps) == 0 {
+			if inbound.Protocol == model.NaiveProxy && hostEps == nil {
 				// Without Host rows, render the plain inbound endpoint. When Host
 				// rows exist, linkFromHosts already rendered a clone carrying those
 				// endpoints, so do not overwrite it with the base inbound again.
@@ -724,6 +724,9 @@ func (s *SubService) inboundLinks(inbound *model.Inbound) []string {
 	s.primeLinkClients(inbound.Id, clients, true)
 	s.projectThroughFallbackMaster(inbound)
 	hostEps := s.hostEndpoints(inbound, "raw")
+	if hostEps != nil && len(hostEps) == 0 {
+		return nil
+	}
 	var out []string
 	seen := make(map[string]struct{}, len(clients))
 	for _, client := range clients {
@@ -2905,22 +2908,34 @@ func applyExternalProxyHysteriaParams(ep map[string]any, params map[string]strin
 	}
 }
 
-// cloneStreamForExternalProxy returns a shallow clone of stream with
-// tlsSettings (and its nested settings map) deep-copied. The external
-// proxy loop mutates tlsSettings per iteration, so without isolating
-// those maps each proxy's SNI/fingerprint/ALPN would leak into the next.
+// Host overrides mutate TLS, Reality and transport settings. Isolate every
+// nested map/slice so one endpoint never changes the next endpoint's base.
 func cloneStreamForExternalProxy(stream map[string]any) map[string]any {
-	out := cloneMap(stream)
-	ts, ok := out["tlsSettings"].(map[string]any)
-	if !ok || ts == nil {
+	if stream == nil {
+		return nil
+	}
+	return cloneStreamValue(stream).(map[string]any)
+}
+
+func cloneStreamValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = cloneStreamValue(item)
+		}
 		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = cloneStreamValue(item)
+		}
+		return out
+	case []string:
+		return slices.Clone(v)
+	default:
+		return value
 	}
-	clonedTs := cloneMap(ts)
-	if inner, ok := clonedTs["settings"].(map[string]any); ok && inner != nil {
-		clonedTs["settings"] = cloneMap(inner)
-	}
-	out["tlsSettings"] = clonedTs
-	return out
 }
 
 func applyExternalProxyTLSToStream(ep map[string]any, stream map[string]any, security string) {
@@ -2979,6 +2994,9 @@ func applyExternalProxyTLSToStream(ep map[string]any, stream map[string]any, sec
 }
 
 func externalProxySNI(ep map[string]any) (string, bool) {
+	if blank, _ := ep["keepSniBlank"].(bool); blank {
+		return "", true
+	}
 	if sni, ok := ep["sni"].(string); ok && sni != "" {
 		return sni, true
 	}

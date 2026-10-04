@@ -1225,7 +1225,8 @@
       "hints": {
         "address": "Leave blank to inherit the inbound's own address.",
         "port": "0 inherits the inbound's port.",
-        "tags": "Not visible to end users; sent with RAW subscription only. Uppercase letters, digits, _ and : only.",
+        "tags": "Internal labels for organizing hosts. They are not exported in subscriptions.",
+        "mihomoX25519": "X25519-MLKEM768 is enabled automatically for Reality in Mihomo subscriptions.",
         "nodeGuids": "Pick nodes which resolved from this host. Only visual assignment.",
         "serverDescription": "Optional note shown under the remark.",
         "allowInsecure": "Skip TLS certificate verification (allowInsecure / skip-cert-verify).",
