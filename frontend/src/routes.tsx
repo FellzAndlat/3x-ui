@@ -37,10 +37,12 @@ function withSuspense(node: React.ReactNode) {
       fallback={
         <div
           style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1000,
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
-            minHeight: '60vh',
           }}
         >
           <Spin size="large" />
